@@ -395,9 +395,7 @@ build_filename() {
         return
     fi
     
-    # Convert quantization to lowercase for filename
-    local quant_lower=$(echo "$quant" | tr '[:upper:]' '[:lower:]')
-    echo "${template//\{quant\}/$quant_lower}"
+    echo "${template//\{quant\}/$quant}"
 }
 
 # Build HuggingFace download URL
@@ -862,11 +860,13 @@ interactive_select() {
                 continue
                 ;;
             [Dd])
-                # List installed models for selection
+                # List installed models for selection (skip small vocab/test files)
                 local del_files=()
                 local del_i=1
                 for f in "$MODELS_DIR"/*.gguf; do
                     [ -f "$f" ] || continue
+                    local fsize=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
+                    [ "$fsize" -lt 100000000 ] && continue  # skip files < 100MB
                     del_files+=("$(basename "$f")")
                     local del_size=$(du -h "$f" 2>/dev/null | cut -f1)
                     echo -e "  ${del_i}) $(basename "$f") (${del_size})" >&2
