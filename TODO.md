@@ -180,3 +180,46 @@ Alternatively, for a more explicit UX:
     read -n 1 -s -r -p "Press any key to continue..." >&2
     echo >&2
 ```
+
+---
+
+## 5. Extract inline Python into its own file
+
+**File:** `oi`, function `fetch_hf_models()`, lines 188–335
+**Current behavior:** A ~150-line Python script is embedded inline via heredoc inside the bash function. This makes the bash file harder to read, harder to lint/test the Python independently, and prevents editor tooling (syntax highlighting, LSP) from working on the Python code.
+**Desired behavior:** The Python code lives in its own file at `lib/fetch_hf_models.py` and the bash function calls it directly.
+
+**Steps:**
+1. Create `lib/fetch_hf_models.py` containing the existing Python code from the heredoc (lines 189–335), adapted to be a standalone script.
+2. Keep the same CLI interface: `python3 lib/fetch_hf_models.py "$CACHE_FILE" "$HF_ORGS" "$total_mem"` — the script already reads `sys.argv[1..3]` and writes to `cache_path`, so no argument changes are needed.
+3. Replace the heredoc block in `fetch_hf_models()` (lines 188–335) with:
+   ```bash
+   python3 "${LIB_DIR}/fetch_hf_models.py" "$CACHE_FILE" "$HF_ORGS" "$total_mem"
+   ```
+4. Ensure the `.py` file is executable or invoked via `python3` explicitly (the latter is safer).
+5. If task 3 (spinner) is also implemented, the backgrounding (`&`) works the same way — just background the `python3` command instead of the heredoc.
+
+---
+
+## 6. Consider rewriting the HF fetcher in Go instead of Python
+
+**File:** `lib/fetch_hf_models.py` (after task 5) or the inline heredoc (lines 188–335)
+**Current behavior:** The HuggingFace model catalog fetch uses Python with `urllib`. It requires a Python 3 installation on the host and takes 10–30 s due to sequential HTTP requests.
+**Desired behavior:** Evaluate whether a Go implementation would be a better fit.
+
+**Reasons to consider Go:**
+- Compiles to a single static binary — no runtime dependency (Python 3 may not be installed everywhere).
+- Native concurrency (`goroutines`) makes it trivial to parallelize the per-org/per-size API calls, which could cut fetch time significantly.
+- Smaller deployment footprint (one binary vs. requiring `python3` on `$PATH`).
+
+**Reasons to keep Python:**
+- Faster to iterate on and modify.
+- The script is simple enough that Python's startup overhead is negligible vs. network time.
+- Already works; rewriting is effort with no new functionality.
+
+**Steps (if proceeding):**
+1. Create `lib/fetch_hf_models.go` implementing the same logic: accept `cache_path`, `hf_orgs`, and `total_mem_gb` as CLI args, write JSON to `cache_path`.
+2. Use `net/http` for API calls and `sync.WaitGroup` / goroutines to fetch all org+size combinations concurrently.
+3. Build with `go build -o lib/fetch_hf_models lib/fetch_hf_models.go`.
+4. Update `fetch_hf_models()` in `oi` to call `"${LIB_DIR}/fetch_hf_models" "$CACHE_FILE" "$HF_ORGS" "$total_mem"`.
+5. Keep the Python version as a fallback or remove it once the Go binary is validated.
