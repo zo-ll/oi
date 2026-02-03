@@ -73,6 +73,7 @@ OPTIONS:
     -d, --download <path>   Download custom model from HuggingFace
                             Format: username/repo-name/filename.gguf
     -r, --refresh           Force refresh model catalog from HuggingFace
+    -x, --remove <file>     Remove an installed model
     -h, --hardware          Show system hardware information
     -c, --context <size>    Set context size (default: ${DEFAULT_CONTEXT})
     -t, --threads <num>     Set number of CPU threads
@@ -84,6 +85,7 @@ EXAMPLES:
     oi -m phi-3-mini -q Q5_K_M  # Use specific quantization
     oi -l                   # List all available models
     oi -r -l                # Force refresh catalog from HuggingFace
+    oi -x qwen3-8b-q4_k_m.gguf  # Remove an installed model
     oi -d microsoft/Phi-3-mini-4k-instruct-gguf/Phi-3-mini-4k-instruct.Q4_K_M.gguf
 
 QUANTIZATION OPTIONS:
@@ -502,6 +504,36 @@ download_custom() {
     echo -e "${GREEN}Download complete: ${filename}${NC}"
 }
 
+# Remove an installed model
+remove_model() {
+    local filename="$1"
+    local filepath="${MODELS_DIR}/${filename}"
+
+    if [ ! -f "$filepath" ]; then
+        echo -e "${RED}Error: Model not found: ${filename}${NC}"
+        echo "Use 'oi -i' to list installed models."
+        return 1
+    fi
+
+    local size=$(du -h "$filepath" 2>/dev/null | cut -f1)
+    echo -e "${YELLOW}Model: ${filename}${NC}"
+    echo -e "${YELLOW}Size:  ${size}${NC}"
+    read -p "Are you sure you want to delete this model? [y/N] " confirm
+    case "$confirm" in
+        [Yy]|[Yy][Ee][Ss])
+            if rm "$filepath"; then
+                echo -e "${GREEN}Deleted: ${filename}${NC}"
+            else
+                echo -e "${RED}Error: Failed to delete ${filename}${NC}"
+                return 1
+            fi
+            ;;
+        *)
+            echo "Cancelled."
+            ;;
+    esac
+}
+
 # List available models (filtered by hardware)
 list_models() {
     local show_all="$1"
@@ -767,6 +799,7 @@ draw_full_menu() {
 
     echo -e "${BLUE}$(make_divider "$w")${NC}" >&2
     echo -e "  ${CYAN}L${NC}) List all available models" >&2
+    echo -e "  ${CYAN}D${NC}) Delete an installed model" >&2
     echo -e "  ${CYAN}H${NC}) Show hardware info" >&2
     echo -e "  ${CYAN}Q${NC}) Quit" >&2
 }
@@ -809,7 +842,7 @@ interactive_select() {
         local w=$(get_term_width)
         local box_inner=$((w - 2))
         echo -e "${CYAN}┌$(make_divider "$box_inner")┐${NC}" >&2
-        read -p "│ Enter choice (1-${#all_ids[@]}, L, H, Q): " choice
+        read -p "│ Enter choice (1-${#all_ids[@]}, L, D, H, Q): " choice
         # Clear the input line and draw bottom border on same line
         echo -e "\r${CYAN}└$(make_divider "$box_inner")┘${NC}" >&2
         
@@ -826,6 +859,32 @@ interactive_select() {
                 echo "" >&2
                 sleep 1
                 # Continue loop to redraw only the prompt
+                continue
+                ;;
+            [Dd])
+                # List installed models for selection
+                local del_files=()
+                local del_i=1
+                for f in "$MODELS_DIR"/*.gguf; do
+                    [ -f "$f" ] || continue
+                    del_files+=("$(basename "$f")")
+                    local del_size=$(du -h "$f" 2>/dev/null | cut -f1)
+                    echo -e "  ${del_i}) $(basename "$f") (${del_size})" >&2
+                    ((del_i++))
+                done
+                if [ ${#del_files[@]} -eq 0 ]; then
+                    echo -e "${YELLOW}No installed models to delete.${NC}" >&2
+                    continue
+                fi
+                read -p "Select model to delete (1-${#del_files[@]}, or C to cancel): " del_choice
+                if [[ "$del_choice" =~ ^[Cc]$ ]]; then
+                    continue
+                fi
+                if [[ "$del_choice" =~ ^[0-9]+$ ]] && [ "$del_choice" -ge 1 ] && [ "$del_choice" -le ${#del_files[@]} ]; then
+                    remove_model "${del_files[$((del_choice - 1))]}"
+                else
+                    echo -e "${RED}Invalid selection${NC}" >&2
+                fi
                 continue
                 ;;
             [Qq])
@@ -961,6 +1020,10 @@ main() {
                 list_mode="installed"
                 shift
                 ;;
+            -x|--remove)
+                remove_file="$2"
+                shift 2
+                ;;
             -d|--download)
                 download_path="$2"
                 shift 2
@@ -994,6 +1057,12 @@ main() {
         exit 0
     fi
     
+    # Handle model removal
+    if [ -n "$remove_file" ]; then
+        remove_model "$remove_file"
+        exit $?
+    fi
+
     # Handle custom download
     if [ -n "$download_path" ]; then
         download_custom "$download_path"
