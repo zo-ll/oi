@@ -14,6 +14,10 @@ MODELS_DIR="${LLAMA_CPP_DIR}/models"
 LLAMA_CLI="${LLAMA_CPP_DIR}/build/bin/llama-cli"
 DEFAULT_QUANT="Q4_K_M"
 DEFAULT_CONTEXT=4096
+CACHE_DIR="${LIB_DIR}/cache"
+CACHE_FILE="${CACHE_DIR}/hf_models.json"
+CACHE_TTL=86400  # 24 hours
+HF_ORGS="Qwen meta-llama microsoft google mistralai bartowski unsloth MaziyarPanahi"
 
 # Colors for output using ANSI escape sequences
 RED=$'\033[0;31m'
@@ -68,6 +72,7 @@ OPTIONS:
     -i, --installed         List installed models only
     -d, --download <path>   Download custom model from HuggingFace
                             Format: username/repo-name/filename.gguf
+    -r, --refresh           Force refresh model catalog from HuggingFace
     -h, --hardware          Show system hardware information
     -c, --context <size>    Set context size (default: ${DEFAULT_CONTEXT})
     -t, --threads <num>     Set number of CPU threads
@@ -78,6 +83,7 @@ EXAMPLES:
     oi -m qwen2.5-3b        # Start chat with specific model
     oi -m phi-3-mini -q Q5_K_M  # Use specific quantization
     oi -l                   # List all available models
+    oi -r -l                # Force refresh catalog from HuggingFace
     oi -d microsoft/Phi-3-mini-4k-instruct-gguf/Phi-3-mini-4k-instruct.Q4_K_M.gguf
 
 QUANTIZATION OPTIONS:
@@ -161,13 +167,156 @@ show_hardware() {
     echo -e "${rec_color}$(truncate_str "$rec_text" "$w")${NC}"
 }
 
-# Load models catalog
+# Check if HF model cache is still valid
+is_cache_valid() {
+    [ -f "$CACHE_FILE" ] || return 1
+    local now file_mod age
+    now=$(date +%s)
+    file_mod=$(stat -c %Y "$CACHE_FILE" 2>/dev/null || stat -f %m "$CACHE_FILE" 2>/dev/null) || return 1
+    age=$((now - file_mod))
+    [ "$age" -lt "$CACHE_TTL" ]
+}
+
+# Fetch 3B GGUF models from HuggingFace for whitelisted orgs
+fetch_hf_models() {
+    mkdir -p "$CACHE_DIR"
+    echo -e "${YELLOW}Updating model catalog from HuggingFace...${NC}" >&2
+    python3 - "$CACHE_FILE" "$HF_ORGS" <<'PYEOF'
+import sys, json, re, os
+try:
+    from urllib.request import urlopen, Request
+    from urllib.error import URLError
+except ImportError:
+    sys.exit(1)
+
+cache_path = sys.argv[1]
+orgs = sys.argv[2].split()
+
+API = "https://huggingface.co/api/models"
+QUANT_RE = re.compile(r'[Qq]\d[_.][Kk]?_?[A-Za-z0-9]*|IQ\d[_.][A-Za-z0-9]*')
+QUANT_NORM_RE = re.compile(r'(?i)(q\d_k_[sml]|q\d_k|q\d_0|q\d_1|q[2-8]_[0-9]|iq\d_[a-z]+)')
+
+def api_get(url):
+    req = Request(url, headers={"User-Agent": "oi-cli/1.0"})
+    with urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode())
+
+seen = {}
+
+for org in orgs:
+    url = f"{API}?author={org}&search=3b+gguf&sort=downloads&direction=-1&limit=5&filter=text-generation"
+    try:
+        results = api_get(url)
+    except Exception:
+        continue
+
+    for repo_info in results:
+        repo_id = repo_info.get("id", "")
+        downloads = repo_info.get("downloads", 0)
+        likes = repo_info.get("likes", 0)
+
+        # Fetch siblings to find GGUF files
+        try:
+            details = api_get(f"{API}/{repo_id}")
+        except Exception:
+            continue
+
+        siblings = details.get("siblings", [])
+        gguf_files = [s["rfilename"] for s in siblings
+                      if s.get("rfilename", "").endswith(".gguf")
+                      and not s["rfilename"].startswith(".")]
+
+        if not gguf_files:
+            continue
+
+        # Pick a representative file (prefer Q4_K_M if available)
+        rep_file = None
+        for f in gguf_files:
+            if "Q4_K_M" in f.upper().replace("-", "_"):
+                rep_file = f
+                break
+        if not rep_file:
+            rep_file = gguf_files[0]
+
+        # Build filename template by replacing the quant string with {quant}
+        m = QUANT_RE.search(rep_file)
+        if m:
+            quant_str = m.group()
+            template = rep_file[:m.start()] + "{quant}" + rep_file[m.end():]
+        else:
+            template = rep_file
+
+        # Derive a short CLI id from repo name
+        repo_name = repo_id.split("/")[-1]
+        cli_id = repo_name.lower()
+        cli_id = re.sub(r'-gguf$', '', cli_id)
+        cli_id = re.sub(r'-instruct', '', cli_id)
+        cli_id = re.sub(r'[._]', '-', cli_id)
+        # Collapse repeated hyphens
+        cli_id = re.sub(r'-+', '-', cli_id).strip('-')
+
+        # Deduplicate: keep highest download count
+        if cli_id in seen:
+            if seen[cli_id]["_downloads"] >= downloads:
+                continue
+
+        model_name = repo_name.replace("-GGUF", "").replace("-gguf", "")
+
+        seen[cli_id] = {
+            "id": cli_id,
+            "name": model_name,
+            "repo": repo_id,
+            "filename_template": template,
+            "min_vram_gb": 3.0,
+            "description": f"{downloads:,} downloads, {likes:,} likes on HuggingFace",
+            "tags": ["dynamic", org.lower()],
+            "_downloads": downloads
+        }
+
+# Sort by downloads descending, remove internal key
+models = sorted(seen.values(), key=lambda m: m["_downloads"], reverse=True)
+for m in models:
+    del m["_downloads"]
+
+output = {"models": models}
+with open(cache_path, "w") as f:
+    json.dump(output, f, indent=2)
+
+print(f"Fetched {len(models)} models from HuggingFace", file=sys.stderr)
+PYEOF
+    return $?
+}
+
+# Load models catalog with fallback chain:
+# 1. Valid cache -> use it
+# 2. Fetch fresh from HF -> use it
+# 3. Stale cache -> use it
+# 4. Static lib/models.json -> use it
+# 5. Empty {"models": []}
 load_models() {
+    if is_cache_valid; then
+        cat "$CACHE_FILE"
+        return
+    fi
+
+    if fetch_hf_models && [ -f "$CACHE_FILE" ]; then
+        cat "$CACHE_FILE"
+        return
+    fi
+
+    # Stale cache is better than nothing
+    if [ -f "$CACHE_FILE" ]; then
+        echo -e "${YELLOW}Using stale cache (network unavailable)${NC}" >&2
+        cat "$CACHE_FILE"
+        return
+    fi
+
     if [ -f "${LIB_DIR}/models.json" ]; then
         cat "${LIB_DIR}/models.json"
-    else
-        echo '{"models": []}'
+        return
     fi
+
+    echo '{"models": []}'
 }
 
 # Get model info by ID
@@ -752,6 +901,10 @@ main() {
             -t|--threads)
                 threads="$2"
                 shift 2
+                ;;
+            -r|--refresh)
+                rm -f "$CACHE_FILE"
+                shift
                 ;;
             -l|--list)
                 list_mode="all"

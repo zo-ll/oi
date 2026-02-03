@@ -1,0 +1,196 @@
+{
+  "models": [
+    {
+      "id": "qwen3-30b-a3b",
+      "name": "Qwen3-30B-A3B",
+      "repo": "MaziyarPanahi/Qwen3-30B-A3B-GGUF",
+      "filename_template": "Qwen3-30B-A3B.{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "219,103 downloads, 3 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "maziyarpanahi"
+      ]
+    },
+    {
+      "id": "llama-3-2-3b",
+      "name": "Llama-3.2-3B-Instruct",
+      "repo": "MaziyarPanahi/Llama-3.2-3B-Instruct-GGUF",
+      "filename_template": "Llama-3.2-3B-Instruct.{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "144,778 downloads, 13 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "maziyarpanahi"
+      ]
+    },
+    {
+      "id": "ministral-3-3b-reasoning-2512",
+      "name": "Ministral-3-3B-Reasoning-2512",
+      "repo": "MaziyarPanahi/Ministral-3-3B-Reasoning-2512-GGUF",
+      "filename_template": "Ministral-3-3B-Reasoning-2512.{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "143,812 downloads, 4 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "maziyarpanahi"
+      ]
+    },
+    {
+      "id": "qwen3-coder-30b-a3b",
+      "name": "Qwen3-Coder-30B-A3B-Instruct",
+      "repo": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+      "filename_template": "Qwen3-Coder-30B-A3B-Instruct-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "120,987 downloads, 443 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "unsloth"
+      ]
+    },
+    {
+      "id": "nemotron-3-nano-30b-a3b",
+      "name": "Nemotron-3-Nano-30B-A3B",
+      "repo": "unsloth/Nemotron-3-Nano-30B-A3B-GGUF",
+      "filename_template": "Nemotron-3-Nano-30B-A3B-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "93,772 downloads, 243 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "unsloth"
+      ]
+    },
+    {
+      "id": "qwen3-30b-a3b-2507",
+      "name": "Qwen3-30B-A3B-Instruct-2507",
+      "repo": "MaziyarPanahi/Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "filename_template": "Qwen3-30B-A3B-Instruct-2507.{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "74,951 downloads, 4 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "maziyarpanahi"
+      ]
+    },
+    {
+      "id": "qwen3-next-80b-a3b",
+      "name": "Qwen3-Next-80B-A3B-Instruct",
+      "repo": "unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF",
+      "filename_template": "Qwen3-Next-80B-A3B-Instruct-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "68,608 downloads, 158 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "unsloth"
+      ]
+    },
+    {
+      "id": "qwen2-5-3b",
+      "name": "Qwen2.5-3B-Instruct",
+      "repo": "Qwen/Qwen2.5-3B-Instruct-GGUF",
+      "filename_template": "qwen2.5-3b-instruct-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "65,051 downloads, 79 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "qwen"
+      ]
+    },
+    {
+      "id": "glm-4-7-flash-reap-23b-a3b",
+      "name": "GLM-4.7-Flash-REAP-23B-A3B",
+      "repo": "unsloth/GLM-4.7-Flash-REAP-23B-A3B-GGUF",
+      "filename_template": "GLM-4.7-Flash-REAP-23B-A3B-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "35,248 downloads, 108 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "unsloth"
+      ]
+    },
+    {
+      "id": "llama-3-2-3b-uncensored",
+      "name": "Llama-3.2-3B-Instruct-uncensored",
+      "repo": "bartowski/Llama-3.2-3B-Instruct-uncensored-GGUF",
+      "filename_template": "Llama-3.2-3B-Instruct-uncensored-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "29,019 downloads, 81 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "bartowski"
+      ]
+    },
+    {
+      "id": "qwen-qwen3-next-80b-a3b-thinking",
+      "name": "Qwen_Qwen3-Next-80B-A3B-Thinking",
+      "repo": "bartowski/Qwen_Qwen3-Next-80B-A3B-Thinking-GGUF",
+      "filename_template": "Qwen_Qwen3-Next-80B-A3B-Thinking-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "17,463 downloads, 13 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "bartowski"
+      ]
+    },
+    {
+      "id": "qwen2-5-coder-3b",
+      "name": "Qwen2.5-Coder-3B-Instruct",
+      "repo": "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF",
+      "filename_template": "qwen2.5-coder-3b-instruct-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "15,727 downloads, 52 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "qwen"
+      ]
+    },
+    {
+      "id": "cerebras-qwen3-coder-reap-25b-a3b",
+      "name": "cerebras_Qwen3-Coder-REAP-25B-A3B",
+      "repo": "bartowski/cerebras_Qwen3-Coder-REAP-25B-A3B-GGUF",
+      "filename_template": "cerebras_Qwen3-Coder-REAP-25B-A3B-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "7,470 downloads, 29 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "bartowski"
+      ]
+    },
+    {
+      "id": "qwen-qwen3-30b-a3b-2507",
+      "name": "Qwen_Qwen3-30B-A3B-Instruct-2507",
+      "repo": "bartowski/Qwen_Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "filename_template": "Qwen_Qwen3-30B-A3B-Instruct-2507-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "7,088 downloads, 23 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "bartowski"
+      ]
+    },
+    {
+      "id": "qwen3-next-80b-a3b-thinking",
+      "name": "Qwen3-Next-80B-A3B-Thinking",
+      "repo": "Qwen/Qwen3-Next-80B-A3B-Thinking-GGUF",
+      "filename_template": "Qwen3-Next-80B-A3B-Thinking-{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "4,094 downloads, 29 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "qwen"
+      ]
+    },
+    {
+      "id": "llama-3-2-3b-abliterated",
+      "name": "Llama-3.2-3B-Instruct-abliterated",
+      "repo": "MaziyarPanahi/Llama-3.2-3B-Instruct-abliterated-GGUF",
+      "filename_template": "Llama-3.2-3B-Instruct-abliterated.{quant}.gguf",
+      "min_vram_gb": 3.0,
+      "description": "476 downloads, 2 likes on HuggingFace",
+      "tags": [
+        "dynamic",
+        "maziyarpanahi"
+      ]
+    }
+  ]
+}
