@@ -74,12 +74,14 @@ MODEL STORAGE:
 EOF
 }
 
-draw_full_menu() {
-    local w=$(get_term_width)
-    local inner=$((w - 2))  # inside the box border chars
+draw_installed_menu() {
+    _MENU_FILES=()
+    _MENU_COUNT=0
 
-    # Output all UI to stderr so only the model ID goes to stdout
-    # Dynamic banner
+    local w=$(get_term_width)
+    local inner=$((w - 2))
+
+    # Banner
     local title="oi - LLM Chat Interface"
     local pad_total=$((inner - ${#title}))
     local pad_left=$((pad_total / 2))
@@ -88,159 +90,82 @@ draw_full_menu() {
     printf >&2 "${CYAN}║${NC}%*s%s%*s${CYAN}║${NC}\n" "$pad_left" "" "$title" "$pad_right" ""
     echo -e "${CYAN}╚$(make_divider "$inner" "═")╝${NC}" >&2
 
-    # Hardware section — compact if terminal is short
-    local term_h
-    term_h=$(tput lines 2>/dev/null) || term_h=40
-    local hw=$(detect_hardware)
-    local vram=$(echo "$hw" | grep -o '"vram_gb": [0-9.]*' | cut -d' ' -f2)
-    local ram=$(echo "$hw" | grep -o '"ram_gb": [0-9]*' | cut -d' ' -f2)
-    echo -e "${CYAN}VRAM: ${vram}G  RAM: ${ram}G${NC}" >&2
-
-    # Get all models and check which are installed
-    local models=$(load_models)
-    local ids=$(echo "$models" | grep '"id":' | cut -d'"' -f4)
-    local installed=()
-
-    for id in $ids; do
-        local model_info=$(echo "$models" | grep -A 10 "\"id\": \"${id}\"" | head -10)
-        local template=$(echo "$model_info" | grep '"filename_template":' | head -1 | cut -d'"' -f4)
-        local filename=$(build_filename "$template" "$DEFAULT_QUANT")
-        if is_model_installed "$filename"; then
-            installed+=("$id")
-        fi
+    # Scan installed models
+    local files=()
+    local sizes=()
+    for f in "$MODELS_DIR"/*.gguf; do
+        [ -f "$f" ] || continue
+        local fsize
+        fsize=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
+        [ "$fsize" -lt 100000000 ] && continue  # skip files < 100MB
+        files+=("$f")
+        sizes+=("$(du -h "$f" 2>/dev/null | cut -f1)")
     done
 
-    # Build single list of all compatible models
-    local compatible=$(get_compatible_models)
-    local all_ids=()
-    local all_names=()
-    local all_status=()
+    _MENU_FILES=("${files[@]}")
+    _MENU_COUNT=${#files[@]}
 
-    while IFS='|' read -r id name status; do
-        [ -z "$id" ] && continue
-        all_ids+=("$id")
-        all_names+=("$name")
-        all_status+=("$status")
-    done <<< "$compatible"
-
-    # Show single unified menu
-    echo -e "${BLUE}Available Models:${NC}" >&2
+    echo -e "${BLUE}Installed Models:${NC}" >&2
     echo -e "${BLUE}$(make_divider "$w")${NC}" >&2
 
-    # Compute how many models we can show
-    local total_models=${#all_ids[@]}
-    local max_models=$total_models
-    # Reserve lines: 3 banner + hw(~8 or 1) + 2 header/divider + 3 footer + 2 prompt = ~18 or ~11
-    local reserved_lines=10
-    if (( term_h < 20 )); then reserved_lines=7; fi
-    local avail_lines=$((term_h - reserved_lines))
-    if (( avail_lines < 3 )); then avail_lines=3; fi
-    if (( max_models > avail_lines )); then
-        max_models=$((avail_lines - 1))  # leave room for overflow indicator
+    if [ $_MENU_COUNT -eq 0 ]; then
+        echo "" >&2
+        echo -e "  ${YELLOW}No models installed.${NC}" >&2
+        echo -e "  Press ${CYAN}A${NC} to add models from HuggingFace." >&2
+        echo "" >&2
+    else
+        local name_max=$((w - 16))
+        (( name_max < 10 )) && name_max=10
+
+        local i
+        for (( i=0; i<_MENU_COUNT; i++ )); do
+            local basename
+            basename=$(basename "${files[$i]}")
+            local display_name=$(truncate_str "$basename" "$name_max")
+            printf >&2 "  %-3s %-${name_max}s %s\n" "$((i+1)))" "$display_name" "${sizes[$i]}"
+        done
     fi
 
-    # Figure out name column width: w - "  N) " (5) - " ● GPU" (6) - " ✓" (2) - padding (2)
-    local name_max=$((w - 16))
-    (( name_max < 10 )) && name_max=10
-
-    local i=1
-    for idx in "${!all_ids[@]}"; do
-        if (( i > max_models )) && (( total_models > max_models )); then
-            local remaining=$((total_models - max_models))
-            echo -e "  ${YELLOW}... ${remaining} more (press L)${NC}" >&2
-            break
-        fi
-
-        local id="${all_ids[$idx]}"
-        local name="${all_names[$idx]}"
-        local status="${all_status[$idx]}"
-
-        local status_str=""
-        if [ "$status" = "gpu" ]; then
-            status_str="${GREEN}●${NC} GPU"
-        else
-            status_str="${YELLOW}●${NC} CPU"
-        fi
-
-        # Truncate name and use short installed marker
-        local display_name=$(truncate_str "$name" "$name_max")
-        local installed_marker=""
-        if is_model_in_array "$id" "${installed[@]}"; then
-            installed_marker=" ${GREEN}✓${NC}"
-        fi
-
-        printf >&2 "  %-3s %-${name_max}s %s%s\n" "$i)" "$display_name" "$status_str" "$installed_marker"
-        ((i++))
-    done
-
     echo -e "${BLUE}$(make_divider "$w")${NC}" >&2
-    echo -e "  ${CYAN}L${NC})ist  ${CYAN}D${NC})elete  ${CYAN}H${NC})ardware  ${CYAN}Q${NC})uit" >&2
+    echo -e "  ${CYAN}A${NC})dd  ${CYAN}D${NC})elete  ${CYAN}Q${NC})uit" >&2
 }
 
-interactive_select() {
-    # Draw the full menu once at startup
-    draw_full_menu
+interactive_select_installed() {
+    draw_installed_menu
 
-    # Get all models and check which are installed (needed for the choice handling)
-    local models=$(load_models)
-    local ids=$(echo "$models" | grep '"id":' | cut -d'"' -f4)
-    local installed=()
-
-    for id in $ids; do
-        local model_info=$(echo "$models" | grep -A 10 "\"id\": \"${id}\"" | head -10)
-        local template=$(echo "$model_info" | grep '"filename_template":' | head -1 | cut -d'"' -f4)
-        local filename=$(build_filename "$template" "$DEFAULT_QUANT")
-        if is_model_installed "$filename"; then
-            installed+=("$id")
-        fi
-    done
-
-    # Build single list of all compatible models
-    local compatible=$(get_compatible_models)
-    local all_ids=()
-    local all_names=()
-    local all_status=()
-
-    while IFS='|' read -r id name status; do
-        [ -z "$id" ] && continue
-        all_ids+=("$id")
-        all_names+=("$name")
-        all_status+=("$status")
-    done <<< "$compatible"
-
-    # Main interaction loop - only redraws the prompt after L/H commands
     while true; do
-        # Read selection - only redraw this prompt line
         local w=$(get_term_width)
         local box_inner=$((w - 2))
         echo -e "${CYAN}┌$(make_divider "$box_inner")┐${NC}" >&2
-        read -p "│ Enter choice (1-${#all_ids[@]}, L, D, H, Q): " choice
-        # Clear the input line and draw bottom border on same line
+
+        local prompt_text
+        if [ $_MENU_COUNT -gt 0 ]; then
+            prompt_text="│ Enter choice (1-${_MENU_COUNT}, A, D, Q): "
+        else
+            prompt_text="│ Enter choice (A, Q): "
+        fi
+        read -p "$prompt_text" choice
         echo -e "\r${CYAN}└$(make_divider "$box_inner")┘${NC}" >&2
 
         case "$choice" in
-            [Ll])
-                list_models >&2
-                echo "" >&2
-                sleep 2
-                # Continue loop to redraw only the prompt
-                continue
-                ;;
-            [Hh])
-                show_hardware >&2
-                echo "" >&2
-                sleep 1
-                # Continue loop to redraw only the prompt
+            [Aa])
+                add_model_flow
+                # Redraw menu after add
+                draw_installed_menu
                 continue
                 ;;
             [Dd])
-                # List installed models for selection (skip small vocab/test files)
+                if [ $_MENU_COUNT -eq 0 ]; then
+                    echo -e "${YELLOW}No installed models to delete.${NC}" >&2
+                    continue
+                fi
                 local del_files=()
                 local del_i=1
                 for f in "$MODELS_DIR"/*.gguf; do
                     [ -f "$f" ] || continue
-                    local fsize=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
-                    [ "$fsize" -lt 100000000 ] && continue  # skip files < 100MB
+                    local fsize
+                    fsize=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
+                    [ "$fsize" -lt 100000000 ] && continue
                     del_files+=("$(basename "$f")")
                     local del_size=$(du -h "$f" 2>/dev/null | cut -f1)
                     echo -e "  ${del_i}) $(basename "$f") (${del_size})" >&2
@@ -252,6 +177,7 @@ interactive_select() {
                 fi
                 read -p "Select model to delete (1-${#del_files[@]}, or C to cancel): " del_choice
                 if [[ "$del_choice" =~ ^[Cc]$ ]]; then
+                    draw_installed_menu
                     continue
                 fi
                 if [[ "$del_choice" =~ ^[0-9]+$ ]] && [ "$del_choice" -ge 1 ] && [ "$del_choice" -le ${#del_files[@]} ]; then
@@ -260,6 +186,8 @@ interactive_select() {
                 else
                     echo -e "${RED}Invalid selection${NC}" >&2
                 fi
+                # Redraw menu after delete
+                draw_installed_menu
                 continue
                 ;;
             [Qq])
@@ -269,28 +197,17 @@ interactive_select() {
             *)
                 if [[ "$choice" =~ ^[0-9]+$ ]]; then
                     local idx=$((choice - 1))
-
-                    # Simple index lookup in unified list
-                    if [ $idx -ge 0 ] && [ $idx -lt ${#all_ids[@]} ]; then
-                        local selected_id="${all_ids[$idx]}"
-                        # This goes to stdout - the only thing captured by command substitution
-                        echo "$selected_id"
+                    if [ $idx -ge 0 ] && [ $idx -lt $_MENU_COUNT ]; then
+                        # Output filepath on stdout
+                        echo "${_MENU_FILES[$idx]}"
                         return 0
                     else
                         echo -e "${RED}Invalid selection${NC}" >&2
-                        # Continue loop to redraw only the prompt
                         continue
                     fi
                 else
-                    # Try direct ID
-                    if get_model_info "$choice" > /dev/null; then
-                        echo "$choice"
-                        return 0
-                    else
-                        echo -e "${RED}Unknown model ID: $choice${NC}" >&2
-                        # Continue loop to redraw only the prompt
-                        continue
-                    fi
+                    echo -e "${RED}Invalid input: $choice${NC}" >&2
+                    continue
                 fi
                 ;;
         esac

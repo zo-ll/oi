@@ -36,6 +36,7 @@ source "${LIB_DIR}/hardware.sh"
 source "${LIB_DIR}/models.sh"
 source "${LIB_DIR}/download.sh"
 source "${LIB_DIR}/chat.sh"
+source "${LIB_DIR}/manual_add.sh"
 
 # Main function
 main() {
@@ -138,18 +139,18 @@ main() {
     else
         # Interactive mode
         while true; do
-            selected=$(interactive_select)
+            selected=$(interactive_select_installed)
             local select_status=$?
 
             if [ $select_status -eq 0 ]; then
-                # User selected a model number
-                launch_chat "$selected" "$quant" "$context" "$threads"
+                # User selected a model - selected is a filepath
+                launch_chat_file "$selected" "$context" "$threads"
                 echo -e "\n${GRAY}Returning to model selection...${NC}\n"
             elif [ $select_status -eq 2 ]; then
                 # User selected Q to quit
                 exit 0
             fi
-            # Otherwise (status 1), loop continues for L or H selection
+            # Otherwise (status 1), loop continues after add/delete
         done
     fi
 }
