@@ -145,6 +145,104 @@ is_model_in_array() {
     return 1
 }
 
+recommend_model() {
+    local hw=$(detect_hardware)
+    local vram=$(echo "$hw" | grep -o '"vram_gb": [0-9.]*' | cut -d' ' -f2)
+    local ram=$(echo "$hw" | grep -o '"ram_gb": [0-9]*' | cut -d' ' -f2)
+    local total_mem=$(echo "$hw" | grep -o '"total_memory_gb": [0-9.]*' | cut -d' ' -f2)
+
+    # Determine which tier of models to recommend
+    local tier=""
+    if (( $(echo "$vram >= 24" | bc -l) )); then
+        tier="24gb"
+    elif (( $(echo "$vram >= 16" | bc -l) )); then
+        tier="16gb"
+    elif (( $(echo "$vram >= 8" | bc -l) )); then
+        tier="8gb"
+    elif (( $(echo "$vram >= 4" | bc -l) )); then
+        tier="4gb"
+    elif (( $(echo "$vram >= 2" | bc -l) )); then
+        tier="2gb"
+    else
+        tier="cpu"
+    fi
+
+    # Get all compatible models
+    local models=$(load_models)
+    local compatible=$(get_compatible_models)
+    local all_ids=()
+
+    while IFS='|' read -r id name status; do
+        [ -z "$id" ] && continue
+        all_ids+=("$id")
+    done <<< "$compatible"
+
+    # Priority order within each tier (highest VRAM requirement first)
+    local recommended=""
+    local fallback=""
+
+    for id in "${all_ids[@]}"; do
+        local model_info=$(echo "$models" | grep -A 10 "\"id\": \"${id}\"" | head -10)
+        local min_vram=$(echo "$model_info" | grep '"min_vram_gb":' | grep -o '[0-9.]*' | head -1)
+
+        case "$tier" in
+            "24gb")
+                # 24GB+: Prefer highest VRAM models (7-8B range)
+                if (( $(echo "$min_vram >= 4.5" | bc -l) )); then
+                    recommended="$id"
+                    break
+                elif [ -z "$recommended" ]; then
+                    recommended="$id"
+                fi
+                ;;
+            "16gb")
+                # 16GB: 7-8B models
+                if (( $(echo "$min_vram >= 4.5" | bc -l) )) && (( $(echo "$min_vram <= 6" | bc -l) )); then
+                    recommended="$id"
+                    break
+                elif [ -z "$recommended" ]; then
+                    recommended="$id"
+                fi
+                ;;
+            "8gb")
+                # 8GB: 7-8B models
+                if (( $(echo "$min_vram >= 4.5" | bc -l) )) && (( $(echo "$min_vram <= 6" | bc -l) )); then
+                    recommended="$id"
+                    break
+                elif [ -z "$recommended" ]; then
+                    recommended="$id"
+                fi
+                ;;
+            "4gb")
+                # 4GB: 3-4B models
+                if (( $(echo "$min_vram >= 2" | bc -l) )) && (( $(echo "$min_vram < 4.5" | bc -l) )); then
+                    recommended="$id"
+                    break
+                elif [ -z "$recommended" ]; then
+                    recommended="$id"
+                fi
+                ;;
+            "2gb")
+                # 2GB: 2-3B models
+                if (( $(echo "$min_vram < 3" | bc -l) )); then
+                    recommended="$id"
+                    break
+                elif [ -z "$recommended" ]; then
+                    recommended="$id"
+                fi
+                ;;
+            "cpu")
+                # CPU-only: Smallest model
+                if [ -z "$recommended" ] || (( $(echo "$min_vram < 2" | bc -l) )); then
+                    recommended="$id"
+                fi
+                ;;
+        esac
+    done
+
+    echo "$recommended"
+}
+
 list_models() {
     local show_all="$1"
     local hw=$(detect_hardware)

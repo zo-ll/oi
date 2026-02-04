@@ -48,10 +48,12 @@ OPTIONS:
     -h, --hardware          Show system hardware information
     -c, --context <size>    Set context size (default: ${DEFAULT_CONTEXT})
     -t, --threads <num>     Set number of CPU threads
+    -a, --auto              Auto-select best model for your hardware
     --help                  Show this help message
 
 EXAMPLES:
     oi                      # Interactive model selection
+    oi -a                   # Auto-select best model for your hardware
     oi -m qwen2.5-3b        # Start chat with specific model
     oi -m phi-3-mini -q Q5_K_M  # Use specific quantization
     oi -l                   # List all available models
@@ -95,6 +97,13 @@ draw_full_menu() {
     local vram=$(echo "$hw" | grep -o '"vram_gb": [0-9.]*' | cut -d' ' -f2)
     local ram=$(echo "$hw" | grep -o '"ram_gb": [0-9]*' | cut -d' ' -f2)
     echo -e "${CYAN}VRAM: ${vram}G  RAM: ${ram}G${NC}" >&2
+
+    # Show recommended model
+    local recommended=$(recommend_model)
+    if [ -n "$recommended" ]; then
+        local rec_name=$(get_model_info "$recommended" | grep '"name":' | head -1 | cut -d'"' -f4)
+        echo -e "${GREEN}★ Recommended: ${rec_name}${NC} (based on ${vram}GB VRAM)" >&2
+    fi
 
     # Get all models and check which are installed
     local models=$(load_models)
