@@ -1071,7 +1071,7 @@ main() {
             if [ $select_status -eq 0 ]; then
                 # User selected a model number
                 launch_chat "$selected" "$quant" "$context" "$threads"
-                break
+                echo -e "\n${GRAY}Returning to model selection...${NC}\n"
             elif [ $select_status -eq 2 ]; then
                 # User selected Q to quit
                 exit 0
