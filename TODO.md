@@ -102,7 +102,7 @@ echo -e "${CYAN}── oi - LLM Chat Interface ──${NC}" >&2
 
 ---
 
-## 3. Add a spinner during catalog fetch
+## ~~3. Add a spinner during catalog fetch~~ ✅
 
 **File:** `oi`, function `fetch_hf_models()`, line 187
 **Current behavior:** Prints `"Updating model catalog from HuggingFace..."` then blocks silently while the Python subprocess runs (can take 10–30 s).
@@ -183,7 +183,7 @@ Alternatively, for a more explicit UX:
 
 ---
 
-## 5. Extract inline Python into its own file
+## ~~5. Extract inline Python into its own file~~ ✅
 
 **File:** `oi`, function `fetch_hf_models()`, lines 188–335
 **Current behavior:** A ~150-line Python script is embedded inline via heredoc inside the bash function. This makes the bash file harder to read, harder to lint/test the Python independently, and prevents editor tooling (syntax highlighting, LSP) from working on the Python code.
