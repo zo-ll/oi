@@ -4,7 +4,7 @@
       "id": "qwen3-8b",
       "name": "Qwen3 8B",
       "repo": "Qwen/Qwen3-8B-GGUF",
-      "filename_template": "qwen3-8b-{quant}.gguf",
+      "filename_template": "Qwen3-8B-{quant}.gguf",
       "min_vram_gb": 5.0,
       "description": "General/reasoning/math with thinking mode",
       "tags": ["general", "reasoning", "math"]
@@ -12,8 +12,8 @@
     {
       "id": "qwen2.5-coder-7b",
       "name": "Qwen2.5 Coder 7B Instruct",
-      "repo": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
-      "filename_template": "qwen2.5-coder-7b-instruct-{quant}.gguf",
+      "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+      "filename_template": "Qwen2.5-Coder-7B-Instruct-{quant}.gguf",
       "min_vram_gb": 4.7,
       "description": "Coding specialist",
       "tags": ["coding", "specialist"]
@@ -48,12 +48,11 @@
     {
       "id": "phi-3-mini",
       "name": "Phi-3 Mini 4K Instruct",
-      "repo": "microsoft/Phi-3-mini-4k-instruct-gguf",
-      "filename_template": "Phi-3-mini-4k-instruct.Q4_K_M.gguf",
+      "repo": "bartowski/Phi-3-mini-4k-instruct-GGUF",
+      "filename_template": "Phi-3-mini-4k-instruct-{quant}.gguf",
       "min_vram_gb": 2.3,
-      "description": "Efficient small model (only Q4 available)",
-      "tags": ["efficient", "microsoft"],
-      "default_quant": "Q4_K_M"
+      "description": "Efficient small model",
+      "tags": ["efficient", "microsoft"]
     },
     {
       "id": "qwen2-math-7b",
