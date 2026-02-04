@@ -12,33 +12,28 @@ HF_API = "https://huggingface.co/api/models"
 
 
 def search_models(keyword, mem_gb):
-    """Search HF for GGUF text-generation models, filter by estimated memory."""
-    query = f"{keyword}+gguf"
-    url = (
-        f"{HF_API}?search={query}"
-        f"&filter=text-generation&sort=downloads&limit=20"
-    )
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "oi/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-    except (urllib.error.URLError, OSError) as e:
-        print(json.dumps({"error": str(e)}))
-        sys.exit(1)
+    """Search HF for GGUF models, falling back to broader search if needed."""
+    # Try gguf-specific search first, then plain keyword as fallback
+    for query in [f"{keyword}+gguf", keyword]:
+        url = (
+            f"{HF_API}?search={query}"
+            f"&sort=downloads&limit=20"
+        )
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "oi/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+        except (urllib.error.URLError, OSError) as e:
+            print(json.dumps({"error": str(e)}))
+            sys.exit(1)
+
+        if data:
+            break
 
     results = []
     for model in data:
         model_id = model.get("modelId", "")
         downloads = model.get("downloads", 0)
-        siblings = model.get("siblings", [])
-
-        # Estimate size from the largest gguf file listed in siblings
-        gguf_sizes = []
-        for s in siblings:
-            fname = s.get("rfilename", "")
-            if fname.lower().endswith(".gguf"):
-                # Size may not be in search results; we estimate from tags
-                pass
 
         # Try to estimate size from model tags or name
         est_gb = _estimate_size_from_id(model_id)
@@ -69,39 +64,6 @@ def _estimate_size_from_id(model_id):
     return None
 
 
-def list_repo_files(repo):
-    """List GGUF files in a HF repo with quant and size info."""
-    url = f"{HF_API}/{repo}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "oi/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-    except (urllib.error.URLError, OSError) as e:
-        print(json.dumps({"error": str(e)}))
-        sys.exit(1)
-
-    siblings = data.get("siblings", [])
-    results = []
-    for s in siblings:
-        fname = s.get("rfilename", "")
-        if not fname.lower().endswith(".gguf"):
-            continue
-        size_bytes = s.get("size", 0)
-
-        # Try to extract quant from filename
-        quant = _extract_quant(fname)
-
-        results.append({
-            "filename": fname,
-            "quant": quant or "unknown",
-            "size_bytes": size_bytes,
-        })
-
-    # Sort by size ascending
-    results.sort(key=lambda x: x["size_bytes"])
-    print(json.dumps(results))
-
-
 def _extract_quant(filename):
     """Extract quantization level from a GGUF filename."""
     name = filename.upper()
@@ -116,6 +78,153 @@ def _extract_quant(filename):
     if m:
         return m.group(1)
     return None
+
+
+def _is_shard(filename):
+    """Check if file is a shard (part of a split model)."""
+    return bool(re.search(r'-\d{5}-of-\d{5}', filename))
+
+
+def _shard_total(filename):
+    """Get total shard count from filename like -00001-of-00004."""
+    m = re.search(r'-\d{5}-of-(\d{5})', filename)
+    return int(m.group(1)) if m else 1
+
+
+# Model weight file extensions we care about
+_MODEL_EXTENSIONS = {
+    ".gguf": "GGUF",
+    ".safetensors": "Safetensors",
+    ".bin": "PyTorch",
+    ".pt": "PyTorch",
+    ".pth": "PyTorch",
+    ".onnx": "ONNX",
+    ".nemo": "NeMo",
+    ".ggml": "GGML",
+    ".mlpackage": "CoreML",
+    ".mlmodelc": "CoreML",
+    ".tflite": "TFLite",
+    ".h5": "Keras",
+    ".keras": "Keras",
+    ".mar": "TorchServe",
+    ".engine": "TensorRT",
+}
+
+# Files to always skip even if extension matches
+_SKIP_PATTERNS = [
+    "tokenizer", "config", "vocab", "merges", "special_tokens",
+    "generation_config", "preprocessor", "trainer_state",
+    "training_args", "optimizer", "scheduler", "added_tokens",
+]
+
+
+def _get_format(filename):
+    """Get model format from filename, or None if not a model file."""
+    lower = filename.lower()
+    basename = lower.rsplit("/", 1)[-1]
+
+    # Skip known non-model files
+    for skip in _SKIP_PATTERNS:
+        if skip in basename:
+            return None
+
+    for ext, fmt in _MODEL_EXTENSIONS.items():
+        if lower.endswith(ext):
+            return fmt
+    return None
+
+
+def _is_shard_generic(filename):
+    """Check if file is a shard (any format)."""
+    # Patterns: -00001-of-00004, .part1of4, etc.
+    return bool(re.search(r'-\d{5}-of-\d{5}', filename))
+
+
+def _shard_key(filename):
+    """Strip shard suffix to get a grouping key."""
+    # Remove -NNNNN-of-NNNNN before the extension
+    return re.sub(r'-\d{5}-of-\d{5}', '', filename)
+
+
+def list_repo_files(repo):
+    """List model weight files in a HF repo, grouped by quant/shard."""
+    url = f"{HF_API}/{repo}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "oi/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError) as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
+
+    siblings = data.get("siblings", [])
+
+    # Collect all model weight files
+    model_files = []
+    for s in siblings:
+        fname = s.get("rfilename", "")
+        fmt = _get_format(fname)
+        if fmt is None:
+            continue
+        size_bytes = s.get("size", 0)
+        quant = _extract_quant(fname)
+        model_files.append({
+            "filename": fname,
+            "format": fmt,
+            "quant": quant or "-",
+            "size_bytes": size_bytes,
+        })
+
+    # Group sharded files
+    groups = {}
+    singles = []
+
+    for f in model_files:
+        fname = f["filename"]
+        if _is_shard_generic(fname):
+            key = _shard_key(fname)
+            if key not in groups:
+                groups[key] = {
+                    "format": f["format"],
+                    "quant": f["quant"],
+                    "files": [],
+                    "total_size": 0,
+                    "shard_count": _shard_total(fname),
+                }
+            groups[key]["files"].append(fname)
+            groups[key]["total_size"] += f["size_bytes"]
+        else:
+            singles.append(f)
+
+    # Build output
+    results = []
+    for f in singles:
+        results.append({
+            "filename": f["filename"],
+            "format": f["format"],
+            "quant": f["quant"],
+            "size_bytes": f["size_bytes"],
+            "shard_count": 1,
+            "all_files": [f["filename"]],
+        })
+
+    for key in sorted(groups.keys()):
+        g = groups[key]
+        g["files"].sort()
+        # Display name: strip shard numbering from first file
+        display = re.sub(r'-\d{5}-of-\d{5}', '', g["files"][0])
+        results.append({
+            "filename": display,
+            "format": g["format"],
+            "quant": g["quant"],
+            "size_bytes": g["total_size"],
+            "shard_count": g["shard_count"],
+            "all_files": g["files"],
+        })
+
+    # Sort by size ascending
+    results.sort(key=lambda x: x["size_bytes"])
+    print(json.dumps(results))
 
 
 def main():
