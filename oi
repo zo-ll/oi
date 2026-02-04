@@ -7,9 +7,16 @@ VERSION="1.0.0"
 
 # Don't use set -e as it causes issues with the interactive menu loop
 
-# Use absolute path to installed location
-SCRIPT_DIR="${HOME}/.local/share/oi"
-LIB_DIR="${SCRIPT_DIR}/lib"
+# Detect if running from repo (development) or installed location
+if [ -f "${BASH_SOURCE[0]}" ] && [ -d "$(dirname "${BASH_SOURCE[0]}")/lib" ]; then
+    # Running from repo - use relative paths
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    LIB_DIR="${SCRIPT_DIR}/lib"
+else
+    # Running from installed location
+    SCRIPT_DIR="${HOME}/.local/share/oi"
+    LIB_DIR="${SCRIPT_DIR}/lib"
+fi
 
 # Configuration
 LLAMA_CPP_DIR="${HOME}/.local/share/oi/llama.cpp"
