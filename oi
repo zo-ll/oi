@@ -696,15 +696,10 @@ draw_full_menu() {
     # Hardware section — compact if terminal is short
     local term_h
     term_h=$(tput lines 2>/dev/null) || term_h=40
-    if (( term_h < 20 )); then
-        # One-line hardware summary
-        local hw=$(detect_hardware)
-        local vram=$(echo "$hw" | grep -o '"vram_gb": [0-9.]*' | cut -d' ' -f2)
-        local ram=$(echo "$hw" | grep -o '"ram_gb": [0-9]*' | cut -d' ' -f2)
-        echo -e "${CYAN}VRAM: ${vram}G  RAM: ${ram}G${NC}" >&2
-    else
-        show_hardware >&2
-    fi
+    local hw=$(detect_hardware)
+    local vram=$(echo "$hw" | grep -o '"vram_gb": [0-9.]*' | cut -d' ' -f2)
+    local ram=$(echo "$hw" | grep -o '"ram_gb": [0-9]*' | cut -d' ' -f2)
+    echo -e "${CYAN}VRAM: ${vram}G  RAM: ${ram}G${NC}" >&2
 
     # Get all models and check which are installed
     local models=$(load_models)
@@ -750,7 +745,7 @@ draw_full_menu() {
     fi
 
     # Figure out name column width: w - "  N) " (5) - " ● GPU" (6) - " ✓" (2) - padding (2)
-    local name_max=$((w - 15))
+    local name_max=$((w - 16))
     (( name_max < 10 )) && name_max=10
 
     local i=1
@@ -779,15 +774,12 @@ draw_full_menu() {
             installed_marker=" ${GREEN}✓${NC}"
         fi
 
-        printf >&2 "  %-2s %-${name_max}s %s%s\n" "$i)" "$display_name" "$status_str" "$installed_marker"
+        printf >&2 "  %-3s %-${name_max}s %s%s\n" "$i)" "$display_name" "$status_str" "$installed_marker"
         ((i++))
     done
 
     echo -e "${BLUE}$(make_divider "$w")${NC}" >&2
-    echo -e "  ${CYAN}L${NC}) List all available models" >&2
-    echo -e "  ${CYAN}D${NC}) Delete an installed model" >&2
-    echo -e "  ${CYAN}H${NC}) Show hardware info" >&2
-    echo -e "  ${CYAN}Q${NC}) Quit" >&2
+    echo -e "  ${CYAN}L${NC})ist  ${CYAN}D${NC})elete  ${CYAN}H${NC})ardware  ${CYAN}Q${NC})uit" >&2
 }
 
 # Interactive model selection
@@ -870,6 +862,7 @@ interactive_select() {
                 fi
                 if [[ "$del_choice" =~ ^[0-9]+$ ]] && [ "$del_choice" -ge 1 ] && [ "$del_choice" -le ${#del_files[@]} ]; then
                     remove_model "${del_files[$((del_choice - 1))]}"
+                    sleep 1
                 else
                     echo -e "${RED}Invalid selection${NC}" >&2
                 fi

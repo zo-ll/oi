@@ -4,7 +4,7 @@ Each task targets `/home/az/local_script/oi` and is self-contained.
 
 ---
 
-## 1. Fix model list number alignment
+## ~~1. Fix model list number alignment~~ ✅
 
 **File:** `oi`, function `draw_full_menu()`, line 794
 **Current behavior:** The `printf` uses `%-2s` for the number column (`"$i)"`). Numbers 1–9 produce 2-char strings like `1)`, but `10)` is 3 chars, causing that row and all subsequent rows to shift right by one space.
@@ -30,7 +30,7 @@ printf >&2 "  %-3s %-${name_max}s %s%s\n" "$i)" "$display_name" "$status_str" "$
 
 ---
 
-## 2. Compact the interactive menu layout
+## ~~2. Compact the interactive menu layout~~ ✅ (2a, 2b done; 2c skipped)
 
 **File:** `oi`, functions `draw_full_menu()` (line 694) and `show_hardware()` (line 136)
 **Current behavior:** The menu uses 3 banner lines + full hardware block (~8 lines) + divider + models + divider + 4 footer lines. On a typical 24-line terminal, this leaves room for only ~6 models before truncation.
@@ -146,7 +146,7 @@ Note: The heredoc with `&` backgrounding requires careful quoting. Test that `$C
 
 ---
 
-## 4. Add visible feedback after interactive model deletion
+## ~~4. Add visible feedback after interactive model deletion~~ ✅
 
 **File:** `oi`, the `[Dd]` case in `interactive_select()`, line 884
 **Current behavior:** `remove_model()` prints `"Deleted: file"` in green, but the interactive menu immediately reprints the prompt line — the confirmation scrolls away or is missed.
