@@ -170,6 +170,9 @@ copy_oi_files() {
 create_wrapper() {
     log_info "Creating wrapper script at $OI_WRAPPER..."
     
+    # Ensure bin directory exists
+    mkdir -p "$OI_BIN_DIR"
+    
     cat > "$OI_WRAPPER" << 'WRAPPER_EOF'
 #!/bin/bash
 OI_SHARE_DIR="${HOME}/.local/share/oi"
