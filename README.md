@@ -15,14 +15,13 @@
 
 - Linux system with bash
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) built from source
+- Python 3 (for HuggingFace catalog fetching)
 - curl (for downloading models)
 - Optional: NVIDIA GPU with CUDA for faster inference
 
 ## Installation
 
 ### 1. Install llama.cpp
-
-First, you need to clone and build llama.cpp:
 
 ```bash
 # Clone the repository
@@ -40,24 +39,25 @@ cmake --build build --config Release
 
 ### 2. Install oi
 
-Clone or copy the `local_script` directory to your home folder:
-
 ```bash
-# If cloning from a repository
 git clone <repository-url> ~/local_script
-
-# Make the script executable
-chmod +x ~/local_script/oi
+cd ~/local_script
+bash install.sh
 ```
 
-### 3. Add to PATH (Optional)
-
-To use `oi` from anywhere, add it to your PATH:
+This creates a symlink at `~/.local/bin/oi` pointing to the repository. Make sure `~/.local/bin` is in your `PATH`:
 
 ```bash
 # Add to your ~/.bashrc or ~/.zshrc
-echo 'export PATH="$HOME/local_script:$PATH"' >> ~/.bashrc
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
+```
+
+You can verify the installation with:
+
+```bash
+which oi
+oi --help
 ```
 
 ## Quick Start
@@ -111,6 +111,9 @@ OPTIONS:
     -l, --list              List available models
     -i, --installed         List installed models only
     -d, --download <path>   Download custom model from HuggingFace
+                            Format: username/repo-name/filename.gguf
+    -r, --refresh           Force refresh model catalog from HuggingFace
+    -x, --remove <file>     Remove an installed model
     -h, --hardware          Show system hardware information
     -c, --context <size>    Set context size (default: 4096)
     -t, --threads <num>     Set number of CPU threads
@@ -119,85 +122,54 @@ OPTIONS:
 
 ## Examples
 
-### Start interactive chat
 ```bash
-oi
-```
-
-### Chat with specific model
-```bash
-oi -m qwen2.5-3b
-```
-
-### Use different quantization
-```bash
-oi -m mistral-7b -q Q5_K_M
-```
-
-### Download a custom model
-```bash
+oi                              # Interactive model selection
+oi -m qwen2.5-3b               # Chat with specific model
+oi -m mistral-7b -q Q5_K_M     # Use different quantization
+oi -l                           # List all available models
+oi -i                           # Show installed models
+oi -h                           # Check system specs
+oi -r -l                        # Refresh catalog from HuggingFace
+oi -x model.gguf                # Remove an installed model
+oi -m qwen2.5-7b -c 8192 -t 8  # Custom context size and threads
 oi -d microsoft/Phi-3-mini-4k-instruct-gguf/Phi-3-mini-4k-instruct.Q4_K_M.gguf
 ```
-
-### List all available models
-```bash
-oi -l
-```
-
-### Show installed models
-```bash
-oi -i
-```
-
-### Check system specs
-```bash
-oi --hardware
-```
-
-### Adjust context size and threads
-```bash
-oi -m qwen2.5-7b -c 8192 -t 8
-```
-
-## Available Models
-
-The following models are pre-configured in the catalog:
-
-### Small Models (2-4GB VRAM)
-- **qwen2.5-3b**: Fast multilingual model, excellent for coding
-- **phi-3-mini**: Microsoft's efficient small model
-- **llama-3.2-3b**: Meta's latest small model, modern architecture
-- **gemma-2-2b**: Google's lightweight model, very fast
-
-### Medium Models (4-8GB VRAM)
-- **qwen2.5-7b**: High quality 7B model, excellent reasoning
-- **mistral-7b**: Strong reasoning, good at following instructions
-- **deepseek-coder-6.7b**: Specialized for code generation
 
 ## Quantization Options
 
 Quantization affects model size, speed, and quality:
 
-| Quantization | Size | Quality | Speed | Recommendation |
-|-------------|------|---------|-------|----------------|
-| Q2_K | Smallest | Lowest | Fastest | Emergency use only |
-| Q3_K_S | Small | Decent | Fast | Low VRAM |
-| Q3_K_M | Small | Good | Fast | Balanced 3-bit |
-| Q4_K_M | Medium | Excellent | Fast | **Recommended default** |
-| Q4_K_L | Medium | Very Good | Fast | High quality 4-bit |
-| Q5_K_M | Large | Near-lossless | Medium | Best quality/size |
-| Q6_K | Larger | Excellent | Medium | Very high quality |
-| Q8_0 | Largest | Best | Slow | Maximum quality |
+| Quantization | Size | Quality | Recommendation |
+|-------------|------|---------|----------------|
+| Q2_K | Smallest | Lowest | Emergency use only |
+| Q3_K_S | Small | Decent | Low VRAM |
+| Q3_K_M | Small | Good | Balanced 3-bit |
+| Q4_K_M | Medium | Excellent | **Recommended default** |
+| Q4_K_L | Medium | Very Good | High quality 4-bit |
+| Q5_K_M | Large | Near-lossless | Best quality/size |
+| Q6_K | Larger | Excellent | Very high quality |
+| Q8_0 | Largest | Best | Maximum quality |
 
-**Default**: `Q4_K_M` - Best balance of quality and file size
+## Project Structure
 
-## Model Storage
+```
+local_script/
+├── oi                        Entry point (globals, source modules, main)
+├── install.sh                Symlinks oi -> ~/.local/bin/oi
+├── README.md
+└── lib/
+    ├── ui.sh                 Terminal helpers + interactive menu
+    ├── models.sh             Catalog loading, filtering, listing
+    ├── download.sh           Download and remove models
+    ├── chat.sh               Launch llama-cli chat
+    ├── hardware.sh           Hardware detection and display
+    ├── hardware_detect.sh    Low-level hardware probe
+    ├── fetch_hf_models.py    HuggingFace API client
+    ├── models.json           Curated model catalog
+    └── cache/                HuggingFace response cache
+```
 
-Models are stored in: `~/llama.cpp/models/`
-
-Files are named according to the HuggingFace repository format:
-- `qwen2.5-3b-instruct-Q4_K_M.gguf`
-- `Phi-3-mini-4k-instruct.Q4_K_M.gguf`
+Models are stored in `~/llama.cpp/models/`.
 
 ## Troubleshooting
 
@@ -232,7 +204,7 @@ ls ~/llama.cpp/build/bin/
 
 ### Adding New Models
 
-Edit `~/local_script/lib/models.json` to add your own models:
+Edit `lib/models.json` to add your own models:
 
 ```json
 {
@@ -248,42 +220,13 @@ Edit `~/local_script/lib/models.json` to add your own models:
 
 ### Changing Defaults
 
-Edit the `oi` script to change default values:
+Edit the top of the `oi` script to change default values:
 - `DEFAULT_QUANT="Q4_K_M"` - Default quantization
 - `DEFAULT_CONTEXT=4096` - Default context size
-
-## File Structure
-
-```
-~/local_script/
-├── oi                    # Main executable script
-├── README.md            # This documentation
-└── lib/
-    ├── hardware_detect.sh    # System detection
-    └── models.json          # Model catalog
-
-~/llama.cpp/
-├── build/
-│   └── bin/
-│       └── llama-cli      # llama.cpp CLI tool
-└── models/
-    └── *.gguf            # Downloaded models
-```
-
-## How It Works
-
-1. **Hardware Detection**: Checks GPU VRAM using `nvidia-smi`, RAM using `free`, and CPU cores using `nproc`
-2. **Model Filtering**: Filters the model catalog to show only compatible models based on available memory
-3. **Download**: Uses `curl` to download models from HuggingFace URLs
-4. **Chat Launch**: Executes `llama-cli` with appropriate parameters for interactive chat
 
 ## License
 
 This script follows the same license as llama.cpp (MIT License).
-
-## Contributing
-
-Contributions are welcome! Please ensure any changes follow the existing code style and include appropriate documentation.
 
 ## Acknowledgments
 
