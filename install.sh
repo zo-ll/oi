@@ -62,7 +62,7 @@ detect_cuda() {
     
     if command -v nvidia-smi &> /dev/null; then
         local vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ')
-        if [ -n "$vram"" ] && [ "$vram" != "[Insufficientpermissions]" ]; then
+        if [ -n "$vram" ] && [ "$vram" != "[Insufficientpermissions]" ]; then
             has_nvidia_smi="yes"
             log_info "Found NVIDIA GPU with ${vram}MB VRAM"
         fi
