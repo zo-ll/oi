@@ -186,7 +186,7 @@ fetch_hf_models() {
     local total_mem=$(echo "$hw" | grep -o '"total_memory_gb": [0-9.]*' | cut -d' ' -f2)
     echo -ne "${YELLOW}Updating model catalog from HuggingFace... ${NC}" >&2
 
-    python3 "${LIB_DIR}/fetch_hf_models.py" "$CACHE_FILE" "$HF_ORGS" "$total_mem" &
+    "${LIB_DIR}/fetch_hf_models" "$CACHE_FILE" "$HF_ORGS" "$total_mem" &
     local py_pid=$!
 
     # Spinner while fetch runs
