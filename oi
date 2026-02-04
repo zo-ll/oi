@@ -336,30 +336,18 @@ PYEOF
     return $?
 }
 
-# Load models catalog with fallback chain:
-# 1. Valid cache -> use it
-# 2. Fetch fresh from HF -> use it
-# 3. Stale cache -> use it
-# 4. Static lib/models.json -> use it
-# 5. Empty {"models": []}
+# Load models catalog:
+# - Default: use curated static list from lib/models.json
+# - If HF cache exists (from -r refresh), use that instead
+# - Fallback: empty list
 load_models() {
+    # If user has previously fetched from HF with -r, use that cache
     if is_cache_valid; then
         cat "$CACHE_FILE"
         return
     fi
 
-    if fetch_hf_models && [ -f "$CACHE_FILE" ]; then
-        cat "$CACHE_FILE"
-        return
-    fi
-
-    # Stale cache is better than nothing
-    if [ -f "$CACHE_FILE" ]; then
-        echo -e "${YELLOW}Using stale cache (network unavailable)${NC}" >&2
-        cat "$CACHE_FILE"
-        return
-    fi
-
+    # Default: use the curated static model list
     if [ -f "${LIB_DIR}/models.json" ]; then
         cat "${LIB_DIR}/models.json"
         return
@@ -1010,6 +998,7 @@ main() {
                 ;;
             -r|--refresh)
                 rm -f "$CACHE_FILE"
+                fetch_hf_models
                 shift
                 ;;
             -l|--list)
