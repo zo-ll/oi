@@ -223,3 +223,10 @@ Alternatively, for a more explicit UX:
 3. Build with `go build -o lib/fetch_hf_models lib/fetch_hf_models.go`.
 4. Update `fetch_hf_models()` in `oi` to call `"${LIB_DIR}/fetch_hf_models" "$CACHE_FILE" "$HF_ORGS" "$total_mem"`.
 5. Keep the Python version as a fallback or remove it once the Go binary is validated.
+
+---
+
+## 7. Add chat memory / conversation persistence across sessions
+
+**Current behavior:** Each chat session starts fresh with no history.
+**Desired behavior:** Conversation history is saved and can be resumed across sessions.
