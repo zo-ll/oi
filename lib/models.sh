@@ -39,19 +39,181 @@ fetch_hf_models() {
 }
 
 load_models() {
-    # If user has previously fetched from HF with -r, use that cache
+    local models_file="${LIB_DIR}/models.json"
+    local output=""
+    
+    # Load base models (from cache or static file)
     if is_cache_valid; then
-        cat "$CACHE_FILE"
+        output=$(cat "$CACHE_FILE")
+    elif [ -f "$models_file" ]; then
+        output=$(cat "$models_file")
+    else
+        echo '{"models": [], "custom_models": []}'
         return
     fi
-
-    # Default: use the curated static model list
-    if [ -f "${LIB_DIR}/models.json" ]; then
-        cat "${LIB_DIR}/models.json"
-        return
+    
+    # Merge custom models into the output
+    if [ -f "$models_file" ]; then
+        local custom_models=$(cat "$models_file" | grep -A 1000 '"custom_models"' | sed 's/.*\[//' | sed 's/\].*//' | grep -v '^$')
+        if [ -n "$custom_models" ]; then
+            # Replace empty custom_models array in output with actual custom models
+            output=$(echo "$output" | sed "s/\"custom_models\": \[\]/\"custom_models\": [$custom_models]/")
+        fi
     fi
+    
+    echo "$output"
+}
 
-    echo '{"models": []}'
+register_local_model() {
+    local model_path="$1"
+    local model_name="$2"
+    local model_desc="$3"
+    local model_tags="$4"
+    
+    # Validate file exists
+    if [ ! -f "$model_path" ]; then
+        echo -e "${RED}Error: Model file not found: $model_path${NC}"
+        return 1
+    fi
+    
+    # Check if it's a .gguf file
+    if [[ "$model_path" != *.gguf ]]; then
+        echo -e "${RED}Error: File must be a .gguf model file${NC}"
+        return 1
+    fi
+    
+    # Copy to models directory if not already there
+    local model_filename=$(basename "$model_path")
+    local target_path="${MODELS_DIR}/${model_filename}"
+    
+    if [ "$model_path" != "$target_path" ]; then
+        if [ ! -f "$target_path" ]; then
+            echo -e "${YELLOW}Copying model to ${MODELS_DIR}...${NC}"
+            cp "$model_path" "$target_path" || {
+                echo -e "${RED}Error: Failed to copy model file${NC}"
+                return 1
+            }
+        fi
+    fi
+    
+    # Calculate VRAM estimate from file size (1GB file ≈ 1GB VRAM needed)
+    local file_size=$(stat -c%s "$target_path" 2>/dev/null || stat -f%z "$target_path" 2>/dev/null)
+    local min_vram=$(echo "scale=1; $file_size / 1073741824 + 0.5" | bc)
+    
+    # Generate unique ID from filename
+    local model_id=$(echo "$model_filename" | sed 's/\.gguf$//' | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+    
+    # Use filename as name if not provided
+    if [ -z "$model_name" ]; then
+        model_name=$(echo "$model_filename" | sed 's/\.gguf$//')
+    fi
+    
+    # Use default description if not provided
+    if [ -z "$model_desc" ]; then
+        model_desc="Custom local model"
+    fi
+    
+    # Parse tags
+    local tags_array="[]"
+    if [ -n "$model_tags" ]; then
+        tags_array="[\"custom\""
+        IFS=',' read -ra TAGS <<< "$model_tags"
+        for tag in "${TAGS[@]}"; do
+            tag=$(echo "$tag" | xargs) # trim whitespace
+            tags_array="$tags_array, \"$tag\""
+        done
+        tags_array="$tags_array]"
+    else
+        tags_array='["custom", "local"]'
+    fi
+    
+    # Create custom model entry
+    local custom_entry="    {\n      \"id\": \"$model_id\",\n      \"name\": \"$model_name\",\n      \"filename_template\": \"$model_filename\",\n      \"min_vram_gb\": $min_vram,\n      \"description\": \"$model_desc\",\n      \"tags\": $tags_array\n    }"
+    
+    # Add to models.json
+    local models_file="${LIB_DIR}/models.json"
+    if [ -f "$models_file" ]; then
+        # Check if model ID already exists in custom_models
+        if grep -q "\"id\": \"$model_id\"" "$models_file"; then
+            echo -e "${YELLOW}Warning: A model with ID '$model_id' already exists${NC}"
+            return 1
+        fi
+        
+        # Insert new custom model before the closing bracket of custom_models array
+        # This is a bit hacky but works for JSON manipulation in bash
+        local temp_file="${models_file}.tmp"
+        awk -v entry="$custom_entry" '
+            /"custom_models": \[\]/ {
+                gsub(/\[\]/, "[\n" entry "\n  ]")
+                print
+                next
+            }
+            /"custom_models": \[/ {
+                print
+                getline
+                if (/\]/) {
+                    print entry ","
+                    print "  ]"
+                } else {
+                    print entry ","
+                    print
+                }
+                next
+            }
+            { print }
+        ' "$models_file" > "$temp_file" && mv "$temp_file" "$models_file"
+        
+        echo -e "${GREEN}✓ Registered custom model: $model_name${NC}"
+        echo -e "  ID: $model_id"
+        echo -e "  VRAM: ${min_vram}GB"
+        echo -e "  Path: $target_path"
+    else
+        echo -e "${RED}Error: models.json not found${NC}"
+        return 1
+    fi
+}
+
+remove_custom_model() {
+    local model_id="$1"
+    local models_file="${LIB_DIR}/models.json"
+    
+    if [ ! -f "$models_file" ]; then
+        echo -e "${RED}Error: models.json not found${NC}"
+        return 1
+    fi
+    
+    # Check if model exists in custom_models
+    if ! grep -q "\"id\": \"$model_id\"" "$models_file"; then
+        echo -e "${RED}Error: Custom model '$model_id' not found${NC}"
+        return 1
+    fi
+    
+    # Get the filename to optionally remove the file too
+    local filename=$(grep -A 5 "\"id\": \"$model_id\"" "$models_file" | grep "\"filename_template\":" | cut -d'"' -f4)
+    
+    # Remove the model entry from custom_models array
+    local temp_file="${models_file}.tmp"
+    awk -v id="$model_id" '
+        /"id":/ && $0 ~ id {
+            # Skip this line and the next 5 lines (the full model entry)
+            for (i=0; i<6; i++) getline
+            # If next line starts with }, skip it too
+            if (/^[[:space:]]*}/) getline
+            next
+        }
+        { print }
+    ' "$models_file" > "$temp_file" && mv "$temp_file" "$models_file"
+    
+    echo -e "${GREEN}✓ Removed custom model: $model_id${NC}"
+    
+    # Ask if user wants to delete the file too
+    if [ -n "$filename" ] && [ -f "${MODELS_DIR}/${filename}" ]; then
+        read -p "Delete model file ${filename}? [y/N]: " delete_file
+        if [[ "$delete_file" =~ ^[Yy]$ ]]; then
+            rm "${MODELS_DIR}/${filename}"
+            echo -e "${GREEN}✓ Deleted model file${NC}"
+        fi
+    fi
 }
 
 get_model_info() {
@@ -60,7 +222,14 @@ get_model_info() {
 
     # Extract model entry from JSON - escape model_id for safety
     local escaped_id=$(echo "$model_id" | sed 's/[[\.*^$()+?{|]/\\&/g')
-    echo "$models" | grep -A 10 "\"id\": \"${escaped_id}\"" | head -10
+    local result=$(echo "$models" | grep -A 10 "\"id\": \"${escaped_id}\"" | head -10)
+    
+    # If not found in regular models, search in custom_models
+    if [ -z "$result" ]; then
+        result=$(echo "$models" | grep -A 15 "\"custom_models\"" | grep -A 10 "\"id\": \"${escaped_id}\"" | head -10)
+    fi
+    
+    echo "$result"
 }
 
 is_model_installed() {

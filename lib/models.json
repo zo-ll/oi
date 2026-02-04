@@ -64,6 +64,7 @@
       "tags": ["math", "specialist"]
     }
   ],
+  "custom_models": [],
   "quantizations": {
     "Q2_K": {"description": "Smallest, fastest, lowest quality"},
     "Q3_K_S": {"description": "Small and fast, decent quality"},

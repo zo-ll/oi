@@ -48,6 +48,11 @@ OPTIONS:
     -h, --hardware          Show system hardware information
     -c, --context <size>    Set context size (default: ${DEFAULT_CONTEXT})
     -t, --threads <num>     Set number of CPU threads
+    --add-local <path>      Register a local GGUF model
+    --name <name>           Name for custom model (with --add-local)
+    --desc <desc>           Description for custom model (with --add-local)
+    --tags <tags>           Comma-separated tags (with --add-local)
+    --remove-custom <id>    Remove a custom model from registry
     --help                  Show this help message
 
 EXAMPLES:
@@ -58,6 +63,8 @@ EXAMPLES:
     oi -r -l                # Force refresh catalog from HuggingFace
     oi -x qwen3-8b-q4_k_m.gguf  # Remove an installed model
     oi -d microsoft/Phi-3-mini-4k-instruct-gguf/Phi-3-mini-4k-instruct.Q4_K_M.gguf
+    oi --add-local /path/to/model.gguf --name "My Model" --desc "Custom model"
+    oi --remove-custom my-model-id
 
 QUANTIZATION OPTIONS:
     Q2_K    - Smallest, fastest, lowest quality
@@ -168,13 +175,24 @@ draw_full_menu() {
         if is_model_in_array "$id" "${installed[@]}"; then
             installed_marker=" ${GREEN}✓${NC}"
         fi
+        
+        # Check if it's a custom model (from custom_models array)
+        local custom_marker=""
+        if echo "$models" | grep -A 1000 '"custom_models"' | grep -q "\"id\": \"$id\""; then
+            custom_marker=" ${CYAN}*${NC}"
+        fi
 
-        printf >&2 "  %-3s %-${name_max}s %s%s\n" "$i)" "$display_name" "$status_str" "$installed_marker"
+        printf >&2 "  %-3s %-${name_max}s %s%s%s\n" "$i)" "$display_name" "$status_str" "$installed_marker" "$custom_marker"
         ((i++))
     done
 
     echo -e "${BLUE}$(make_divider "$w")${NC}" >&2
     echo -e "  ${CYAN}L${NC})ist  ${CYAN}D${NC})elete  ${CYAN}H${NC})ardware  ${CYAN}Q${NC})uit" >&2
+    
+    # Show legend for custom models
+    if echo "$models" | grep -q '"custom_models": \[' && ! echo "$models" | grep -q '"custom_models": \[\]'; then
+        echo -e "  ${CYAN}*${NC} Custom model" >&2
+    fi
 }
 
 interactive_select() {

@@ -46,6 +46,11 @@ main() {
     local threads="$(nproc)"
     local list_mode=""
     local download_path=""
+    local add_local_path=""
+    local add_local_name=""
+    local add_local_desc=""
+    local add_local_tags=""
+    local remove_custom=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -63,6 +68,26 @@ main() {
                 ;;
             -t|--threads)
                 threads="$2"
+                shift 2
+                ;;
+            --add-local)
+                add_local_path="$2"
+                shift 2
+                ;;
+            --name)
+                add_local_name="$2"
+                shift 2
+                ;;
+            --desc)
+                add_local_desc="$2"
+                shift 2
+                ;;
+            --tags)
+                add_local_tags="$2"
+                shift 2
+                ;;
+            --remove-custom)
+                remove_custom="$2"
                 shift 2
                 ;;
             -r|--refresh)
@@ -117,6 +142,18 @@ main() {
     elif [ "$list_mode" = "installed" ]; then
         list_installed_models
         exit 0
+    fi
+
+    # Handle custom model registration
+    if [ -n "$add_local_path" ]; then
+        register_local_model "$add_local_path" "$add_local_name" "$add_local_desc" "$add_local_tags"
+        exit $?
+    fi
+
+    # Handle custom model removal from registry
+    if [ -n "$remove_custom" ]; then
+        remove_custom_model "$remove_custom"
+        exit $?
     fi
 
     # Handle model removal
