@@ -3,16 +3,15 @@
 check_llama_cpp() {
     if [ ! -d "$LLAMA_CPP_DIR" ]; then
         echo -e "${RED}Error: llama.cpp not found at ${LLAMA_CPP_DIR}${NC}"
-        echo "Please clone and build llama.cpp first:"
-        echo "  git clone https://github.com/ggml-org/llama.cpp.git ~/llama.cpp"
-        echo "  cd ~/llama.cpp && cmake -B build && cmake --build build"
+        echo "Please run the install script:"
+        echo "  cd ~/oi && bash install.sh"
         exit 1
     fi
 
     if [ ! -f "$LLAMA_CLI" ]; then
         echo -e "${RED}Error: llama-cli not found at ${LLAMA_CLI}${NC}"
-        echo "Please build llama.cpp:"
-        echo "  cd ~/llama.cpp && cmake -B build && cmake --build build"
+        echo "Please run the install script:"
+        echo "  cd ~/oi && bash install.sh"
         exit 1
     fi
 

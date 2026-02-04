@@ -1,6 +1,6 @@
 # TODO — oi script improvements
 
-Each task targets `/home/az/local_script/oi` and is self-contained.
+Each task targets `~/.local/share/oi/oi` and is self-contained.
 
 ---
 

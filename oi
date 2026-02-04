@@ -3,15 +3,16 @@
 # oi - One-command LLM chat interface for llama.cpp
 # Interactive model selection and chat launcher
 #
+VERSION="1.0.0"
 
 # Don't use set -e as it causes issues with the interactive menu loop
 
-# Resolve through symlinks so installed symlink finds the real lib/
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# Use absolute path to installed location
+SCRIPT_DIR="${HOME}/.local/share/oi"
 LIB_DIR="${SCRIPT_DIR}/lib"
 
 # Configuration
-LLAMA_CPP_DIR="${HOME}/llama.cpp"
+LLAMA_CPP_DIR="${HOME}/.local/share/oi/llama.cpp"
 MODELS_DIR="${LLAMA_CPP_DIR}/models"
 LLAMA_CLI="${LLAMA_CPP_DIR}/build/bin/llama-cli"
 DEFAULT_QUANT="Q4_K_M"
@@ -88,6 +89,10 @@ main() {
             -h|--hardware)
                 check_llama_cpp
                 show_hardware
+                exit 0
+                ;;
+            --version)
+                echo "oi version $VERSION"
                 exit 0
                 ;;
             --help)

@@ -14,51 +14,66 @@
 ## Requirements
 
 - Linux system with bash
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) built from source
-- Python 3 (for HuggingFace catalog fetching)
-- curl (for downloading models)
-- Optional: NVIDIA GPU with CUDA for faster inference
+- Build tools: cmake, gcc
+- Git, Python 3, curl
+- Optional: NVIDIA GPU with CUDA toolkit for GPU acceleration
+
+Note: llama.cpp is downloaded and compiled automatically during installation.
 
 ## Installation
 
-### 1. Install llama.cpp
+### Quick Install
 
+1. Clone the repository:
+   ```bash
+   git clone <repository-url> ~/oi
+   ```
+
+2. Run the install script:
+   ```bash
+   cd ~/oi
+   bash install.sh
+   ```
+
+   The install script will automatically:
+   - Check for required dependencies (cmake, gcc, git, python3, curl)
+   - Detect CUDA support and build llama.cpp with GPU acceleration if available
+   - Download and compile llama.cpp in `~/.local/share/oi/llama.cpp`
+   - Install oi to `~/.local/share/oi/`
+   - Create the `oi` command at `~/.local/bin/oi`
+
+3. Ensure `~/.local/bin` is in your PATH:
+   ```bash
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+   source ~/.bashrc
+   ```
+
+4. Verify installation:
+   ```bash
+   which oi
+   oi --help
+   ```
+
+### Uninstall
+
+To remove oi completely:
 ```bash
-# Clone the repository
-git clone https://github.com/ggml-org/llama.cpp.git ~/llama.cpp
-
-# Build with CUDA support (if you have an NVIDIA GPU)
-cd ~/llama.cpp
-cmake -B build -DGGML_CUDA=ON
-cmake --build build --config Release
-
-# Or build for CPU only
-cmake -B build
-cmake --build build --config Release
+cd ~/oi
+bash uninstall.sh
 ```
 
-### 2. Install oi
+You will be prompted whether to preserve your downloaded models in `~/.local/share/oi/llama.cpp/models/`.
 
+### Update Installation
+
+To update oi to the latest version:
 ```bash
-git clone <repository-url> ~/local_script
-cd ~/local_script
+cd ~/oi
+git pull
 bash install.sh
 ```
 
-This creates a symlink at `~/.local/bin/oi` pointing to the repository. Make sure `~/.local/bin` is in your `PATH`:
-
-```bash
-# Add to your ~/.bashrc or ~/.zshrc
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-You can verify the installation with:
-
-```bash
-which oi
-oi --help
-```
+Your downloaded models will be preserved during the update.
 
 ## Quick Start
 
@@ -117,6 +132,7 @@ OPTIONS:
     -h, --hardware          Show system hardware information
     -c, --context <size>    Set context size (default: 4096)
     -t, --threads <num>     Set number of CPU threads
+    --version               Show version information
     --help                  Show help message
 ```
 
@@ -133,6 +149,7 @@ oi -r -l                        # Refresh catalog from HuggingFace
 oi -x model.gguf                # Remove an installed model
 oi -m qwen2.5-7b -c 8192 -t 8  # Custom context size and threads
 oi -d microsoft/Phi-3-mini-4k-instruct-gguf/Phi-3-mini-4k-instruct.Q4_K_M.gguf
+oi --version                   # Show oi version
 ```
 
 ## Quantization Options
@@ -153,34 +170,54 @@ Quantization affects model size, speed, and quality:
 ## Project Structure
 
 ```
-local_script/
-├── oi                        Entry point (globals, source modules, main)
-├── install.sh                Symlinks oi -> ~/.local/bin/oi
-├── README.md
-└── lib/
-    ├── ui.sh                 Terminal helpers + interactive menu
-    ├── models.sh             Catalog loading, filtering, listing
-    ├── download.sh           Download and remove models
-    ├── chat.sh               Launch llama-cli chat
-    ├── hardware.sh           Hardware detection and display
-    ├── hardware_detect.sh    Low-level hardware probe
-    ├── fetch_hf_models.py    HuggingFace API client
-    ├── models.json           Curated model catalog
-    └── cache/                HuggingFace response cache
+~/.local/share/oi/
+├── oi                        Main entry point
+├── install.sh                Installation script
+├── uninstall.sh              Uninstallation script
+├── README.md                 This file
+├── TODO.md                   Development tasks
+├── lib/
+│   ├── ui.sh                 Terminal helpers + interactive menu
+│   ├── models.sh             Catalog loading, filtering, listing
+│   ├── download.sh           Download and remove models
+│   ├── chat.sh               Launch llama-cli chat
+│   ├── hardware.sh           Hardware detection and display
+│   ├── hardware_detect.sh    Low-level hardware probe
+│   ├── fetch_hf_models.py    HuggingFace API client
+│   ├── models.json           Curated model catalog
+│   └── cache/                HuggingFace response cache
+└── llama.cpp/
+    ├── build/                Compiled llama.cpp
+    └── models/               Downloaded GGUF models (auto-created)
 ```
 
-Models are stored in `~/llama.cpp/models/`.
+The `oi` command is a wrapper at `~/.local/bin/oi` that calls the main script in `~/.local/share/oi/oi`.
+
+Models are stored in `~/.local/share/oi/llama.cpp/models/`.
 
 ## Troubleshooting
 
-### "llama.cpp not found"
-Make sure you've cloned llama.cpp to `~/llama.cpp` and built it successfully.
-
-### "llama-cli not found"
-The build might have failed or llama-cli is in a different location. Check:
+### "oi command not found"
+Make sure `~/.local/bin` is in your PATH:
 ```bash
-ls ~/llama.cpp/build/bin/
+echo $PATH | grep "$HOME/.local/bin"
 ```
+If not present, add it to your shell config:
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### "llama.cpp not found" or "llama-cli not found"
+The installation may have failed. Re-run the install script:
+```bash
+cd ~/oi
+bash install.sh
+```
+
+Check the build log for errors. If llama.cpp failed to compile, ensure:
+- cmake and gcc are installed: `cmake --version`, `gcc --version`
+- Sufficient disk space: `df -h`
 
 ### Download fails
 - Check your internet connection
@@ -196,8 +233,11 @@ ls ~/llama.cpp/build/bin/
 - Reduce context size: `oi -m model-name -c 2048`
 
 ### Slow performance
-- If you have a GPU, make sure llama.cpp was built with CUDA: `cmake -B build -DGGML_CUDA=ON`
-- Check GPU is being used: `nvidia-smi` during chat
+- If you have a GPU, ensure the install script detected CUDA. Check:
+  ```bash
+  oi -h  # Look for CUDA: yes
+  ```
+- Verify GPU is being used during chat: `nvidia-smi`
 - Use a smaller model or lower quantization
 
 ## Customization
