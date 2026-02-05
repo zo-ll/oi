@@ -11,44 +11,60 @@ import urllib.error
 HF_API = "https://huggingface.co/api/models"
 
 
-def search_models(keyword, mem_gb):
-    """Search HF for GGUF models, falling back to broader search if needed."""
-    # Try gguf-specific search first, then plain keyword as fallback
-    for query in [f"{keyword}+gguf", keyword]:
-        url = (
-            f"{HF_API}?search={query}"
-            f"&sort=downloads&limit=20"
-        )
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "oi/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
-        except (urllib.error.URLError, OSError) as e:
-            print(json.dumps({"error": str(e)}))
-            sys.exit(1)
+def search_models(keyword, mem_gb, format_filter=None):
+    """Search HF for models with optional format filtering."""
+    # Build base URL with search parameters
+    params = {
+        "search": keyword,
+        "sort": "downloads",
+        "direction": "-1",
+        "limit": "20",
+    }
 
-        if data:
-            break
+    # Add format filter if specified (use HuggingFace API filter parameter)
+    if format_filter:
+        params["filter"] = format_filter
+
+    # Build URL with parameters
+    url = HF_API + "?" + "&".join(f"{k}={v}" for k, v in params.items())
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "oi/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError) as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
 
     results = []
     for model in data:
         model_id = model.get("modelId", "")
         downloads = model.get("downloads", 0)
-
+        
+        # Extract format from tags
+        tags = model.get("tags", [])
+        model_format = None
+        format_priority = ["gguf", "safetensors", "pytorch", "tensorflow", "onnx", "jax", "coreml", "openvino"]
+        for fmt in format_priority:
+            if fmt in tags:
+                model_format = fmt
+                break
+        
         # Try to estimate size from model tags or name
         est_gb = _estimate_size_from_id(model_id)
-
+        
         # Filter: skip if estimated size exceeds available memory (with margin)
         if est_gb and mem_gb and est_gb > mem_gb * 1.1:
             continue
-
+        
         results.append({
             "repo": model_id,
             "name": model_id.split("/")[-1] if "/" in model_id else model_id,
             "downloads": downloads,
             "est_size_gb": est_gb,
+            "format": model_format or "unknown",
         })
-
+    
     print(json.dumps(results))
 
 
@@ -228,14 +244,15 @@ def list_repo_files(repo):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Search HuggingFace for GGUF models")
+    parser = argparse.ArgumentParser(description="Search HuggingFace for models")
     parser.add_argument("--search", help="Search keyword")
     parser.add_argument("--mem", type=float, default=0, help="Available memory in GB")
-    parser.add_argument("--files", help="List GGUF files in a repo")
+    parser.add_argument("--format", help="Filter by model format (gguf, pytorch, safetensors, tensorflow, onnx, or leave empty for all)")
+    parser.add_argument("--files", help="List model files in a repo")
     args = parser.parse_args()
-
+    
     if args.search:
-        search_models(args.search, args.mem)
+        search_models(args.search, args.mem, args.format)
     elif args.files:
         list_repo_files(args.files)
     else:
