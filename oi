@@ -17,10 +17,6 @@ MODELS_DIR="${LLAMA_CPP_DIR}/models"
 LLAMA_CLI="${LLAMA_CPP_DIR}/build/bin/llama-cli"
 DEFAULT_QUANT="Q4_K_M"
 DEFAULT_CONTEXT=4096
-CACHE_DIR="${LIB_DIR}/cache"
-CACHE_FILE="${CACHE_DIR}/hf_models.json"
-CACHE_TTL=86400  # 24 hours
-HF_ORGS="Qwen meta-llama microsoft google mistralai bartowski unsloth MaziyarPanahi"
 
 # Colors for output using ANSI escape sequences
 RED=$'\033[0;31m'
@@ -41,8 +37,6 @@ source "${LIB_DIR}/manual_add.sh"
 # Main function
 main() {
     # Parse arguments
-    local model_id=""
-    local quant="$DEFAULT_QUANT"
     local context="$DEFAULT_CONTEXT"
     local threads="$(nproc)"
     local list_mode=""
@@ -50,14 +44,6 @@ main() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -m|--model)
-                model_id="$2"
-                shift 2
-                ;;
-            -q|--quant)
-                quant="$2"
-                shift 2
-                ;;
             -c|--context)
                 context="$2"
                 shift 2
@@ -66,16 +52,7 @@ main() {
                 threads="$2"
                 shift 2
                 ;;
-            -r|--refresh)
-                rm -f "$CACHE_FILE"
-                fetch_hf_models
-                shift
-                ;;
             -l|--list)
-                list_mode="all"
-                shift
-                ;;
-            -i|--installed)
                 list_mode="installed"
                 shift
                 ;;
@@ -112,10 +89,7 @@ main() {
     check_llama_cpp
 
     # Handle list modes
-    if [ "$list_mode" = "all" ]; then
-        list_models
-        exit 0
-    elif [ "$list_mode" = "installed" ]; then
+    if [ "$list_mode" = "installed" ]; then
         list_installed_models
         exit 0
     fi
@@ -132,27 +106,21 @@ main() {
         exit $?
     fi
 
-    # Main flow
-    if [ -n "$model_id" ]; then
-        # Direct model selection
-        launch_chat "$model_id" "$quant" "$context" "$threads"
-    else
-        # Interactive mode
-        while true; do
-            selected=$(interactive_select_installed)
-            local select_status=$?
+    # Interactive mode
+    while true; do
+        selected=$(interactive_select_installed)
+        local select_status=$?
 
-            if [ $select_status -eq 0 ]; then
-                # User selected a model - selected is a filepath
-                launch_chat_file "$selected" "$context" "$threads"
-                echo -e "\n${GRAY}Returning to model selection...${NC}\n"
-            elif [ $select_status -eq 2 ]; then
-                # User selected Q to quit
-                exit 0
-            fi
-            # Otherwise (status 1), loop continues after add/delete
-        done
-    fi
+        if [ $select_status -eq 0 ]; then
+            # User selected a model - selected is a filepath
+            launch_chat_file "$selected" "$context" "$threads"
+            echo -e "\n${GRAY}Returning to model selection...${NC}\n"
+        elif [ $select_status -eq 2 ]; then
+            # User selected Q to quit
+            exit 0
+        fi
+        # Otherwise (status 1), loop continues after add/delete
+    done
 }
 
 # Run main
