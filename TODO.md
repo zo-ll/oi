@@ -655,7 +655,34 @@ Alternatively, for a more explicit UX:
 
 ---
 
-## 18. Add support for additional runtimes
+## 18. Add format validation and better error messages for non-GGUF models
+
+**File:** `lib/download.sh`, function `download_model()`
+
+**Current behavior:** Users can download models in any format (e.g., `.nemo`, `.pt`, `.bin`) from HuggingFace. After download, these models don't appear in the installed models list because `list_installed_models()` only scans for `.gguf` files. This causes confusion and wasted bandwidth.
+
+**Desired behavior:** Validate model format before download and prevent incompatible formats. Clear error messages explain what formats are supported and what to do instead.
+
+**Steps:**
+1. Add format validation in `download_model()` before downloading:
+   ```bash
+   local extension=$(basename "$filename" | rev | cut -d. -f1 | rev)
+   local supported_formats="gguf ggml"
+   if [[ ! " $supported_formats " =~ " $extension " ]]; then
+       echo -e "${RED}Error: Unsupported model format '.${extension}'${NC}" >&2
+       echo -e "${YELLOW}This tool currently only supports GGUF format models for llama.cpp.${NC}" >&2
+       echo -e "${YELLOW}Please download a GGUF variant of this model instead.${NC}" >&2
+       return 1
+   fi
+   ```
+2. Update HuggingFace search to filter for GGUF files only in available file listings
+3. Add format information to the model selection UI (show file extensions)
+4. Document supported formats in README and in the error message
+5. Consider adding a `--allow-any-format` flag for advanced users who know what they're doing
+
+---
+
+## 19. Add support for additional runtimes
 
 **Status:** Runtime selection UI implemented, inference support pending
 
