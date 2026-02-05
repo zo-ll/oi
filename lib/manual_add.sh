@@ -20,6 +20,30 @@ _float_ge() {
     python3 -c "import sys; sys.exit(0 if float('$1') >= float('$2') else 1)"
 }
 
+select_runtime() {
+    echo "" >&2
+    echo -e "${CYAN}══ Step 1/4: Select Runtime ══${NC}" >&2
+    echo "" >&2
+    echo -e "Select runtime:" >&2
+    echo -e "  ${CYAN}1${NC}) GGUF (for LLM text generation, Whisper models)" >&2
+    echo -e "  ${CYAN}2${NC}) PyTorch (vision, audio, Parakeet, general ML)" >&2
+    echo -e "  ${CYAN}3${NC}) Safetensors (safe alternative to PyTorch)" >&2
+    echo -e "  ${CYAN}4${NC}) TensorFlow (Google's ML framework)" >&2
+    echo -e "  ${CYAN}5${NC}) ONNX (cross-platform inference)" >&2
+    echo -e "  ${CYAN}6${NC}) All formats (no filter)" >&2
+    echo "" >&2
+    read -p "Runtime (1-6) [default: 1]: " runtime_choice
+    
+    case "$runtime_choice" in
+        2) echo "pytorch" ;;
+        3) echo "safetensors" ;;
+        4) echo "tensorflow" ;;
+        5) echo "onnx" ;;
+        6) echo "" ;;
+        ""|1|*) echo "gguf" ;;
+    esac
+}
+
 add_model_flow() {
     echo "" >&2
     echo -e "${CYAN}══ Add Model ══${NC}" >&2
@@ -44,20 +68,29 @@ add_model_flow() {
 search_hf_interactive() {
     _init_hw_info
     local mem_gb="$_HW_TOTAL_GB"
-
+    
+    # Get runtime selection
+    local format_filter
+    format_filter=$(select_runtime)
+    
     while true; do
         echo "" >&2
-        echo -e "${CYAN}══ Step 1/3: Search HuggingFace ══${NC}" >&2
+        echo -e "${CYAN}══ Step 2/4: Search HuggingFace ══${NC}" >&2
         echo "" >&2
-        read -p "Search keyword (e.g. llama, qwen, phi): " keyword
+        read -p "Search keyword (e.g. llama, qwen, phi, parakeet, whisper): " keyword
         if [ -z "$keyword" ]; then
             echo -e "${RED}No keyword entered${NC}" >&2
             return 1
         fi
-
-        echo -e "${YELLOW}Searching HuggingFace for '${keyword}'...${NC}" >&2
+        
+        echo -e "${YELLOW}Searching HuggingFace for '${keyword}'${format_filter:+ ($format_filter)}...${NC}" >&2
         local results
-        results=$(python3 "${LIB_DIR}/search_hf.py" --search "$keyword" --mem "${mem_gb:-0}")
+        # Pass format filter to search
+        if [ -n "$format_filter" ]; then
+            results=$(python3 "${LIB_DIR}/search_hf.py" --search "$keyword" --mem "${mem_gb:-0}" --format "$format_filter")
+        else
+            results=$(python3 "${LIB_DIR}/search_hf.py" --search "$keyword" --mem "${mem_gb:-0}")
+        fi
 
         # Check for error
         local err
@@ -66,13 +99,13 @@ search_hf_interactive() {
             echo -e "${RED}Search failed: ${err}${NC}" >&2
             return 1
         fi
-
+        
         # Parse results
         local count
         count=$(echo "$results" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
-
+        
         if [ "$count" = "0" ] || [ -z "$count" ]; then
-            echo -e "${YELLOW}No results found for '${keyword}'${NC}" >&2
+            echo -e "${YELLOW}No results found for '${keyword}'${format_filter:+ ($format_filter)}${NC}" >&2
             echo "" >&2
             read -p "Try another search? [Y/n]: " retry
             if [[ "$retry" =~ ^[Nn]$ ]]; then
@@ -80,21 +113,22 @@ search_hf_interactive() {
             fi
             continue
         fi
-
+        
         echo "" >&2
-        echo -e "${CYAN}══ Step 2/3: Pick a Repository ══${NC}" >&2
+        echo -e "${CYAN}══ Step 3/4: Pick a Repository ══${NC}" >&2
         echo "" >&2
         echo -e "${BLUE}Results for '${keyword}' (${count} found):${NC}" >&2
         echo -e "${BLUE}$(make_divider "$(get_term_width)")${NC}" >&2
-
+        
         local repos=()
         local i
         for (( i=0; i<count; i++ )); do
-            local repo name downloads est est_raw
+            local repo name downloads est est_raw format
             repo=$(echo "$results" | python3 -c "import sys,json; print(json.load(sys.stdin)[$i]['repo'])")
             name=$(echo "$results" | python3 -c "import sys,json; print(json.load(sys.stdin)[$i]['name'])")
             downloads=$(echo "$results" | python3 -c "import sys,json; print(json.load(sys.stdin)[$i]['downloads'])")
             est_raw=$(echo "$results" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]['est_size_gb']; print(e if e else '')")
+            format=$(echo "$results" | python3 -c "import sys,json; f=json.load(sys.stdin)[$i]['format']; print(f if f else 'unknown')" 2>/dev/null || echo "unknown")
             repos+=("$repo")
 
             # Color-code by hardware fit
@@ -116,8 +150,10 @@ search_hf_interactive() {
                 hw_tag=""
                 line_color=""
             fi
-
-            printf >&2 "  ${line_color}%-3s${NC} %-42s %8s DL  %6s  %b\n" "$((i+1)))" "$(truncate_str "$repo" 42)" "$downloads" "$est" "$hw_tag"
+            
+            # Display format in brackets
+            local fmt_tag="[${format}]"
+            printf >&2 "  ${line_color}%-3s${NC} %-40s %8s DL  %6s  %-12s  %b\n" "$((i+1)))" "$(truncate_str "$repo" 40)" "$downloads" "$est" "$fmt_tag" "$hw_tag"
         done
 
         echo -e "  ${GREEN}GPU${NC}=fits VRAM  ${YELLOW}CPU${NC}=fits RAM  ${RED}too large${NC}=won't fit" >&2
@@ -161,9 +197,9 @@ direct_repo_entry() {
 pick_repo_file() {
     local repo="$1"
     _init_hw_info
-
+    
     echo "" >&2
-    echo -e "${CYAN}══ Step 3/3: Pick a Model File ══${NC}" >&2
+    echo -e "${CYAN}══ Step 4/4: Pick a Model File ══${NC}" >&2
     echo "" >&2
     echo -e "${YELLOW}Fetching files from ${repo}...${NC}" >&2
     local files
@@ -274,9 +310,10 @@ pick_repo_file() {
             rec_mark=" << recommended"
         fi
 
-        printf >&2 "  ${color}%-3s %-12s %-10s %8s%s  %-12s %s${NC}%s\n" \
-            "$((i+1)))" "$fmt" "$quant" "$size_display" "$shard_info" "$tag" \
-            "$(truncate_str "$fname" 24)" "$rec_mark"
+        # Show format in output
+        printf >&2 "  ${color}%-3s %-12s %-12s %8s%s  %-12s %s${NC}%s\n" \
+            "$((i+1)))" "$fmt" "${quant:--}" "$size_display" "$shard_info" "$tag" \
+            "$(truncate_str "$fname" 20)" "$rec_mark"
     done
 
     echo -e "  ${GREEN}GPU${NC}=fits VRAM  ${YELLOW}CPU${NC}=fits RAM  ${RED}too large${NC}=won't fit" >&2
