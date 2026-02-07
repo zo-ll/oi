@@ -64,3 +64,109 @@ show_hardware() {
     fi
     echo -e "${rec_color}$(truncate_str "$rec_text" "$w")${NC}"
 }
+
+update_llama_cpp() {
+    echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo -e "${CYAN}  Updating llama.cpp${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════${NC}"
+    echo ""
+
+    # Check if llama.cpp exists
+    if [ ! -d "$LLAMA_CPP_DIR" ]; then
+        echo -e "${RED}Error: llama.cpp not found at ${LLAMA_CPP_DIR}${NC}"
+        echo "Please run the install script first:"
+        echo "  cd ~/oi && bash install.sh"
+        return 1
+    fi
+
+    # Backup models directory
+    local models_backup="${HOME}/.oi_models_backup_$(date +%s)"
+    if [ -d "$MODELS_DIR" ] && [ "$(ls -A "$MODELS_DIR" 2>/dev/null)" ]; then
+        echo -e "${YELLOW}Backing up models to ${models_backup}...${NC}"
+        cp -r "$MODELS_DIR" "$models_backup"
+        echo -e "${GREEN}Models backed up${NC}"
+    fi
+
+    # Detect CUDA for rebuild configuration
+    local use_cuda="no"
+    if command -v nvidia-smi &> /dev/null && command -v nvcc &> /dev/null; then
+        local vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ')
+        if [ -n "$vram" ] && [ "$vram" != "[Insufficientpermissions]" ]; then
+            use_cuda="yes"
+            echo -e "${GREEN}CUDA detected - will build with GPU support${NC}"
+        fi
+    fi
+
+    if [ "$use_cuda" = "no" ]; then
+        echo -e "${YELLOW}No CUDA detected - will build CPU-only version${NC}"
+    fi
+
+    echo ""
+    echo -e "${CYAN}Removing old llama.cpp installation...${NC}"
+    rm -rf "$LLAMA_CPP_DIR"
+
+    echo -e "${CYAN}Cloning latest llama.cpp from GitHub...${NC}"
+    if ! git clone https://github.com/ggml-org/llama.cpp.git "$LLAMA_CPP_DIR"; then
+        echo -e "${RED}Error: Failed to clone llama.cpp${NC}"
+        # Restore models if backup exists
+        if [ -d "$models_backup" ]; then
+            echo -e "${YELLOW}Restoring models from backup...${NC}"
+            mkdir -p "$MODELS_DIR"
+            cp -r "$models_backup/"* "$MODELS_DIR/" 2>/dev/null || true
+            rm -rf "$models_backup"
+        fi
+        return 1
+    fi
+
+    echo ""
+    echo -e "${CYAN}Building llama.cpp...${NC}"
+    cd "$LLAMA_CPP_DIR"
+
+    if [ "$use_cuda" = "yes" ]; then
+        echo -e "${CYAN}Configuring with CUDA support...${NC}"
+        cmake -B build -DGGML_CUDA=ON
+    else
+        echo -e "${CYAN}Configuring for CPU-only...${NC}"
+        cmake -B build
+    fi
+
+    echo -e "${CYAN}Compiling... (this may take a few minutes)${NC}"
+    if ! cmake --build build --config Release -j$(nproc); then
+        echo -e "${RED}Error: Build failed${NC}"
+        # Restore models if backup exists
+        if [ -d "$models_backup" ]; then
+            echo -e "${YELLOW}Restoring models from backup...${NC}"
+            mkdir -p "$MODELS_DIR"
+            cp -r "$models_backup/"* "$MODELS_DIR/" 2>/dev/null || true
+        fi
+        return 1
+    fi
+
+    # Verify build
+    if [ ! -f "$LLAMA_CLI" ]; then
+        echo -e "${RED}Error: llama-cli not found after build${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}llama.cpp built successfully!${NC}"
+
+    # Restore models
+    if [ -d "$models_backup" ]; then
+        echo ""
+        echo -e "${CYAN}Restoring models...${NC}"
+        mkdir -p "$MODELS_DIR"
+        cp -r "$models_backup/"* "$MODELS_DIR/" 2>/dev/null || true
+        rm -rf "$models_backup"
+        echo -e "${GREEN}Models restored${NC}"
+    fi
+
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════${NC}"
+    echo -e "${GREEN}  llama.cpp update complete!${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════${NC}"
+    echo ""
+    echo "You can now run: oi"
+    echo ""
+
+    return 0
+}
