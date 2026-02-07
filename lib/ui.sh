@@ -231,18 +231,42 @@ add_model_flow() {
     echo -e "${CYAN}══ Add Model ══${NC}" >&2
     echo "" >&2
     echo -e "  ${CYAN}1${NC}) Search HuggingFace" >&2
+    echo -e "  ${CYAN}2${NC}) Enter repository directly" >&2
     echo -e "  ${CYAN}Q${NC}) Cancel" >&2
     echo "" >&2
     read -p "Choice: " add_choice
 
     case "$add_choice" in
         1) search_hf_interactive ;;
+        2) direct_repo_entry ;;
         [Qq]) return 1 ;;
         *)
             echo -e "${RED}Invalid choice${NC}" >&2
             return 1
             ;;
     esac
+}
+
+direct_repo_entry() {
+    echo "" >&2
+    echo -e "${CYAN}══ Enter Repository ══${NC}" >&2
+    echo "" >&2
+    echo -e "Enter HuggingFace repo (e.g. ${CYAN}bartowski/Llama-3.1-8B-GGUF${NC}):" >&2
+    read -p "Repo: " repo
+
+    if [ -z "$repo" ]; then
+        echo -e "${RED}No repo entered${NC}" >&2
+        return 1
+    fi
+
+    # Validate repo format (should contain /)
+    if [[ "$repo" != */* ]]; then
+        echo -e "${RED}Invalid repo format. Should be: username/repo-name${NC}" >&2
+        echo "Example: bartowski/Llama-3.1-8B-GGUF" >&2
+        return 1
+    fi
+
+    pick_repo_file "$repo"
 }
 
 search_hf_interactive() {
