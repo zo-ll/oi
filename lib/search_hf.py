@@ -11,7 +11,7 @@ import urllib.error
 HF_API = "https://huggingface.co/api/models"
 
 
-def search_models(keyword, mem_gb):
+def search_models(keyword, mem_gb, offset=0):
     """Search HF for GGUF models."""
     # Build base URL with search parameters
     params = {
@@ -21,6 +21,10 @@ def search_models(keyword, mem_gb):
         "direction": "-1",
         "limit": "20",
     }
+    
+    # Add offset for pagination
+    if offset > 0:
+        params["offset"] = str(offset)
 
     # Build URL with parameters
     url = HF_API + "?" + "&".join(f"{k}={v}" for k, v in params.items())
@@ -205,11 +209,12 @@ def main():
     parser = argparse.ArgumentParser(description="Search HuggingFace for GGUF models")
     parser.add_argument("--search", help="Search keyword")
     parser.add_argument("--mem", type=float, default=0, help="Available memory in GB")
+    parser.add_argument("--offset", type=int, default=0, help="Result offset for pagination")
     parser.add_argument("--files", help="List GGUF files in a repo")
     args = parser.parse_args()
-    
+
     if args.search:
-        search_models(args.search, args.mem)
+        search_models(args.search, args.mem, args.offset)
     elif args.files:
         list_repo_files(args.files)
     else:

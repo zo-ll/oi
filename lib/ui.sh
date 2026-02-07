@@ -272,20 +272,26 @@ direct_repo_entry() {
 search_hf_interactive() {
     _init_hw_info
     local mem_gb="$_HW_TOTAL_GB"
+    local offset=0
+    local keyword=""
     
     while true; do
-        echo "" >&2
-        echo -e "${CYAN}══ Step 1/3: Search HuggingFace ══${NC}" >&2
-        echo "" >&2
-        read -p "Search keyword (e.g. llama, qwen, phi): " keyword
+        # Get keyword if not set (first run or new search)
         if [ -z "$keyword" ]; then
-            echo -e "${RED}No keyword entered${NC}" >&2
-            return 1
+            echo "" >&2
+            echo -e "${CYAN}══ Step 1/3: Search HuggingFace ══${NC}" >&2
+            echo "" >&2
+            read -p "Search keyword (e.g. llama, qwen, phi): " keyword
+            if [ -z "$keyword" ]; then
+                echo -e "${RED}No keyword entered${NC}" >&2
+                return 1
+            fi
+            offset=0
         fi
         
-        echo -e "${YELLOW}Searching HuggingFace for '${keyword}' (GGUF)...${NC}" >&2
+        echo -e "${YELLOW}Searching HuggingFace for '${keyword}' (GGUF, offset ${offset})...${NC}" >&2
         local results
-        results=$(python3 "${LIB_DIR}/search_hf.py" --search "$keyword" --mem "${mem_gb:-0}")
+        results=$(python3 "${LIB_DIR}/search_hf.py" --search "$keyword" --mem "${mem_gb:-0}" --offset "$offset")
 
         # Check for error
         local err
@@ -300,19 +306,38 @@ search_hf_interactive() {
         count=$(echo "$results" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
         
         if [ "$count" = "0" ] || [ -z "$count" ]; then
-            echo -e "${YELLOW}No results found for '${keyword}'${NC}" >&2
-            echo "" >&2
-            read -p "Try another search? [Y/n]: " retry
-            if [[ "$retry" =~ ^[Nn]$ ]]; then
-                return 1
+            if [ "$offset" -gt 0 ]; then
+                echo -e "${YELLOW}No more results for '${keyword}'${NC}" >&2
+                echo "" >&2
+                read -p "Go to previous page? [Y/n]: " retry
+                if [[ "$retry" =~ ^[Nn]$ ]]; then
+                    keyword=""
+                    offset=0
+                    continue
+                fi
+                offset=$((offset - 20))
+                if [ "$offset" -lt 0 ]; then
+                    offset=0
+                fi
+                continue
+            else
+                echo -e "${YELLOW}No results found for '${keyword}'${NC}" >&2
+                echo "" >&2
+                read -p "Try another search? [Y/n]: " retry
+                if [[ "$retry" =~ ^[Nn]$ ]]; then
+                    return 1
+                fi
+                keyword=""
+                offset=0
+                continue
             fi
-            continue
         fi
         
         echo "" >&2
         echo -e "${CYAN}══ Step 2/3: Pick a Repository ══${NC}" >&2
         echo "" >&2
-        echo -e "${BLUE}Results for '${keyword}' (${count} found):${NC}" >&2
+        local page_num=$((offset / 20 + 1))
+        echo -e "${BLUE}Results for '${keyword}' page ${page_num} (${count} found):${NC}" >&2
         echo -e "${BLUE}$(make_divider "$(get_term_width)")${NC}" >&2
         
         local repos=()
@@ -351,23 +376,51 @@ search_hf_interactive() {
         echo -e "  ${GREEN}GPU${NC}=fits VRAM  ${YELLOW}CPU${NC}=fits RAM  ${RED}too large${NC}=won't fit" >&2
 
         echo "" >&2
-        read -p "Pick a repo (1-${count}, S to search again, Q to cancel): " pick
-
-        if [[ "$pick" =~ ^[Qq]$ ]]; then
-            return 1
+        local nav_options=""
+        if [ "$offset" -ge 20 ]; then
+            nav_options="${nav_options}[P]revious page  "
         fi
-
-        if [[ "$pick" =~ ^[Ss]$ ]]; then
-            continue
+        if [ "$count" -eq 20 ]; then
+            nav_options="${nav_options}[N]ext page  "
         fi
+        
+        read -p "Pick a repo (1-${count}, ${nav_options}[S]earch again, [Q]uit): " pick
 
-        if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 1 ] && [ "$pick" -le "$count" ]; then
-            local chosen_repo="${repos[$((pick - 1))]}"
-            pick_repo_file "$chosen_repo"
-            return $?
-        else
-            echo -e "${RED}Invalid selection${NC}" >&2
-        fi
+        case "$pick" in
+            [Qq])
+                return 1
+                ;;
+            [Ss])
+                keyword=""
+                offset=0
+                continue
+                ;;
+            [Nn])
+                if [ "$count" -eq 20 ]; then
+                    offset=$((offset + 20))
+                    continue
+                else
+                    echo -e "${YELLOW}No more pages available${NC}" >&2
+                fi
+                ;;
+            [Pp])
+                if [ "$offset" -ge 20 ]; then
+                    offset=$((offset - 20))
+                    continue
+                else
+                    echo -e "${YELLOW}Already on first page${NC}" >&2
+                fi
+                ;;
+            *)
+                if [[ "$pick" =~ ^[0-9]+$ ]] && [ "$pick" -ge 1 ] && [ "$pick" -le "$count" ]; then
+                    local chosen_repo="${repos[$((pick - 1))]}"
+                    pick_repo_file "$chosen_repo"
+                    return $?
+                else
+                    echo -e "${RED}Invalid selection${NC}" >&2
+                fi
+                ;;
+        esac
     done
 }
 
