@@ -30,9 +30,7 @@ NC=$'\033[0m' # No Color
 source "${LIB_DIR}/ui.sh"
 source "${LIB_DIR}/hardware.sh"
 source "${LIB_DIR}/models.sh"
-source "${LIB_DIR}/download.sh"
 source "${LIB_DIR}/chat.sh"
-source "${LIB_DIR}/manual_add.sh"
 
 # Main function
 main() {
@@ -40,7 +38,6 @@ main() {
     local context="$DEFAULT_CONTEXT"
     local threads="$(nproc)"
     local list_mode=""
-    local download_path=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -58,10 +55,6 @@ main() {
                 ;;
             -x|--remove)
                 remove_file="$2"
-                shift 2
-                ;;
-            -d|--download)
-                download_path="$2"
                 shift 2
                 ;;
             -h|--hardware)
@@ -100,12 +93,6 @@ main() {
         exit $?
     fi
 
-    # Handle custom download
-    if [ -n "$download_path" ]; then
-        download_custom "$download_path"
-        exit $?
-    fi
-
     # Interactive mode
     while true; do
         selected=$(interactive_select_installed)
@@ -114,7 +101,7 @@ main() {
         if [ $select_status -eq 0 ]; then
             # User selected a model - selected is a filepath
             launch_chat_file "$selected" "$context" "$threads"
-            echo -e "\n${GRAY}Returning to model selection...${NC}\n"
+            echo -e "\n${CYAN}Returning to model selection...${NC}\n"
         elif [ $select_status -eq 2 ]; then
             # User selected Q to quit
             exit 0

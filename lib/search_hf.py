@@ -11,19 +11,16 @@ import urllib.error
 HF_API = "https://huggingface.co/api/models"
 
 
-def search_models(keyword, mem_gb, format_filter=None):
-    """Search HF for models with optional format filtering."""
+def search_models(keyword, mem_gb):
+    """Search HF for GGUF models."""
     # Build base URL with search parameters
     params = {
         "search": keyword,
+        "filter": "gguf",
         "sort": "downloads",
         "direction": "-1",
         "limit": "20",
     }
-
-    # Add format filter if specified (use HuggingFace API filter parameter)
-    if format_filter:
-        params["filter"] = format_filter
 
     # Build URL with parameters
     url = HF_API + "?" + "&".join(f"{k}={v}" for k, v in params.items())
@@ -41,15 +38,6 @@ def search_models(keyword, mem_gb, format_filter=None):
         model_id = model.get("modelId", "")
         downloads = model.get("downloads", 0)
         
-        # Extract format from tags
-        tags = model.get("tags", [])
-        model_format = None
-        format_priority = ["gguf", "safetensors", "pytorch", "tensorflow", "onnx", "jax", "coreml", "openvino"]
-        for fmt in format_priority:
-            if fmt in tags:
-                model_format = fmt
-                break
-        
         # Try to estimate size from model tags or name
         est_gb = _estimate_size_from_id(model_id)
         
@@ -62,7 +50,6 @@ def search_models(keyword, mem_gb, format_filter=None):
             "name": model_id.split("/")[-1] if "/" in model_id else model_id,
             "downloads": downloads,
             "est_size_gb": est_gb,
-            "format": model_format or "unknown",
         })
     
     print(json.dumps(results))
@@ -107,26 +94,7 @@ def _shard_total(filename):
     return int(m.group(1)) if m else 1
 
 
-# Model weight file extensions we care about
-_MODEL_EXTENSIONS = {
-    ".gguf": "GGUF",
-    ".safetensors": "Safetensors",
-    ".bin": "PyTorch",
-    ".pt": "PyTorch",
-    ".pth": "PyTorch",
-    ".onnx": "ONNX",
-    ".nemo": "NeMo",
-    ".ggml": "GGML",
-    ".mlpackage": "CoreML",
-    ".mlmodelc": "CoreML",
-    ".tflite": "TFLite",
-    ".h5": "Keras",
-    ".keras": "Keras",
-    ".mar": "TorchServe",
-    ".engine": "TensorRT",
-}
-
-# Files to always skip even if extension matches
+# Files to always skip
 _SKIP_PATTERNS = [
     "tokenizer", "config", "vocab", "merges", "special_tokens",
     "generation_config", "preprocessor", "trainer_state",
@@ -134,36 +102,31 @@ _SKIP_PATTERNS = [
 ]
 
 
-def _get_format(filename):
-    """Get model format from filename, or None if not a model file."""
+def _is_gguf_file(filename):
+    """Check if file is a GGUF model file."""
     lower = filename.lower()
     basename = lower.rsplit("/", 1)[-1]
 
     # Skip known non-model files
     for skip in _SKIP_PATTERNS:
         if skip in basename:
-            return None
+            return False
 
-    for ext, fmt in _MODEL_EXTENSIONS.items():
-        if lower.endswith(ext):
-            return fmt
-    return None
+    return lower.endswith(".gguf")
 
 
 def _is_shard_generic(filename):
-    """Check if file is a shard (any format)."""
-    # Patterns: -00001-of-00004, .part1of4, etc.
+    """Check if file is a shard."""
     return bool(re.search(r'-\d{5}-of-\d{5}', filename))
 
 
 def _shard_key(filename):
     """Strip shard suffix to get a grouping key."""
-    # Remove -NNNNN-of-NNNNN before the extension
     return re.sub(r'-\d{5}-of-\d{5}', '', filename)
 
 
 def list_repo_files(repo):
-    """List model weight files in a HF repo, grouped by quant/shard."""
+    """List GGUF files in a HF repo, grouped by quant/shard."""
     url = f"{HF_API}/{repo}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "oi/1.0"})
@@ -175,18 +138,16 @@ def list_repo_files(repo):
 
     siblings = data.get("siblings", [])
 
-    # Collect all model weight files
+    # Collect all GGUF files
     model_files = []
     for s in siblings:
         fname = s.get("rfilename", "")
-        fmt = _get_format(fname)
-        if fmt is None:
+        if not _is_gguf_file(fname):
             continue
         size_bytes = s.get("size", 0)
         quant = _extract_quant(fname)
         model_files.append({
             "filename": fname,
-            "format": fmt,
             "quant": quant or "-",
             "size_bytes": size_bytes,
         })
@@ -201,7 +162,6 @@ def list_repo_files(repo):
             key = _shard_key(fname)
             if key not in groups:
                 groups[key] = {
-                    "format": f["format"],
                     "quant": f["quant"],
                     "files": [],
                     "total_size": 0,
@@ -217,7 +177,6 @@ def list_repo_files(repo):
     for f in singles:
         results.append({
             "filename": f["filename"],
-            "format": f["format"],
             "quant": f["quant"],
             "size_bytes": f["size_bytes"],
             "shard_count": 1,
@@ -231,7 +190,6 @@ def list_repo_files(repo):
         display = re.sub(r'-\d{5}-of-\d{5}', '', g["files"][0])
         results.append({
             "filename": display,
-            "format": g["format"],
             "quant": g["quant"],
             "size_bytes": g["total_size"],
             "shard_count": g["shard_count"],
@@ -244,15 +202,14 @@ def list_repo_files(repo):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Search HuggingFace for models")
+    parser = argparse.ArgumentParser(description="Search HuggingFace for GGUF models")
     parser.add_argument("--search", help="Search keyword")
     parser.add_argument("--mem", type=float, default=0, help="Available memory in GB")
-    parser.add_argument("--format", help="Filter by model format (gguf, pytorch, safetensors, tensorflow, onnx, or leave empty for all)")
-    parser.add_argument("--files", help="List model files in a repo")
+    parser.add_argument("--files", help="List GGUF files in a repo")
     args = parser.parse_args()
     
     if args.search:
-        search_models(args.search, args.mem, args.format)
+        search_models(args.search, args.mem)
     elif args.files:
         list_repo_files(args.files)
     else:
