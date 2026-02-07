@@ -40,6 +40,7 @@ OPTIONS:
     -l, --list              List installed models
     -x, --remove <file>     Remove an installed model
     -h, --hardware          Show system hardware information
+    -u, --update-llama      Update llama.cpp to latest version
     -c, --context <size>    Set context size (default: ${DEFAULT_CONTEXT})
     -t, --threads <num>     Set number of CPU threads
     --help                  Show this help message
@@ -63,6 +64,10 @@ QUANTIZATION OPTIONS:
 
 MODEL STORAGE:
     Models are stored in: ${MODELS_DIR}
+
+UPDATE LLAMA.CPP:
+    To update llama.cpp to the latest version:
+      oi --update-llama
 EOF
 }
 
