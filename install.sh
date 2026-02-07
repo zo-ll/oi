@@ -55,16 +55,20 @@ check_dependencies() {
 }
 
 detect_cuda() {
-    log_info "Detecting CUDA support..."
+    log_info "Detecting GPU support..."
     
     local has_nvidia_smi="no"
     local has_nvcc="no"
+    local gpu_info=""
     
+    # Check for NVIDIA dGPU
     if command -v nvidia-smi &> /dev/null; then
         local vram=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ')
         if [ -n "$vram" ] && [ "$vram" != "[Insufficientpermissions]" ]; then
             has_nvidia_smi="yes"
-            log_info "Found NVIDIA GPU with ${vram}MB VRAM"
+            local gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1 | sed 's/^ *//;s/ *$//')
+            log_info "Found NVIDIA GPU: ${gpu_name} (${vram}MB VRAM)"
+            gpu_info="NVIDIA ${gpu_name}"
         fi
     fi
     
@@ -74,11 +78,31 @@ detect_cuda() {
         log_info "Found nvcc: ${nvcc_version}"
     fi
     
+    # Check for integrated GPUs
+    if [ "$has_nvidia_smi" = "no" ] && command -v lspci &> /dev/null; then
+        local intel_gpu=$(lspci 2>/dev/null | grep -i vga | grep -i intel | head -n1)
+        local amd_gpu=$(lspci 2>/dev/null | grep -i vga | grep -iE 'amd|ati' | head -n1)
+        
+        if [ -n "$intel_gpu" ]; then
+            gpu_info=$(echo "$intel_gpu" | sed 's/.*: //' | sed 's/^ *//;s/ *$//')
+            log_info "Found Intel GPU: ${gpu_info}"
+            log_info "Note: llama.cpp will use CPU mode (Intel GPU acceleration requires specific builds)"
+        elif [ -n "$amd_gpu" ]; then
+            gpu_info=$(echo "$amd_gpu" | sed 's/.*: //' | sed 's/^ *//;s/ *$//')
+            log_info "Found AMD GPU: ${gpu_info}"
+            log_info "Note: llama.cpp will use CPU mode (AMD GPU acceleration requires ROCm)"
+        fi
+    fi
+    
     if [ "$has_nvidia_smi" = "yes" ] && [ "$has_nvcc" = "yes" ]; then
         log_success "CUDA detected - will build with GPU support"
         return 0
     else
-        log_warning "CUDA not fully detected - will build CPU-only version"
+        if [ -n "$gpu_info" ]; then
+            log_info "Integrated GPU detected - will build CPU-optimized version"
+        else
+            log_info "No discrete GPU detected - will build CPU-only version"
+        fi
         if [ "$has_nvidia_smi" = "yes" ]; then
             log_warning "  NVIDIA GPU found but CUDA toolkit (nvcc) not in PATH"
             echo "  Install CUDA toolkit to enable GPU acceleration"
@@ -227,6 +251,43 @@ ensure_path() {
     fi
 }
 
+show_hardware_summary() {
+    log_info "Hardware summary..."
+    
+    # Get hardware info
+    local hw_info=$(bash "${SCRIPT_DIR}/lib/hardware_detect.sh" 2>/dev/null)
+    if [ -z "$hw_info" ]; then
+        return
+    fi
+    
+    local vram_gb=$(echo "$hw_info" | grep -o '"vram_gb": [0-9.]*' | cut -d' ' -f2)
+    local ram_gb=$(echo "$hw_info" | grep -o '"ram_gb": [0-9]*' | cut -d' ' -f2)
+    local gpu_name=$(echo "$hw_info" | grep -o '"gpu_name": "[^"]*"' | cut -d'"' -f4)
+    local cuda_available=$(echo "$hw_info" | grep -o '"cuda_available": "[^"]*"' | cut -d'"' -f4)
+    
+    echo ""
+    echo "  GPU: ${gpu_name:-Unknown}"
+    echo "  VRAM: ${vram_gb:-0} GB"
+    echo "  RAM: ${ram_gb:-0} GB"
+    echo "  CUDA: ${cuda_available:-no}"
+    echo ""
+    
+    # Give recommendations
+    if [ "${cuda_available}" = "yes" ] && [ "${vram_gb%.*}" -ge 8 ]; then
+        log_success "Great! You can run large models (7B+ parameters) with GPU acceleration"
+    elif [ "${cuda_available}" = "yes" ] && [ "${vram_gb%.*}" -ge 4 ]; then
+        log_info "Good! You can run medium-sized models (4-7B parameters)"
+    elif [ -n "$vram_gb" ] && [ "${vram_gb%.*}" -ge 2 ]; then
+        log_info "Integrated GPU detected. You can run smaller models (2-4B parameters)"
+        echo "  Note: Models will run on CPU but still work well"
+    elif [ "$ram_gb" -ge 16 ]; then
+        log_info "CPU-only mode. With ${ram_gb}GB RAM, you can run models up to 7B parameters"
+    else
+        log_warning "Limited memory (${ram_gb}GB). Stick to small models (2-3B parameters)"
+    fi
+    echo ""
+}
+
 show_completion() {
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════${NC}"
@@ -237,12 +298,17 @@ show_completion() {
     echo "Installation directory: $OI_SHARE_DIR"
     echo "Wrapper: $OI_WRAPPER"
     echo ""
+    
+    show_hardware_summary
+    
     echo "Next steps:"
     echo "  1. Make sure ~/.local/bin is in your PATH (see warning above if needed)"
     echo "  2. Verify installation: which oi"
     echo "  3. Show help: oi --help"
-    echo "  4. Start chatting: oi"
+    echo "  4. Check hardware: oi -h"
+    echo "  5. Start chatting: oi"
     echo ""
+    echo "To update llama.cpp: oi --update-llama"
     echo "To uninstall: cd ~/oi && bash uninstall.sh"
     echo ""
 }

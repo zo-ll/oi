@@ -4,7 +4,7 @@
 # Detects VRAM, RAM, and CPU cores to recommend suitable models
 #
 
-get_gpu_info() {
+get_nvidia_gpu_info() {
     local vram_gb=0
     local gpu_name="None"
     local cuda_available="no"
@@ -18,7 +18,73 @@ get_gpu_info() {
         fi
     fi
     
-    echo "${vram_gb}|${gpu_name}|${cuda_available}"
+    echo "nvidia|${vram_gb}|${gpu_name}|${cuda_available}"
+}
+
+get_integrated_gpu_info() {
+    local gpu_type="none"
+    local gpu_name="None"
+    local vram_gb=0
+    
+    # Check for Intel integrated graphics
+    if command -v lspci &> /dev/null; then
+        local intel_gpu=$(lspci 2>/dev/null | grep -i vga | grep -i intel | head -n1)
+        if [ -n "$intel_gpu" ]; then
+            gpu_type="intel"
+            gpu_name=$(echo "$intel_gpu" | sed 's/.*: //' | sed 's/^ *//;s/ *$//')
+        fi
+        
+        # Check for AMD integrated graphics
+        local amd_gpu=$(lspci 2>/dev/null | grep -i vga | grep -iE 'amd|ati' | head -n1)
+        if [ -n "$amd_gpu" ]; then
+            gpu_type="amd"
+            gpu_name=$(echo "$amd_gpu" | sed 's/.*: //' | sed 's/^ *//;s/ *$//')
+        fi
+    fi
+    
+    # Also check via /sys/class/drm for render devices
+    if [ "$gpu_type" = "none" ]; then
+        for dev in /sys/class/drm/renderD*/device/vendor 2>/dev/null; do
+            if [ -f "$dev" ]; then
+                local vendor=$(cat "$dev" 2>/dev/null)
+                case "$vendor" in
+                    0x8086)  # Intel
+                        gpu_type="intel"
+                        if [ -f "${dev%/*}/product" ]; then
+                            local product=$(cat "${dev%/*}/product" 2>/dev/null)
+                            gpu_name="Intel Graphics (0x${product})"
+                        else
+                            gpu_name="Intel Integrated Graphics"
+                        fi
+                        break
+                        ;;
+                    0x1002|0x1022)  # AMD
+                        gpu_type="amd"
+                        if [ -f "${dev%/*}/product" ]; then
+                            local product=$(cat "${dev%/*}/product" 2>/dev/null)
+                            gpu_name="AMD Graphics (0x${product})"
+                        else
+                            gpu_name="AMD Integrated Graphics"
+                        fi
+                        break
+                        ;;
+                esac
+            fi
+        done
+    fi
+    
+    # For integrated GPUs, use a portion of system RAM as VRAM estimate
+    if [ "$gpu_type" != "none" ]; then
+        local ram_gb=$(get_ram_info)
+        # Use up to 50% of system RAM or max 4GB as shared VRAM estimate
+        if [ "$ram_gb" -gt 8 ]; then
+            vram_gb=4
+        else
+            vram_gb=$(echo "scale=1; $ram_gb * 0.5" | bc 2>/dev/null || echo "2")
+        fi
+    fi
+    
+    echo "${gpu_type}|${vram_gb}|${gpu_name}"
 }
 
 get_ram_info() {
@@ -36,10 +102,22 @@ get_cpu_info() {
 }
 
 detect_hardware() {
-    local gpu_data=$(get_gpu_info)
-    local vram_gb=$(echo "$gpu_data" | cut -d'|' -f1)
-    local gpu_name=$(echo "$gpu_data" | cut -d'|' -f2)
-    local cuda_available=$(echo "$gpu_data" | cut -d'|' -f3)
+    # Try NVIDIA first
+    local nvidia_data=$(get_nvidia_gpu_info)
+    local gpu_type=$(echo "$nvidia_data" | cut -d'|' -f1)
+    local vram_gb=$(echo "$nvidia_data" | cut -d'|' -f2)
+    local gpu_name=$(echo "$nvidia_data" | cut -d'|' -f3)
+    local cuda_available=$(echo "$nvidia_data" | cut -d'|' -f4)
+    
+    # If no NVIDIA, check for integrated GPUs
+    if [ "$gpu_type" = "nvidia" ] && [ -z "$gpu_name" ] || [ "$gpu_name" = "None" ]; then
+        local integrated_data=$(get_integrated_gpu_info)
+        gpu_type=$(echo "$integrated_data" | cut -d'|' -f1)
+        vram_gb=$(echo "$integrated_data" | cut -d'|' -f2)
+        gpu_name=$(echo "$integrated_data" | cut -d'|' -f3)
+        # Integrated GPUs don't support CUDA
+        cuda_available="no"
+    fi
     
     local ram_gb=$(get_ram_info)
     local cpu_data=$(get_cpu_info)
