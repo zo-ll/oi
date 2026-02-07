@@ -44,7 +44,8 @@ get_integrated_gpu_info() {
     
     # Also check via /sys/class/drm for render devices
     if [ "$gpu_type" = "none" ]; then
-        for dev in /sys/class/drm/renderD*/device/vendor 2>/dev/null; do
+        # Use find to avoid issues with glob patterns
+        while IFS= read -r dev; do
             if [ -f "$dev" ]; then
                 local vendor=$(cat "$dev" 2>/dev/null)
                 case "$vendor" in
@@ -70,7 +71,7 @@ get_integrated_gpu_info() {
                         ;;
                 esac
             fi
-        done
+        done < <(find /sys/class/drm -name "renderD*" -type l 2>/dev/null | head -1 | xargs -I {} echo {}/device/vendor)
     fi
     
     # For integrated GPUs, use a portion of system RAM as VRAM estimate
@@ -109,8 +110,8 @@ detect_hardware() {
     local gpu_name=$(echo "$nvidia_data" | cut -d'|' -f3)
     local cuda_available=$(echo "$nvidia_data" | cut -d'|' -f4)
     
-    # If no NVIDIA, check for integrated GPUs
-    if [ "$gpu_type" = "nvidia" ] && [ -z "$gpu_name" ] || [ "$gpu_name" = "None" ]; then
+    # If no NVIDIA GPU found, check for integrated GPUs
+    if [ "$gpu_name" = "None" ] || [ -z "$gpu_name" ]; then
         local integrated_data=$(get_integrated_gpu_info)
         gpu_type=$(echo "$integrated_data" | cut -d'|' -f1)
         vram_gb=$(echo "$integrated_data" | cut -d'|' -f2)
