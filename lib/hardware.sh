@@ -54,6 +54,9 @@ show_hardware() {
         rec_color="$GREEN"; rec_text="✓ You can run models up to 7B parameters comfortably"
     elif [ "${cuda}" = "yes" ] && [ "${vram%.*}" -ge 4 ]; then
         rec_color="$YELLOW"; rec_text="● You can run models up to 4B parameters comfortably"
+    elif [ "${vram%.*}" -ge 2 ] && [ "$ram" -ge 8 ]; then
+        # Integrated GPU with decent shared memory
+        rec_color="$YELLOW"; rec_text="● Integrated GPU mode. Models up to 4-7B will work (slower on CPU)"
     elif [ "$ram" -ge 16 ]; then
         rec_color="$YELLOW"; rec_text="● CPU-only mode. Models up to 7B will work but slower"
     else
