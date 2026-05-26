@@ -1,4 +1,5 @@
 bin/
+/oi
 *.log
 .coverage
 coverage.out

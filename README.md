@@ -12,11 +12,43 @@ Current focus:
 - stdio RPC for bot integration
 - standard library only
 
+## Install
+
+```bash
+cd ~/Projects/oi
+bash install.sh
+```
+
+By default this installs `oi` to `~/.local/bin/oi`.
+Override with:
+
+```bash
+OI_INSTALL_DIR=/custom/bin bash install.sh
+```
+
+Uninstall:
+
+```bash
+bash uninstall.sh
+```
+
+## Make targets
+
+```bash
+make build
+make test
+make install
+make uninstall
+make doctor
+make version
+```
+
 ## Commands
 
 ```bash
 oi doctor
 oi models
+oi version
 oi run "task"
 oi chat
 oi rpc
@@ -29,6 +61,7 @@ Available now:
 ```bash
 oi doctor
 oi models
+oi version
 ```
 
 `chat`, `run`, and `rpc` are scaffolded but not implemented yet.

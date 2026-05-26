@@ -6,12 +6,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/zo-ll/oi/internal/config"
 	iprovider "github.com/zo-ll/oi/internal/provider"
 	"github.com/zo-ll/oi/internal/workspace"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {
@@ -31,6 +38,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case "help", "--help", "-h":
 		printUsage(stdout)
 		return nil
+	case "version", "--version", "-v":
+		printVersion(stdout)
+		return nil
 	case "doctor":
 		return runDoctor(args[1:], stdout)
 	case "models":
@@ -48,12 +58,20 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  oi help")
 	fmt.Fprintln(w, "  oi doctor")
+	fmt.Fprintln(w, "  oi models")
+	fmt.Fprintln(w, "  oi version")
 	fmt.Fprintln(w, "  oi chat")
 	fmt.Fprintln(w, "  oi run \"task\"")
 	fmt.Fprintln(w, "  oi rpc")
-	fmt.Fprintln(w, "  oi models")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Current status: scaffolded rebuild; doctor and models are available.")
+	fmt.Fprintln(w, "Current status: scaffolded rebuild; doctor, models, and version are available.")
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "oi %s\n", version)
+	fmt.Fprintf(w, "commit: %s\n", commit)
+	fmt.Fprintf(w, "built: %s\n", date)
+	fmt.Fprintf(w, "go: %s\n", runtime.Version())
 }
 
 func runDoctor(args []string, w io.Writer) error {
