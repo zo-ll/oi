@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	ilog "github.com/zo-ll/oi/internal/log"
 	"github.com/zo-ll/oi/internal/provider"
 	"github.com/zo-ll/oi/internal/session"
 	"github.com/zo-ll/oi/internal/tool"
@@ -24,6 +25,7 @@ type Runtime struct {
 	SystemPrompt string
 	OnToolStart  func(tool.Call)
 	OnToolResult func(tool.Call, tool.Result)
+	Logger       *ilog.Logger
 }
 
 // RunOnce executes one user request through the bounded agent loop.
@@ -62,20 +64,26 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 	}
 	history = append(history, provider.Message{Role: "user", Content: input})
 	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: input, Kind: "talk"})
+	r.logEvent("user_input", map[string]any{"input": input})
 
 	for step := 0; step < r.MaxSteps; step++ {
+		r.logEvent("provider_request", map[string]any{"step": step + 1, "streaming": streaming, "message_count": len(history)})
 		resp, err := r.callProvider(ctx, history, onDelta, streaming)
 		if err != nil {
+			r.logEvent("provider_error", map[string]any{"step": step + 1, "error": err.Error()})
 			return "", err
 		}
 
 		if len(resp.ToolCalls) == 0 {
 			if resp.Content == "" {
-				return "", fmt.Errorf("provider returned neither content nor tool calls")
+				err := fmt.Errorf("provider returned neither content nor tool calls")
+				r.logEvent("provider_error", map[string]any{"step": step + 1, "error": err.Error()})
+				return "", err
 			}
 			history = append(history, provider.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning})
 			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning, Kind: "talk"})
 			r.Session.UpdatedAt = time.Now().UTC()
+			r.logEvent("assistant_final", map[string]any{"step": step + 1, "content": resp.Content})
 			return resp.Content, nil
 		}
 
@@ -89,6 +97,7 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 
 		for _, tc := range resp.ToolCalls {
 			call := tool.Call{ID: tc.ID, Name: tc.Name, Args: tc.Args}
+			r.logEvent("tool_start", map[string]any{"step": step + 1, "tool": call.Name, "args": jsonRaw(call.Args)})
 			if r.OnToolStart != nil {
 				r.OnToolStart(call)
 			}
@@ -98,6 +107,7 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 			if r.OnToolResult != nil {
 				r.OnToolResult(call, res)
 			}
+			r.logEvent("tool_result", map[string]any{"step": step + 1, "tool": call.Name, "ok": res.OK, "error": res.Error})
 
 			payload, err := json.Marshal(res)
 			if err != nil {
@@ -108,7 +118,27 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 		}
 	}
 
-	return "", fmt.Errorf("max steps exceeded (%d)", r.MaxSteps)
+	err := fmt.Errorf("max steps exceeded (%d)", r.MaxSteps)
+	r.logEvent("agent_error", map[string]any{"error": err.Error()})
+	return "", err
+}
+
+func (r *Runtime) logEvent(kind string, fields map[string]any) {
+	if r == nil || r.Logger == nil {
+		return
+	}
+	_ = r.Logger.Event(kind, fields)
+}
+
+func jsonRaw(raw []byte) any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err == nil {
+		return v
+	}
+	return string(raw)
 }
 
 func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, onDelta func(string), streaming bool) (provider.Response, error) {

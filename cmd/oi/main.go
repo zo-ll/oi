@@ -191,7 +191,11 @@ func runTask(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	runtime := buildRuntime(cfg, sel, p, root, os.Stdin, os.Stdout)
+	logger, err := maybeDebugLogger("run", opts.debug)
+	if err != nil {
+		return err
+	}
+	runtime := buildRuntime(cfg, sel, p, root, os.Stdin, os.Stdout, logger)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.ToolTimeoutSeconds*cfg.Agent.MaxSteps+30)*time.Second)
 	defer cancel()
 	out, err := runtime.RunOnce(ctx, prompt)
@@ -237,6 +241,7 @@ func parseCommonOptions(name string, args []string) (commonOptions, error) {
 	fs.StringVar(&opts.provider, "provider", "", "provider name")
 	fs.StringVar(&opts.model, "model", "", "model name")
 	fs.StringVar(&opts.apiKey, "api-key", "", "API key override")
+	fs.BoolVar(&opts.debug, "debug", false, "enable debug logging")
 	if err := fs.Parse(args); err != nil {
 		return commonOptions{}, err
 	}
@@ -277,6 +282,7 @@ type commonOptions struct {
 	provider string
 	model    string
 	apiKey   string
+	debug    bool
 	rest     []string
 }
 

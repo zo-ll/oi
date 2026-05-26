@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -77,4 +79,46 @@ func Load(path string) (*Session, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// Info is a lightweight session listing record.
+type Info struct {
+	ID        string    `json:"id"`
+	Provider  string    `json:"provider,omitempty"`
+	Model     string    `json:"model,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Path      string    `json:"path"`
+}
+
+// List returns saved sessions sorted by most recently updated first.
+func List(dir string) ([]Info, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	items := make([]Info, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		s, err := Load(path)
+		if err != nil {
+			continue
+		}
+		items = append(items, Info{
+			ID:        s.ID,
+			Provider:  s.Provider,
+			Model:     s.Model,
+			UpdatedAt: s.UpdatedAt,
+			Path:      path,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+	return items, nil
 }

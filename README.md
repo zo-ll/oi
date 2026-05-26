@@ -69,7 +69,27 @@ oi rpc
 oi chat
 ```
 
-`chat` is implemented as a minimal interactive mode with slash commands.
+`chat` is implemented as a minimal interactive mode with slash commands and streaming output.
+
+## Chat slash commands
+
+- `/help`
+- `/provider [name]`
+- `/model [name]`
+- `/stream [on|off]`
+- `/new`
+- `/sessions`
+- `/save [name]`
+- `/load <name|path>`
+- `/exit`
+
+## Debug logging
+
+Use `--debug` with `oi chat` or `oi run` to write JSONL debug logs under:
+
+```bash
+~/.local/state/oi/logs/
+```
 
 ## Docs
 

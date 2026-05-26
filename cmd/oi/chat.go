@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
 	"github.com/zo-ll/oi/internal/session"
+	"github.com/zo-ll/oi/internal/tool"
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
@@ -35,7 +37,11 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 	}
 	reader := bufio.NewReader(in)
 	streaming := true
-	rt := buildRuntime(cfg, sel, p, root, reader, out)
+	logger, err := maybeDebugLogger("chat", opts.debug)
+	if err != nil {
+		return err
+	}
+	rt := buildRuntime(cfg, sel, p, root, reader, out, logger)
 	configureChatRuntime(rt, out)
 
 	fmt.Fprintf(out, "oi chat\nprovider: %s\nmodel: %s\nworkspace: %s\n", sel.Provider, valueOr(sel.Model, "(none)"), root)
@@ -129,6 +135,7 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		fmt.Fprintln(out, "/model [name]        show models or set model")
 		fmt.Fprintln(out, "/stream [on|off]     show or set streaming mode")
 		fmt.Fprintln(out, "/new                 start a new session")
+		fmt.Fprintln(out, "/sessions            list saved sessions")
 		fmt.Fprintln(out, "/save [name]         save current session")
 		fmt.Fprintln(out, "/load <name|path>    load a saved session")
 		fmt.Fprintln(out, "/exit                exit chat")
@@ -161,7 +168,7 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		if err != nil {
 			return false, rt, sel, streaming, err
 		}
-		nextRT := buildRuntime(cfg, nextSel, p, root, reader, out)
+		nextRT := buildRuntime(cfg, nextSel, p, root, reader, out, rt.Logger)
 		fmt.Fprintf(out, "provider set to %s\n", nextSel.Provider)
 		return false, nextRT, nextSel, streaming, nil
 	case "/model":
@@ -191,7 +198,7 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		if err != nil {
 			return false, rt, sel, streaming, err
 		}
-		nextRT := buildRuntime(cfg, nextSel, p, root, reader, out)
+		nextRT := buildRuntime(cfg, nextSel, p, root, reader, out, rt.Logger)
 		fmt.Fprintf(out, "model set to %s\n", arg)
 		return false, nextRT, nextSel, streaming, nil
 	case "/stream":
@@ -209,6 +216,19 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		default:
 			return false, rt, sel, streaming, fmt.Errorf("usage: /stream [on|off]")
 		}
+	case "/sessions":
+		infos, err := session.List(config.SessionsDir())
+		if err != nil {
+			return false, rt, sel, streaming, err
+		}
+		if len(infos) == 0 {
+			fmt.Fprintln(out, "no saved sessions")
+			return false, rt, sel, streaming, nil
+		}
+		for _, info := range infos {
+			fmt.Fprintf(out, "%s  %s  %s  %s\n", info.ID, info.UpdatedAt.Format("2006-01-02 15:04:05"), valueOr(info.Provider, "-"), valueOr(info.Model, "-"))
+		}
+		return false, rt, sel, streaming, nil
 	case "/save":
 		if rt.Session == nil {
 			return false, rt, sel, streaming, fmt.Errorf("no session to save")
@@ -261,7 +281,7 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 				root = detected
 			}
 		}
-		nextRT := buildRuntime(cfg2, nextSel2, p, root, reader, out)
+		nextRT := buildRuntime(cfg2, nextSel2, p, root, reader, out, rt.Logger)
 		loaded.Provider = nextSel2.Provider
 		loaded.Model = nextSel2.Model
 		loaded.CWD = root
@@ -306,9 +326,56 @@ func configureChatRuntime(rt *agent.Runtime, out io.Writer) {
 	if rt == nil {
 		return
 	}
-	rt.OnToolStart = nil
-	rt.OnToolResult = nil
-	_ = out
+	rt.OnToolStart = func(call tool.Call) {
+		clearStatusLine(out)
+		fmt.Fprintf(out, "[tool:start] %s %s\n", call.Name, summarizeToolArgs(call.Args))
+	}
+	rt.OnToolResult = func(call tool.Call, result tool.Result) {
+		clearStatusLine(out)
+		status := "ok"
+		if !result.OK {
+			status = "error"
+		}
+		fmt.Fprintf(out, "[tool:%s] %s", status, call.Name)
+		if result.Error != "" {
+			fmt.Fprintf(out, ": %s", result.Error)
+		} else if text := summarizeToolOutput(result.Output); text != "" {
+			fmt.Fprintf(out, ": %s", text)
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+func clearStatusLine(out io.Writer) {
+	fmt.Fprint(out, "\r                    \r")
+}
+
+func summarizeToolArgs(raw []byte) string {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	s := string(b)
+	if len(s) > 80 {
+		s = s[:77] + "..."
+	}
+	return s
+}
+
+func summarizeToolOutput(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > 100 {
+		return s[:97] + "..."
+	}
+	return s
 }
 
 func onOff(v bool) string {
