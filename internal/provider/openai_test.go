@@ -24,6 +24,7 @@ func TestParseChatResponseNativeToolCall(t *testing.T) {
 		"choices": [{
 			"message": {
 				"content": "",
+				"reasoning_content": "need file contents",
 				"tool_calls": [{
 					"id": "call_1",
 					"type": "function",
@@ -39,6 +40,9 @@ func TestParseChatResponseNativeToolCall(t *testing.T) {
 	resp, err := parseChatResponse(data)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if resp.Reasoning != "need file contents" {
+		t.Fatalf("reasoning = %q", resp.Reasoning)
 	}
 	if len(resp.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %d", len(resp.ToolCalls))

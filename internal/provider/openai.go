@@ -147,6 +147,9 @@ func toOpenAIMessages(messages []Message) ([]map[string]any, error) {
 		if m.Content != "" {
 			msg["content"] = m.Content
 		}
+		if m.Reasoning != "" {
+			msg["reasoning_content"] = m.Reasoning
+		}
 		if m.ToolCallID != "" {
 			msg["tool_call_id"] = m.ToolCallID
 		}
@@ -342,6 +345,7 @@ type streamChunk struct {
 	Choices []struct {
 		Delta struct {
 			Content   string `json:"content"`
+			Reasoning string `json:"reasoning_content"`
 			ToolCalls []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
@@ -382,8 +386,9 @@ func parseChatResponse(data []byte) (Response, error) {
 	var raw struct {
 		Choices []struct {
 			Message struct {
-				Content   string `json:"content"`
-				ToolCalls []struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
 					Function struct {
@@ -406,7 +411,8 @@ func parseChatResponse(data []byte) (Response, error) {
 	}
 	msg := raw.Choices[0].Message
 	resp := Response{
-		Content: msg.Content,
+		Content:   msg.Content,
+		Reasoning: msg.ReasoningContent,
 		Usage: Usage{
 			InputTokens:  raw.Usage.PromptTokens,
 			OutputTokens: raw.Usage.CompletionTokens,

@@ -67,7 +67,7 @@ func TestRunOnceFinalAnswer(t *testing.T) {
 func TestRunOnceToolThenFinal(t *testing.T) {
 	args, _ := json.Marshal(map[string]string{"text": "tool output"})
 	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{
-		{ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "echo", Args: args}}},
+		{Reasoning: "need a tool", ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "echo", Args: args}}},
 		{Content: "all done"},
 	}}
 	r := &Runtime{
@@ -93,6 +93,9 @@ func TestRunOnceToolThenFinal(t *testing.T) {
 	}
 	if last[len(last)-1].Role != "tool" {
 		t.Fatalf("last role = %q", last[len(last)-1].Role)
+	}
+	if got := p.requests[1].Messages[2].Reasoning; got != "need a tool" {
+		t.Fatalf("reasoning = %q", got)
 	}
 }
 

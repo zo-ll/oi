@@ -66,19 +66,19 @@ func (r *Runtime) RunOnce(ctx context.Context, input string) (string, error) {
 			if resp.Content == "" {
 				return "", fmt.Errorf("provider returned neither content nor tool calls")
 			}
-			history = append(history, provider.Message{Role: "assistant", Content: resp.Content})
-			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: resp.Content, Kind: "talk"})
+			history = append(history, provider.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning})
+			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning, Kind: "talk"})
 			r.Session.UpdatedAt = time.Now().UTC()
 			return resp.Content, nil
 		}
 
-		assistantMsg := provider.Message{Role: "assistant", ToolCalls: resp.ToolCalls}
+		assistantMsg := provider.Message{Role: "assistant", ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning}
 		if resp.Content != "" {
 			assistantMsg.Content = resp.Content
 		}
 		history = append(history, assistantMsg)
 		toolCallJSON, _ := json.Marshal(resp.ToolCalls)
-		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: string(toolCallJSON), Kind: "tool_call"})
+		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: string(toolCallJSON), Reasoning: resp.Reasoning, Kind: "tool_call"})
 
 		for _, tc := range resp.ToolCalls {
 			toolCtx, cancel := context.WithTimeout(ctx, r.ToolTimeout)
@@ -120,7 +120,7 @@ func (r *Runtime) historyToProviderMessages() []provider.Message {
 		case "tool_call":
 			var calls []provider.ToolCall
 			if json.Unmarshal([]byte(m.Content), &calls) == nil {
-				out = append(out, provider.Message{Role: "assistant", ToolCalls: calls})
+				out = append(out, provider.Message{Role: "assistant", Reasoning: m.Reasoning, ToolCalls: calls})
 			}
 		case "tool_result":
 			var tc struct {
@@ -131,7 +131,7 @@ func (r *Runtime) historyToProviderMessages() []provider.Message {
 			// persisted sessions are not yet resumed into active tool-call chains.
 			out = append(out, provider.Message{Role: "tool", ToolCallID: toolCallID, Content: m.Content})
 		default:
-			out = append(out, provider.Message{Role: m.Role, Content: m.Content})
+			out = append(out, provider.Message{Role: m.Role, Content: m.Content, Reasoning: m.Reasoning})
 		}
 	}
 	return out

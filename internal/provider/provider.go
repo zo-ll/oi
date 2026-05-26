@@ -9,6 +9,7 @@ import (
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content,omitempty"`
+	Reasoning  string     `json:"reasoning_content,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
@@ -44,6 +45,7 @@ type Usage struct {
 // Response is the normalized non-streaming provider response.
 type Response struct {
 	Content   string     `json:"content,omitempty"`
+	Reasoning string     `json:"reasoning_content,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	Usage     Usage      `json:"usage,omitempty"`
 }
