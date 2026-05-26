@@ -13,6 +13,7 @@ import (
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
 	iprovider "github.com/zo-ll/oi/internal/provider"
+	irpc "github.com/zo-ll/oi/internal/rpc"
 	"github.com/zo-ll/oi/internal/session"
 	"github.com/zo-ll/oi/internal/tool"
 	"github.com/zo-ll/oi/internal/workspace"
@@ -50,7 +51,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runModels(args[1:], stdout)
 	case "run":
 		return runTask(args[1:], stdout)
-	case "chat", "rpc":
+	case "rpc":
+		return runRPC(stdout)
+	case "chat":
 		return fmt.Errorf("%s: not implemented yet", args[0])
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -69,7 +72,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  oi run \"task\"")
 	fmt.Fprintln(w, "  oi rpc")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Current status: scaffolded rebuild; doctor, models, and version are available.")
+	fmt.Fprintln(w, "Current status: doctor, models, version, run, and rpc are available.")
 }
 
 func printVersion(w io.Writer) {
@@ -214,6 +217,14 @@ func runTask(args []string, w io.Writer) error {
 	}
 	fmt.Fprintln(w, out)
 	return nil
+}
+
+func runRPC(w io.Writer) error {
+	srv, err := irpc.NewServer()
+	if err != nil {
+		return err
+	}
+	return srv.Serve(os.Stdin, w)
 }
 
 func doctorConnectivity(sel config.Selection) string {

@@ -22,6 +22,8 @@ type Runtime struct {
 	MaxSteps     int
 	ToolTimeout  time.Duration
 	SystemPrompt string
+	OnToolStart  func(tool.Call)
+	OnToolResult func(tool.Call, tool.Result)
 }
 
 // RunOnce executes one user request through the bounded agent loop.
@@ -81,9 +83,16 @@ func (r *Runtime) RunOnce(ctx context.Context, input string) (string, error) {
 		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: string(toolCallJSON), Reasoning: resp.Reasoning, Kind: "tool_call"})
 
 		for _, tc := range resp.ToolCalls {
+			call := tool.Call{ID: tc.ID, Name: tc.Name, Args: tc.Args}
+			if r.OnToolStart != nil {
+				r.OnToolStart(call)
+			}
 			toolCtx, cancel := context.WithTimeout(ctx, r.ToolTimeout)
-			res := r.Tools.Run(toolCtx, tool.Call{ID: tc.ID, Name: tc.Name, Args: tc.Args})
+			res := r.Tools.Run(toolCtx, call)
 			cancel()
+			if r.OnToolResult != nil {
+				r.OnToolResult(call, res)
+			}
 
 			payload, err := json.Marshal(res)
 			if err != nil {

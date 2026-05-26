@@ -59,9 +59,10 @@ oi doctor
 oi models
 oi version
 oi run "task"
+oi rpc
 ```
 
-`chat` and `rpc` are still scaffolded but not implemented yet.
+`chat` is still scaffolded but not implemented yet.
 
 ## Docs
 

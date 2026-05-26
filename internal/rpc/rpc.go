@@ -22,6 +22,7 @@ type Event struct {
 	Delta   string `json:"delta,omitempty"`
 	Message string `json:"message,omitempty"`
 	Error   string `json:"error,omitempty"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // Decoder reads newline-delimited JSON frames.
