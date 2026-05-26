@@ -42,6 +42,9 @@ go build -o ~/.local/bin/oi ./cmd/oi
 ## Commands
 
 ```bash
+oi
+# same as: oi chat
+
 oi doctor
 oi models
 oi version
@@ -55,6 +58,9 @@ oi rpc
 Available now:
 
 ```bash
+oi
+# default chat mode
+
 oi doctor
 oi models
 oi version

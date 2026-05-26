@@ -31,8 +31,7 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		printUsage(stdout)
-		return nil
+		return runChat(nil, os.Stdin, stdout)
 	}
 
 	switch args[0] {
@@ -61,6 +60,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "oi")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  oi                  # start chat")
 	fmt.Fprintln(w, "  oi help")
 	fmt.Fprintln(w, "  oi doctor")
 	fmt.Fprintln(w, "  oi models")
@@ -69,7 +69,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  oi run \"task\"")
 	fmt.Fprintln(w, "  oi rpc")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Current status: doctor, models, version, chat, run, and rpc are available.")
+	fmt.Fprintln(w, "Current status: chat is the default mode; doctor, models, version, run, and rpc are also available.")
 }
 
 func printVersion(w io.Writer) {
