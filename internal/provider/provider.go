@@ -7,8 +7,10 @@ import (
 
 // Message is one chat message in provider-neutral form.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // ToolSpec describes one tool exposed to the model.
@@ -20,10 +22,10 @@ type ToolSpec struct {
 
 // Request is the normalized provider request shape.
 type Request struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
+	Model    string     `json:"model"`
+	Messages []Message  `json:"messages"`
 	Tools    []ToolSpec `json:"tools,omitempty"`
-	Stream   bool      `json:"stream,omitempty"`
+	Stream   bool       `json:"stream,omitempty"`
 }
 
 // ToolCall is one normalized tool invocation from the model.

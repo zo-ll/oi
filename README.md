@@ -12,7 +12,7 @@ Current focus:
 - stdio RPC for bot integration
 - standard library only
 
-## Planned commands
+## Commands
 
 ```bash
 oi doctor
@@ -22,11 +22,16 @@ oi chat
 oi rpc
 ```
 
-## Current command
+## Current status
+
+Available now:
 
 ```bash
 oi doctor
+oi models
 ```
+
+`chat`, `run`, and `rpc` are scaffolded but not implemented yet.
 
 ## Docs
 
