@@ -12,10 +12,11 @@ import (
 
 // Message is one persisted transcript entry.
 type Message struct {
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	Reasoning string `json:"reasoning,omitempty"`
-	Kind      string `json:"kind,omitempty"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	Reasoning  string `json:"reasoning,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Kind       string `json:"kind,omitempty"`
 }
 
 // Session stores transcript and runtime metadata.

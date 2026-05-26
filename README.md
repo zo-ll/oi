@@ -79,12 +79,29 @@ oi chat
 - `/stream [on|off]`
 - `/autosave [on|off]`
 - `/new`
-- `/sessions`
+- `/sessions [filter]`
 - `/save [name]`
-- `/load <name|path>`
+- `/load [name|path|index]`
 - `/exit`
 
 Chat autosaves the rolling session by default after successful turns, saves on exit, and can optionally save a named snapshot when exiting.
+
+### Session examples
+
+```text
+/sessions
+/sessions deepseek
+/load
+/load 1
+/save refactor-snapshot
+/autosave off
+```
+
+## RPC example
+
+```bash
+printf '{"id":"1","type":"ping"}\n{"id":"2","type":"get_state"}\n' | oi rpc
+```
 
 ## Debug logging
 

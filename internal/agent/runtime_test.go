@@ -94,6 +94,9 @@ func TestRunOnceToolThenFinal(t *testing.T) {
 	if last[len(last)-1].Role != "tool" {
 		t.Fatalf("last role = %q", last[len(last)-1].Role)
 	}
+	if last[len(last)-1].ToolCallID != "call_1" {
+		t.Fatalf("tool_call_id = %q", last[len(last)-1].ToolCallID)
+	}
 	if got := p.requests[1].Messages[2].Reasoning; got != "need a tool" {
 		t.Fatalf("reasoning = %q", got)
 	}

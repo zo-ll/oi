@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
@@ -46,5 +47,36 @@ func TestSaveSessionNamedDoesNotMutateRollingSessionID(t *testing.T) {
 	}
 	if rt.Session.ID != "rolling" {
 		t.Fatalf("session id mutated: %q", rt.Session.ID)
+	}
+}
+
+func TestResolveSessionArgByIndexAndFilter(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	for _, s := range []*session.Session{
+		{ID: "alpha", Provider: "p1", Model: "m1", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour)},
+		{ID: "beta", Provider: "p2", Model: "deepseek", CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+	} {
+		if _, err := session.Save(dir, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	infos, err := filteredSessions(dir, "deep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].ID != "beta" {
+		t.Fatalf("infos = %+v", infos)
+	}
+	all, err := filteredSessions(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := resolveSessionArg(dir, all, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != all[0].Path {
+		t.Fatalf("path = %q want %q", path, all[0].Path)
 	}
 }

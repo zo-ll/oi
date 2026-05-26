@@ -114,7 +114,7 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 				payload = []byte(fmt.Sprintf(`{"tool":%q,"ok":false,"error":%q}`, tc.Name, err.Error()))
 			}
 			history = append(history, provider.Message{Role: "tool", ToolCallID: tc.ID, Content: string(payload)})
-			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "tool", Content: string(payload), Kind: "tool_result"})
+			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "tool", ToolCallID: tc.ID, Content: string(payload), Kind: "tool_result"})
 		}
 	}
 
@@ -200,13 +200,7 @@ func (r *Runtime) historyToProviderMessages() []provider.Message {
 				out = append(out, provider.Message{Role: "assistant", Reasoning: m.Reasoning, ToolCalls: calls})
 			}
 		case "tool_result":
-			var tc struct {
-				Tool string `json:"tool"`
-			}
-			var toolCallID string
-			_ = tc
-			// persisted sessions are not yet resumed into active tool-call chains.
-			out = append(out, provider.Message{Role: "tool", ToolCallID: toolCallID, Content: m.Content})
+			out = append(out, provider.Message{Role: "tool", ToolCallID: m.ToolCallID, Content: m.Content})
 		default:
 			out = append(out, provider.Message{Role: m.Role, Content: m.Content, Reasoning: m.Reasoning})
 		}
