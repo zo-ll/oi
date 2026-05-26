@@ -10,12 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
 	iprovider "github.com/zo-ll/oi/internal/provider"
 	irpc "github.com/zo-ll/oi/internal/rpc"
-	"github.com/zo-ll/oi/internal/session"
-	"github.com/zo-ll/oi/internal/tool"
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
@@ -54,7 +51,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case "rpc":
 		return runRPC(stdout)
 	case "chat":
-		return fmt.Errorf("%s: not implemented yet", args[0])
+		return runChat(args[1:], os.Stdin, stdout)
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
@@ -72,7 +69,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  oi run \"task\"")
 	fmt.Fprintln(w, "  oi rpc")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Current status: doctor, models, version, run, and rpc are available.")
+	fmt.Fprintln(w, "Current status: doctor, models, version, chat, run, and rpc are available.")
 }
 
 func printVersion(w io.Writer) {
@@ -194,21 +191,7 @@ func runTask(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	policy := workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalMode(cfg.Agent.ApprovalMode)}
-	tools := tool.NewBuiltinRegistry(tool.Options{
-		Policy:         policy,
-		MaxOutputBytes: cfg.Agent.MaxToolOutputBytes,
-		PromptInput:    os.Stdin,
-		PromptOutput:   os.Stdout,
-	})
-	runtime := &agent.Runtime{
-		Provider:    p,
-		Tools:       tools,
-		Policy:      policy,
-		Session:     session.New(sel.Provider, p.Model(), root),
-		MaxSteps:    cfg.Agent.MaxSteps,
-		ToolTimeout: time.Duration(cfg.Agent.ToolTimeoutSeconds) * time.Second,
-	}
+	runtime := buildRuntime(cfg, sel, p, root, os.Stdin, os.Stdout)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.ToolTimeoutSeconds*cfg.Agent.MaxSteps+30)*time.Second)
 	defer cancel()
 	out, err := runtime.RunOnce(ctx, prompt)

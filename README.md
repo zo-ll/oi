@@ -60,9 +60,10 @@ oi models
 oi version
 oi run "task"
 oi rpc
+oi chat
 ```
 
-`chat` is still scaffolded but not implemented yet.
+`chat` is implemented as a minimal interactive mode with slash commands.
 
 ## Docs
 
