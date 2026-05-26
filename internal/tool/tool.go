@@ -99,5 +99,8 @@ func (r *Registry) Run(ctx context.Context, call Call) Result {
 	if res.Tool == "" {
 		res.Tool = call.Name
 	}
+	if res.Error == "" {
+		res.OK = true
+	}
 	return res
 }

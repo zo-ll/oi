@@ -10,8 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
 	iprovider "github.com/zo-ll/oi/internal/provider"
+	"github.com/zo-ll/oi/internal/session"
+	"github.com/zo-ll/oi/internal/tool"
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
@@ -45,7 +48,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runDoctor(args[1:], stdout)
 	case "models":
 		return runModels(args[1:], stdout)
-	case "chat", "run", "rpc":
+	case "run":
+		return runTask(args[1:], stdout)
+	case "chat", "rpc":
 		return fmt.Errorf("%s: not implemented yet", args[0])
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -136,28 +141,12 @@ func runModels(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load()
+	cfg, sel, err := loadSelection(opts)
 	if err != nil {
 		return err
 	}
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	auth, err := config.LoadAuth()
-	if err != nil {
-		return err
-	}
-	sel, err := config.ResolveSelection(cfg, auth, opts.provider, opts.model, opts.apiKey)
-	if err != nil {
-		return err
-	}
-	if sel.Provider == "" {
-		return fmt.Errorf("no provider selected")
-	}
-	if sel.APIKey == "" {
-		return fmt.Errorf("no API key resolved for provider %q", sel.Provider)
-	}
-	p, err := iprovider.NewOpenAI(sel.Provider, sel.BaseURL, sel.APIKey, sel.Model)
+	_ = cfg
+	p, err := requireProvider(sel)
 	if err != nil {
 		return err
 	}
@@ -168,8 +157,62 @@ func runModels(args []string, w io.Writer) error {
 		return err
 	}
 	for _, m := range models {
-		fmt.Fprintln(w, m.ID)
+		marker := " "
+		if m.ID == sel.Model {
+			marker = "*"
+		}
+		fmt.Fprintf(w, "%s %s\n", marker, m.ID)
 	}
+	return nil
+}
+
+func runTask(args []string, w io.Writer) error {
+	opts, err := parseCommonOptions("run", args)
+	if err != nil {
+		return err
+	}
+	prompt := strings.TrimSpace(strings.Join(opts.rest, " "))
+	if prompt == "" {
+		return fmt.Errorf("usage: oi run [--provider NAME] [--model NAME] [--api-key KEY] \"task\"")
+	}
+	cfg, sel, err := loadSelection(opts)
+	if err != nil {
+		return err
+	}
+	p, err := requireProvider(sel)
+	if err != nil {
+		return err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	root, err := workspace.DetectRoot(cwd)
+	if err != nil {
+		return err
+	}
+	policy := workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalMode(cfg.Agent.ApprovalMode)}
+	tools := tool.NewBuiltinRegistry(tool.Options{
+		Policy:         policy,
+		MaxOutputBytes: cfg.Agent.MaxToolOutputBytes,
+		PromptInput:    os.Stdin,
+		PromptOutput:   os.Stdout,
+	})
+	runtime := &agent.Runtime{
+		Provider:    p,
+		Tools:       tools,
+		Policy:      policy,
+		Session:     session.New(sel.Provider, p.Model(), root),
+		MaxSteps:    cfg.Agent.MaxSteps,
+		ToolTimeout: time.Duration(cfg.Agent.ToolTimeoutSeconds) * time.Second,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.ToolTimeoutSeconds*cfg.Agent.MaxSteps+30)*time.Second)
+	defer cancel()
+	out, err := runtime.RunOnce(ctx, prompt)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, out)
 	return nil
 }
 
@@ -203,13 +246,44 @@ func parseCommonOptions(name string, args []string) (commonOptions, error) {
 	if err := fs.Parse(args); err != nil {
 		return commonOptions{}, err
 	}
+	opts.rest = fs.Args()
 	return opts, nil
+}
+
+func loadSelection(opts commonOptions) (*config.Config, config.Selection, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, config.Selection{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, config.Selection{}, err
+	}
+	auth, err := config.LoadAuth()
+	if err != nil {
+		return nil, config.Selection{}, err
+	}
+	sel, err := config.ResolveSelection(cfg, auth, opts.provider, opts.model, opts.apiKey)
+	if err != nil {
+		return nil, config.Selection{}, err
+	}
+	return cfg, sel, nil
+}
+
+func requireProvider(sel config.Selection) (*iprovider.OpenAIProvider, error) {
+	if sel.Provider == "" {
+		return nil, fmt.Errorf("no provider selected")
+	}
+	if sel.APIKey == "" {
+		return nil, fmt.Errorf("no API key resolved for provider %q", sel.Provider)
+	}
+	return iprovider.NewOpenAI(sel.Provider, sel.BaseURL, sel.APIKey, sel.Model)
 }
 
 type commonOptions struct {
 	provider string
 	model    string
 	apiKey   string
+	rest     []string
 }
 
 func valueOr(v, fallback string) string {

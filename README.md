@@ -58,9 +58,10 @@ Available now:
 oi doctor
 oi models
 oi version
+oi run "task"
 ```
 
-`chat`, `run`, and `rpc` are scaffolded but not implemented yet.
+`chat` and `rpc` are still scaffolded but not implemented yet.
 
 ## Docs
 
