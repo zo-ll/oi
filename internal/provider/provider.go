@@ -67,11 +67,12 @@ const (
 
 // Event is one normalized streaming event.
 type Event struct {
-	Type     EventType `json:"type"`
-	Delta    string    `json:"delta,omitempty"`
-	ToolCall *ToolCall `json:"tool_call,omitempty"`
-	Done     bool      `json:"done,omitempty"`
-	Err      error     `json:"-"`
+	Type      EventType `json:"type"`
+	Delta     string    `json:"delta,omitempty"`
+	Reasoning string    `json:"reasoning_content,omitempty"`
+	ToolCall  *ToolCall `json:"tool_call,omitempty"`
+	Done      bool      `json:"done,omitempty"`
+	Err       error     `json:"-"`
 }
 
 // Provider is the core backend abstraction for oi.

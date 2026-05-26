@@ -28,6 +28,15 @@ type Runtime struct {
 
 // RunOnce executes one user request through the bounded agent loop.
 func (r *Runtime) RunOnce(ctx context.Context, input string) (string, error) {
+	return r.run(ctx, input, nil, false)
+}
+
+// RunOnceStream executes one user request and forwards text deltas as they arrive.
+func (r *Runtime) RunOnceStream(ctx context.Context, input string, onDelta func(string)) (string, error) {
+	return r.run(ctx, input, onDelta, true)
+}
+
+func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), streaming bool) (string, error) {
 	if r == nil {
 		return "", errors.New("nil runtime")
 	}
@@ -55,11 +64,7 @@ func (r *Runtime) RunOnce(ctx context.Context, input string) (string, error) {
 	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: input, Kind: "talk"})
 
 	for step := 0; step < r.MaxSteps; step++ {
-		resp, err := r.Provider.Chat(ctx, provider.Request{
-			Model:    r.Provider.Model(),
-			Messages: history,
-			Tools:    providerToolSpecs(r.Tools),
-		})
+		resp, err := r.callProvider(ctx, history, onDelta, streaming)
 		if err != nil {
 			return "", err
 		}
@@ -104,6 +109,39 @@ func (r *Runtime) RunOnce(ctx context.Context, input string) (string, error) {
 	}
 
 	return "", fmt.Errorf("max steps exceeded (%d)", r.MaxSteps)
+}
+
+func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, onDelta func(string), streaming bool) (provider.Response, error) {
+	req := provider.Request{Model: r.Provider.Model(), Messages: history, Tools: providerToolSpecs(r.Tools)}
+	if !streaming {
+		return r.Provider.Chat(ctx, req)
+	}
+	stream, err := r.Provider.ChatStream(ctx, req)
+	if err != nil {
+		return provider.Response{}, err
+	}
+	var resp provider.Response
+	for ev := range stream {
+		if ev.Err != nil {
+			return provider.Response{}, ev.Err
+		}
+		if ev.Reasoning != "" {
+			resp.Reasoning += ev.Reasoning
+		}
+		if ev.Delta != "" {
+			resp.Content += ev.Delta
+			if onDelta != nil {
+				onDelta(ev.Delta)
+			}
+		}
+		if ev.ToolCall != nil {
+			resp.ToolCalls = append(resp.ToolCalls, *ev.ToolCall)
+		}
+		if ev.Done {
+			break
+		}
+	}
+	return resp, nil
 }
 
 func providerToolSpecs(reg *tool.Registry) []provider.ToolSpec {

@@ -298,6 +298,9 @@ func (p *OpenAIProvider) readStream(body io.ReadCloser, ch chan<- Event) {
 			return
 		}
 		for _, choice := range chunk.Choices {
+			if choice.Delta.Reasoning != "" {
+				ch <- Event{Type: EventDelta, Reasoning: choice.Delta.Reasoning}
+			}
 			if choice.Delta.Content != "" {
 				ch <- Event{Type: EventDelta, Delta: choice.Delta.Content}
 			}

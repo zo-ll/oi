@@ -34,7 +34,9 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 		return err
 	}
 	reader := bufio.NewReader(in)
+	streaming := true
 	rt := buildRuntime(cfg, sel, p, root, reader, out)
+	configureChatRuntime(rt, out)
 
 	fmt.Fprintf(out, "oi chat\nprovider: %s\nmodel: %s\nworkspace: %s\n", sel.Provider, valueOr(sel.Model, "(none)"), root)
 	fmt.Fprintln(out, "Type /help for commands.")
@@ -54,12 +56,14 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 			continue
 		}
 		if strings.HasPrefix(line, "/") {
-			exit, newRT, newSel, cmdErr := handleChatCommand(cfg, sel, rt, reader, out, line)
+			exit, newRT, newSel, newStreaming, cmdErr := handleChatCommand(cfg, sel, rt, reader, out, line, streaming)
 			if cmdErr != nil {
 				fmt.Fprintf(out, "error: %v\n", cmdErr)
 			} else {
 				rt = newRT
 				sel = newSel
+				streaming = newStreaming
+				configureChatRuntime(rt, out)
 			}
 			if exit {
 				return nil
@@ -71,12 +75,38 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.ToolTimeoutSeconds*cfg.Agent.MaxSteps+30)*time.Second)
-		resp, runErr := rt.RunOnce(ctx, line)
-		cancel()
-		if runErr != nil {
-			fmt.Fprintf(out, "error: %v\n", runErr)
+		if streaming {
+			spinnerStop := startThinkingIndicator(out)
+			startedOutput := false
+			resp, runErr := rt.RunOnceStream(ctx, line, func(delta string) {
+				if !startedOutput {
+					spinnerStop()
+					startedOutput = true
+				}
+				fmt.Fprint(out, delta)
+			})
+			spinnerStop()
+			cancel()
+			if runErr != nil {
+				if startedOutput {
+					fmt.Fprintln(out)
+				}
+				fmt.Fprintf(out, "error: %v\n", runErr)
+			} else {
+				if !startedOutput {
+					fmt.Fprintln(out, resp)
+				} else {
+					fmt.Fprintln(out)
+				}
+			}
 		} else {
-			fmt.Fprintln(out, resp)
+			resp, runErr := rt.RunOnce(ctx, line)
+			cancel()
+			if runErr != nil {
+				fmt.Fprintf(out, "error: %v\n", runErr)
+			} else {
+				fmt.Fprintln(out, resp)
+			}
 		}
 		if err == io.EOF {
 			return nil
@@ -84,7 +114,7 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 	}
 }
 
-func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, line string) (bool, *agent.Runtime, config.Selection, error) {
+func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, line string, streaming bool) (bool, *agent.Runtime, config.Selection, bool, error) {
 	fields := strings.Fields(line)
 	cmd := fields[0]
 	arg := ""
@@ -97,49 +127,50 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		fmt.Fprintln(out, "/help                show commands")
 		fmt.Fprintln(out, "/provider [name]     show or set provider")
 		fmt.Fprintln(out, "/model [name]        show models or set model")
+		fmt.Fprintln(out, "/stream [on|off]     show or set streaming mode")
 		fmt.Fprintln(out, "/new                 start a new session")
 		fmt.Fprintln(out, "/save [name]         save current session")
 		fmt.Fprintln(out, "/load <name|path>    load a saved session")
 		fmt.Fprintln(out, "/exit                exit chat")
-		return false, rt, sel, nil
+		return false, rt, sel, streaming, nil
 	case "/exit", "/quit":
-		return true, rt, sel, nil
+		return true, rt, sel, streaming, nil
 	case "/new":
 		root, err := workspace.DetectRoot(rt.Policy.Root)
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		rt.Session = session.New(sel.Provider, sel.Model, root)
 		fmt.Fprintln(out, "new session started")
-		return false, rt, sel, nil
+		return false, rt, sel, streaming, nil
 	case "/provider":
 		if arg == "" {
 			fmt.Fprintf(out, "current provider: %s\n", valueOr(sel.Provider, "(none)"))
 			fmt.Fprintf(out, "available providers: %s\n", strings.Join(config.ProviderNames(cfg), ", "))
-			return false, rt, sel, nil
+			return false, rt, sel, streaming, nil
 		}
 		nextSel, err := config.ResolveSelection(cfg, mustLoadAuth(), arg, "", "")
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		p, err := requireProvider(nextSel)
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		root, err := workspace.DetectRoot(rt.Policy.Root)
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		nextRT := buildRuntime(cfg, nextSel, p, root, reader, out)
 		fmt.Fprintf(out, "provider set to %s\n", nextSel.Provider)
-		return false, nextRT, nextSel, nil
+		return false, nextRT, nextSel, streaming, nil
 	case "/model":
 		if arg == "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			models, err := rt.Provider.ListModels(ctx)
 			if err != nil {
-				return false, rt, sel, err
+				return false, rt, sel, streaming, err
 			}
 			for _, m := range models {
 				marker := " "
@@ -148,28 +179,43 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 				}
 				fmt.Fprintf(out, "%s %s\n", marker, m.ID)
 			}
-			return false, rt, sel, nil
+			return false, rt, sel, streaming, nil
 		}
 		nextSel := sel
 		nextSel.Model = arg
 		p, err := requireProvider(nextSel)
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		root, err := workspace.DetectRoot(rt.Policy.Root)
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		nextRT := buildRuntime(cfg, nextSel, p, root, reader, out)
 		fmt.Fprintf(out, "model set to %s\n", arg)
-		return false, nextRT, nextSel, nil
+		return false, nextRT, nextSel, streaming, nil
+	case "/stream":
+		if arg == "" {
+			fmt.Fprintf(out, "streaming: %s\n", onOff(streaming))
+			return false, rt, sel, streaming, nil
+		}
+		switch strings.ToLower(arg) {
+		case "on":
+			fmt.Fprintln(out, "streaming: on")
+			return false, rt, sel, true, nil
+		case "off":
+			fmt.Fprintln(out, "streaming: off")
+			return false, rt, sel, false, nil
+		default:
+			return false, rt, sel, streaming, fmt.Errorf("usage: /stream [on|off]")
+		}
 	case "/save":
 		if rt.Session == nil {
-			return false, rt, sel, fmt.Errorf("no session to save")
+			return false, rt, sel, streaming, fmt.Errorf("no session to save")
 		}
 		if arg != "" {
 			if err := validateSessionName(arg); err != nil {
-				return false, rt, sel, err
+				return false, rt, sel, streaming, err
 			}
 			rt.Session.ID = arg
 		}
@@ -181,18 +227,18 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		}
 		path, err := session.Save(config.SessionsDir(), rt.Session)
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		fmt.Fprintf(out, "saved: %s\n", path)
-		return false, rt, sel, nil
+		return false, rt, sel, streaming, nil
 	case "/load":
 		if arg == "" {
-			return false, rt, sel, fmt.Errorf("usage: /load <name|path>")
+			return false, rt, sel, streaming, fmt.Errorf("usage: /load <name|path>")
 		}
 		path := resolveSessionPath(config.SessionsDir(), arg)
 		loaded, err := session.Load(path)
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		nextSel := sel
 		if loaded.Provider != "" {
@@ -203,11 +249,11 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		}
 		cfg2, nextSel2, err := loadSelection(commonOptions{provider: nextSel.Provider, model: nextSel.Model})
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		p, err := requireProvider(nextSel2)
 		if err != nil {
-			return false, rt, sel, err
+			return false, rt, sel, streaming, err
 		}
 		root := rt.Policy.Root
 		if loaded.CWD != "" {
@@ -221,9 +267,9 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		loaded.CWD = root
 		nextRT.Session = loaded
 		fmt.Fprintf(out, "loaded: %s\n", path)
-		return false, nextRT, nextSel2, nil
+		return false, nextRT, nextSel2, streaming, nil
 	default:
-		return false, rt, sel, fmt.Errorf("unknown command: %s", cmd)
+		return false, rt, sel, streaming, fmt.Errorf("unknown command: %s", cmd)
 	}
 }
 
@@ -254,4 +300,50 @@ func mustLoadAuth() *config.Auth {
 		return &config.Auth{}
 	}
 	return auth
+}
+
+func configureChatRuntime(rt *agent.Runtime, out io.Writer) {
+	if rt == nil {
+		return
+	}
+	rt.OnToolStart = nil
+	rt.OnToolResult = nil
+	_ = out
+}
+
+func onOff(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
+}
+
+func startThinkingIndicator(out io.Writer) func() {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		frames := []string{"thinking   ", "thinking.  ", "thinking.. ", "thinking..."}
+		i := 0
+		ticker := time.NewTicker(120 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				fmt.Fprint(out, "\r            \r")
+				return
+			case <-ticker.C:
+				fmt.Fprintf(out, "\r%s", frames[i%len(frames)])
+				i++
+			}
+		}
+	}()
+	return func() {
+		select {
+		case <-stop:
+		default:
+			close(stop)
+		}
+		<-done
+	}
 }
