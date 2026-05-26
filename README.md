@@ -32,15 +32,11 @@ Uninstall:
 bash uninstall.sh
 ```
 
-## Make targets
+Build manually:
 
 ```bash
-make build
-make test
-make install
-make uninstall
-make doctor
-make version
+go test ./...
+go build -o ~/.local/bin/oi ./cmd/oi
 ```
 
 ## Commands
