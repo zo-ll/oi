@@ -1,11 +1,15 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
+
+	"github.com/zo-ll/oi/internal/oauth"
 )
 
 // ProviderConfig defines one OpenAI-compatible provider profile.
@@ -30,17 +34,19 @@ type Config struct {
 	Agent           AgentConfig               `json:"agent,omitempty"`
 }
 
-// Auth stores provider API keys when env vars are not used.
+// Auth stores provider API keys and refreshable OAuth credentials.
 type Auth struct {
-	Keys map[string]string `json:"keys,omitempty"`
+	Keys  map[string]string                       `json:"keys,omitempty"`
+	OAuth map[string]oauth.OpenAICodexCredentials `json:"oauth,omitempty"`
 }
 
 // Selection is the fully resolved runtime provider selection.
 type Selection struct {
-	Provider string
-	Model    string
-	BaseURL  string
-	APIKey   string
+	Provider  string
+	Model     string
+	BaseURL   string
+	APIKey    string
+	AccountID string
 }
 
 // Default returns config defaults suitable for a minimal build.
@@ -108,7 +114,7 @@ func Load() (*Config, error) {
 
 // LoadAuth reads auth.json if present.
 func LoadAuth() (*Auth, error) {
-	auth := &Auth{Keys: make(map[string]string)}
+	auth := &Auth{Keys: make(map[string]string), OAuth: make(map[string]oauth.OpenAICodexCredentials)}
 	data, err := os.ReadFile(AuthPath())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -121,6 +127,9 @@ func LoadAuth() (*Auth, error) {
 	}
 	if auth.Keys == nil {
 		auth.Keys = make(map[string]string)
+	}
+	if auth.OAuth == nil {
+		auth.OAuth = make(map[string]oauth.OpenAICodexCredentials)
 	}
 	return auth, nil
 }
@@ -151,16 +160,28 @@ func Save(c *Config) error {
 // SaveAuth writes auth.json using private file permissions.
 func SaveAuth(auth *Auth) error {
 	if auth == nil {
-		auth = &Auth{Keys: make(map[string]string)}
+		auth = &Auth{Keys: make(map[string]string), OAuth: make(map[string]oauth.OpenAICodexCredentials)}
 	}
 	if auth.Keys == nil {
 		auth.Keys = make(map[string]string)
 	}
-	clean := &Auth{Keys: make(map[string]string, len(auth.Keys))}
+	if auth.OAuth == nil {
+		auth.OAuth = make(map[string]oauth.OpenAICodexCredentials)
+	}
+	clean := &Auth{
+		Keys:  make(map[string]string, len(auth.Keys)),
+		OAuth: make(map[string]oauth.OpenAICodexCredentials, len(auth.OAuth)),
+	}
 	for name, key := range auth.Keys {
 		if key = firstNonEmpty(key); key != "" {
 			clean.Keys[name] = key
 		}
+	}
+	for name, cred := range auth.OAuth {
+		if firstNonEmpty(cred.Access, cred.Refresh, cred.AccountID) == "" || cred.ExpiresAt.IsZero() {
+			continue
+		}
+		clean.OAuth[name] = cred
 	}
 	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
 		return err
@@ -210,7 +231,7 @@ func ResolveSelection(c *Config, auth *Auth, cliProvider, cliModel, cliKey strin
 		c = Default()
 	}
 	if auth == nil {
-		auth = &Auth{Keys: make(map[string]string)}
+		auth = &Auth{Keys: make(map[string]string), OAuth: make(map[string]oauth.OpenAICodexCredentials)}
 	}
 	sel := Selection{
 		Provider: firstNonEmpty(cliProvider, c.DefaultProvider),
@@ -229,6 +250,11 @@ func ResolveSelection(c *Config, auth *Auth, cliProvider, cliModel, cliKey strin
 		os.Getenv(pc.APIKeyEnv),
 		auth.Keys[sel.Provider],
 	)
+	if sel.APIKey == "" {
+		if err := hydrateOAuthSelection(auth, &sel); err != nil {
+			return sel, err
+		}
+	}
 	return sel, nil
 }
 
@@ -246,6 +272,34 @@ func (c *Config) applyDefaults() {
 	if c.Agent.ApprovalMode == "" {
 		c.Agent.ApprovalMode = def.Agent.ApprovalMode
 	}
+}
+
+func hydrateOAuthSelection(auth *Auth, sel *Selection) error {
+	if auth == nil || sel == nil {
+		return nil
+	}
+	switch sel.Provider {
+	case "openai-codex":
+		cred, ok := auth.OAuth[sel.Provider]
+		if !ok {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		fresh, changed, err := oauth.RefreshOpenAICodexTokenIfNeeded(ctx, cred)
+		if err != nil {
+			return err
+		}
+		if changed {
+			auth.OAuth[sel.Provider] = fresh
+			if err := SaveAuth(auth); err != nil {
+				return err
+			}
+		}
+		sel.APIKey = fresh.Access
+		sel.AccountID = fresh.AccountID
+	}
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {

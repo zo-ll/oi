@@ -69,10 +69,7 @@ func NewServer() (*Server, error) {
 			if sel.Provider == "" {
 				return nil, nil
 			}
-			if sel.APIKey == "" {
-				return nil, fmt.Errorf("no API key resolved for provider %q", sel.Provider)
-			}
-			return provider.NewOpenAI(sel.Provider, sel.BaseURL, sel.APIKey, sel.Model)
+			return provider.NewForSelection(sel)
 		},
 	}
 	s.tools = tool.NewBuiltinRegistry(tool.Options{

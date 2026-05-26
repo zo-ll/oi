@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/zo-ll/oi/internal/config"
+	"github.com/zo-ll/oi/internal/oauth"
 	iprovider "github.com/zo-ll/oi/internal/provider"
 	irpc "github.com/zo-ll/oi/internal/rpc"
 	"github.com/zo-ll/oi/internal/workspace"
@@ -270,6 +272,10 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 		cfg.DefaultModel = opts.model
 	}
 
+	if providerName == "openai-codex" {
+		return runLoginOpenAICodex(in, w, cfg, auth, providerName, pc, opts)
+	}
+
 	key := normalizeAPIKey(opts.apiKey)
 	if key == "" {
 		fmt.Fprintf(w, "Paste API key for %s (input will be visible): ", providerName)
@@ -285,6 +291,7 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 	if auth.Keys == nil {
 		auth.Keys = make(map[string]string)
 	}
+	delete(auth.OAuth, providerName)
 	auth.Keys[providerName] = key
 	if err := config.Save(cfg); err != nil {
 		return err
@@ -299,6 +306,58 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 	if providerName == "openai" {
 		fmt.Fprintln(w, "note: OpenAI requires an API key from platform.openai.com. A ChatGPT web subscription does not provide API access.")
 	}
+	sel, err := config.ResolveSelection(cfg, auth, providerName, firstNonEmpty(opts.model, cfg.DefaultModel), "")
+	if err == nil {
+		fmt.Fprintf(w, "connectivity: %s\n", doctorConnectivity(sel))
+	}
+	return nil
+}
+
+func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *config.Auth, providerName string, pc config.ProviderConfig, opts struct {
+	provider    string
+	apiKey      string
+	baseURL     string
+	model       string
+	makeDefault bool
+}) error {
+	if auth.OAuth == nil {
+		auth.OAuth = make(map[string]oauth.OpenAICodexCredentials)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cred, err := oauth.LoginOpenAICodex(ctx, func(info oauth.AuthInfo) {
+		fmt.Fprintf(w, "Open this URL to log in:\n%s\n", info.URL)
+		if info.Instructions != "" {
+			fmt.Fprintln(w, info.Instructions)
+		}
+		if err := openBrowser(info.URL); err != nil {
+			fmt.Fprintf(w, "warning: could not open browser automatically: %v\n", err)
+		}
+	}, func(message string) (string, error) {
+		fmt.Fprint(w, message)
+		return promptLine(in)
+	})
+	if err != nil {
+		return err
+	}
+	cfg.Providers[providerName] = pc
+	if cfg.DefaultProvider == "" || opts.makeDefault {
+		cfg.DefaultProvider = providerName
+	}
+	if cfg.DefaultModel == "" || opts.makeDefault || cfg.DefaultProvider == providerName {
+		cfg.DefaultModel = firstNonEmpty(opts.model, "gpt-5.3-codex")
+	}
+	delete(auth.Keys, providerName)
+	auth.OAuth[providerName] = cred
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	if err := config.SaveAuth(auth); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "saved provider: %s\n", providerName)
+	fmt.Fprintf(w, "config: %s\n", config.ConfigPath())
+	fmt.Fprintf(w, "auth: %s\n", config.AuthPath())
 	sel, err := config.ResolveSelection(cfg, auth, providerName, firstNonEmpty(opts.model, cfg.DefaultModel), "")
 	if err == nil {
 		fmt.Fprintf(w, "connectivity: %s\n", doctorConnectivity(sel))
@@ -332,6 +391,7 @@ func runLogout(args []string, w io.Writer) error {
 		return err
 	}
 	delete(auth.Keys, providerName)
+	delete(auth.OAuth, providerName)
 	if err := config.SaveAuth(auth); err != nil {
 		return err
 	}
@@ -397,7 +457,7 @@ func doctorConnectivity(sel config.Selection) string {
 	if sel.APIKey == "" {
 		return "skipped (no API key)"
 	}
-	p, err := iprovider.NewOpenAI(sel.Provider, sel.BaseURL, sel.APIKey, sel.Model)
+	p, err := iprovider.NewForSelection(sel)
 	if err != nil {
 		return "error: " + err.Error()
 	}
@@ -444,14 +504,8 @@ func loadSelection(opts commonOptions) (*config.Config, config.Selection, error)
 	return cfg, sel, nil
 }
 
-func requireProvider(sel config.Selection) (*iprovider.OpenAIProvider, error) {
-	if sel.Provider == "" {
-		return nil, fmt.Errorf("no provider selected")
-	}
-	if sel.APIKey == "" {
-		return nil, fmt.Errorf("no API key resolved for provider %q", sel.Provider)
-	}
-	return iprovider.NewOpenAI(sel.Provider, sel.BaseURL, sel.APIKey, sel.Model)
+func requireProvider(sel config.Selection) (iprovider.Provider, error) {
+	return iprovider.NewForSelection(sel)
 }
 
 type commonOptions struct {
@@ -466,6 +520,8 @@ func knownProviderProfile(name string) (config.ProviderConfig, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "openai":
 		return config.ProviderConfig{BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY"}, true
+	case "openai-codex":
+		return config.ProviderConfig{BaseURL: "https://chatgpt.com/backend-api"}, true
 	case "opencode-go":
 		return config.ProviderConfig{BaseURL: "https://opencode.ai/zen/go/v1", APIKeyEnv: "OPENCODE_API_KEY"}, true
 	default:
@@ -477,8 +533,13 @@ func authSource(name string, pc config.ProviderConfig, auth *config.Auth) string
 	if pc.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(pc.APIKeyEnv)) != "" {
 		return "env:" + pc.APIKeyEnv
 	}
-	if auth != nil && strings.TrimSpace(auth.Keys[name]) != "" {
-		return "auth.json"
+	if auth != nil {
+		if strings.TrimSpace(auth.Keys[name]) != "" {
+			return "auth.json"
+		}
+		if _, ok := auth.OAuth[name]; ok {
+			return "oauth"
+		}
 	}
 	return "none"
 }
@@ -493,6 +554,19 @@ func promptLine(in io.Reader) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(line), nil
+}
+
+func openBrowser(target string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", target)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", target)
+	default:
+		cmd = exec.Command("xdg-open", target)
+	}
+	return cmd.Start()
 }
 
 func firstNonEmpty(values ...string) string {

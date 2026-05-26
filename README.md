@@ -49,6 +49,7 @@ oi doctor
 oi models
 oi providers
 oi login openai
+oi login openai-codex
 oi logout openai
 oi version
 oi run "task"
@@ -68,6 +69,7 @@ oi doctor
 oi models
 oi providers
 oi login openai
+oi login openai-codex
 oi logout openai
 oi version
 oi run "task"
@@ -115,12 +117,14 @@ Save credentials for a provider:
 
 ```bash
 oi login openai --model gpt-4.1
+oi login openai-codex --model gpt-5.3-codex
 oi login opencode-go --model deepseek-v4-pro
 ```
 
-`oi login openai` uses the standard OpenAI API endpoint (`https://api.openai.com/v1`).
+- `oi login openai` uses the standard OpenAI API endpoint (`https://api.openai.com/v1`) and requires an API key from `platform.openai.com`.
+- `oi login openai-codex` uses ChatGPT Plus/Pro browser OAuth against the Codex backend (`https://chatgpt.com/backend-api`).
 
-Important: a ChatGPT web subscription does not automatically provide API access. For `openai`, you need an API key from `platform.openai.com`.
+If you have a ChatGPT Plus/Pro subscription and want browser login, use `openai-codex`, not `openai`.
 
 ## RPC example
 

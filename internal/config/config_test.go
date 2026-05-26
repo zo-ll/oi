@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/zo-ll/oi/internal/oauth"
 )
 
 func TestConfigAndStateDirUseXDG(t *testing.T) {
@@ -114,5 +117,30 @@ func TestSaveAuthWritesPrivateFile(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("perm = %o", got)
+	}
+}
+
+func TestResolveSelectionUsesStoredOAuth(t *testing.T) {
+	cfg := &Config{
+		DefaultProvider: "openai-codex",
+		DefaultModel:    "gpt-5.3-codex",
+		Providers: map[string]ProviderConfig{
+			"openai-codex": {BaseURL: "https://chatgpt.com/backend-api"},
+		},
+	}
+	auth := &Auth{OAuth: map[string]oauth.OpenAICodexCredentials{
+		"openai-codex": {
+			Access:    "tok",
+			Refresh:   "ref",
+			AccountID: "acct",
+			ExpiresAt: time.Now().UTC().Add(time.Hour),
+		},
+	}}
+	sel, err := ResolveSelection(cfg, auth, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel.APIKey != "tok" || sel.AccountID != "acct" {
+		t.Fatalf("selection = %+v", sel)
 	}
 }
