@@ -37,6 +37,7 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 	}
 	reader := bufio.NewReader(in)
 	streaming := true
+	autosave := true
 	logger, err := maybeDebugLogger("chat", opts.debug)
 	if err != nil {
 		return err
@@ -57,18 +58,19 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 		if line == "" {
 			if err == io.EOF {
 				fmt.Fprintln(out)
-				return nil
+				return exitChat(reader, out, rt, sel, autosave)
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "/") {
-			exit, newRT, newSel, newStreaming, cmdErr := handleChatCommand(cfg, sel, rt, reader, out, line, streaming)
+			exit, newRT, newSel, newStreaming, newAutosave, cmdErr := handleChatCommand(cfg, sel, rt, reader, out, line, streaming, autosave)
 			if cmdErr != nil {
 				fmt.Fprintf(out, "error: %v\n", cmdErr)
 			} else {
 				rt = newRT
 				sel = newSel
 				streaming = newStreaming
+				autosave = newAutosave
 				configureChatRuntime(rt, out)
 			}
 			if exit {
@@ -104,6 +106,11 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 				} else {
 					fmt.Fprintln(out)
 				}
+				if autosave {
+					if _, saveErr := saveSession(rt, sel); saveErr != nil {
+						fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)
+					}
+				}
 			}
 		} else {
 			resp, runErr := rt.RunOnce(ctx, line)
@@ -112,15 +119,20 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 				fmt.Fprintf(out, "error: %v\n", runErr)
 			} else {
 				fmt.Fprintln(out, resp)
+				if autosave {
+					if _, saveErr := saveSession(rt, sel); saveErr != nil {
+						fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)
+					}
+				}
 			}
 		}
 		if err == io.EOF {
-			return nil
+			return exitChat(reader, out, rt, sel, autosave)
 		}
 	}
 }
 
-func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, line string, streaming bool) (bool, *agent.Runtime, config.Selection, bool, error) {
+func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, line string, streaming bool, autosave bool) (bool, *agent.Runtime, config.Selection, bool, bool, error) {
 	fields := strings.Fields(line)
 	cmd := fields[0]
 	arg := ""
@@ -134,50 +146,64 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		fmt.Fprintln(out, "/provider [name]     show or set provider")
 		fmt.Fprintln(out, "/model [name]        show models or set model")
 		fmt.Fprintln(out, "/stream [on|off]     show or set streaming mode")
+		fmt.Fprintln(out, "/autosave [on|off]   show or set autosave mode")
 		fmt.Fprintln(out, "/new                 start a new session")
 		fmt.Fprintln(out, "/sessions            list saved sessions")
 		fmt.Fprintln(out, "/save [name]         save current session")
 		fmt.Fprintln(out, "/load <name|path>    load a saved session")
 		fmt.Fprintln(out, "/exit                exit chat")
-		return false, rt, sel, streaming, nil
+		return false, rt, sel, streaming, autosave, nil
 	case "/exit", "/quit":
-		return true, rt, sel, streaming, nil
+		if err := exitChat(reader, out, rt, sel, autosave); err != nil {
+			return false, rt, sel, streaming, autosave, err
+		}
+		return true, rt, sel, streaming, autosave, nil
 	case "/new":
 		root, err := workspace.DetectRoot(rt.Policy.Root)
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		rt.Session = session.New(sel.Provider, sel.Model, root)
 		fmt.Fprintln(out, "new session started")
-		return false, rt, sel, streaming, nil
+		if autosave {
+			if _, err := saveSession(rt, sel); err != nil {
+				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
+			}
+		}
+		return false, rt, sel, streaming, autosave, nil
 	case "/provider":
 		if arg == "" {
 			fmt.Fprintf(out, "current provider: %s\n", valueOr(sel.Provider, "(none)"))
 			fmt.Fprintf(out, "available providers: %s\n", strings.Join(config.ProviderNames(cfg), ", "))
-			return false, rt, sel, streaming, nil
+			return false, rt, sel, streaming, autosave, nil
 		}
 		nextSel, err := config.ResolveSelection(cfg, mustLoadAuth(), arg, "", "")
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		p, err := requireProvider(nextSel)
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		root, err := workspace.DetectRoot(rt.Policy.Root)
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		nextRT := buildRuntime(cfg, nextSel, p, root, reader, out, rt.Logger)
 		fmt.Fprintf(out, "provider set to %s\n", nextSel.Provider)
-		return false, nextRT, nextSel, streaming, nil
+		if autosave {
+			if _, err := saveSession(nextRT, nextSel); err != nil {
+				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
+			}
+		}
+		return false, nextRT, nextSel, streaming, autosave, nil
 	case "/model":
 		if arg == "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			models, err := rt.Provider.ListModels(ctx)
 			if err != nil {
-				return false, rt, sel, streaming, err
+				return false, rt, sel, streaming, autosave, err
 			}
 			for _, m := range models {
 				marker := " "
@@ -186,79 +212,87 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 				}
 				fmt.Fprintf(out, "%s %s\n", marker, m.ID)
 			}
-			return false, rt, sel, streaming, nil
+			return false, rt, sel, streaming, autosave, nil
 		}
 		nextSel := sel
 		nextSel.Model = arg
 		p, err := requireProvider(nextSel)
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		root, err := workspace.DetectRoot(rt.Policy.Root)
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		nextRT := buildRuntime(cfg, nextSel, p, root, reader, out, rt.Logger)
 		fmt.Fprintf(out, "model set to %s\n", arg)
-		return false, nextRT, nextSel, streaming, nil
+		if autosave {
+			if _, err := saveSession(nextRT, nextSel); err != nil {
+				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
+			}
+		}
+		return false, nextRT, nextSel, streaming, autosave, nil
 	case "/stream":
 		if arg == "" {
 			fmt.Fprintf(out, "streaming: %s\n", onOff(streaming))
-			return false, rt, sel, streaming, nil
+			return false, rt, sel, streaming, autosave, nil
 		}
 		switch strings.ToLower(arg) {
 		case "on":
 			fmt.Fprintln(out, "streaming: on")
-			return false, rt, sel, true, nil
+			return false, rt, sel, true, autosave, nil
 		case "off":
 			fmt.Fprintln(out, "streaming: off")
-			return false, rt, sel, false, nil
+			return false, rt, sel, false, autosave, nil
 		default:
-			return false, rt, sel, streaming, fmt.Errorf("usage: /stream [on|off]")
+			return false, rt, sel, streaming, autosave, fmt.Errorf("usage: /stream [on|off]")
+		}
+	case "/autosave":
+		if arg == "" {
+			fmt.Fprintf(out, "autosave: %s\n", onOff(autosave))
+			return false, rt, sel, streaming, autosave, nil
+		}
+		switch strings.ToLower(arg) {
+		case "on":
+			fmt.Fprintln(out, "autosave: on")
+			if _, err := saveSession(rt, sel); err != nil {
+				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
+			}
+			return false, rt, sel, streaming, true, nil
+		case "off":
+			fmt.Fprintln(out, "autosave: off")
+			return false, rt, sel, streaming, false, nil
+		default:
+			return false, rt, sel, streaming, autosave, fmt.Errorf("usage: /autosave [on|off]")
 		}
 	case "/sessions":
 		infos, err := session.List(config.SessionsDir())
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		if len(infos) == 0 {
 			fmt.Fprintln(out, "no saved sessions")
-			return false, rt, sel, streaming, nil
+			return false, rt, sel, streaming, autosave, nil
 		}
 		for _, info := range infos {
 			fmt.Fprintf(out, "%s  %s  %s  %s\n", info.ID, info.UpdatedAt.Format("2006-01-02 15:04:05"), valueOr(info.Provider, "-"), valueOr(info.Model, "-"))
 		}
-		return false, rt, sel, streaming, nil
+		return false, rt, sel, streaming, autosave, nil
 	case "/save":
-		if rt.Session == nil {
-			return false, rt, sel, streaming, fmt.Errorf("no session to save")
-		}
-		if arg != "" {
-			if err := validateSessionName(arg); err != nil {
-				return false, rt, sel, streaming, err
-			}
-			rt.Session.ID = arg
-		}
-		rt.Session.Provider = sel.Provider
-		rt.Session.Model = sel.Model
-		root, err := workspace.DetectRoot(rt.Policy.Root)
-		if err == nil {
-			rt.Session.CWD = root
-		}
-		path, err := session.Save(config.SessionsDir(), rt.Session)
+		path, err := saveSessionNamed(rt, sel, arg)
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		fmt.Fprintf(out, "saved: %s\n", path)
-		return false, rt, sel, streaming, nil
+		return false, rt, sel, streaming, autosave, nil
 	case "/load":
 		if arg == "" {
-			return false, rt, sel, streaming, fmt.Errorf("usage: /load <name|path>")
+			return false, rt, sel, streaming, autosave, fmt.Errorf("usage: /load <name|path>")
 		}
 		path := resolveSessionPath(config.SessionsDir(), arg)
 		loaded, err := session.Load(path)
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		nextSel := sel
 		if loaded.Provider != "" {
@@ -269,11 +303,11 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		}
 		cfg2, nextSel2, err := loadSelection(commonOptions{provider: nextSel.Provider, model: nextSel.Model})
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		p, err := requireProvider(nextSel2)
 		if err != nil {
-			return false, rt, sel, streaming, err
+			return false, rt, sel, streaming, autosave, err
 		}
 		root := rt.Policy.Root
 		if loaded.CWD != "" {
@@ -287,9 +321,9 @@ func handleChatCommand(cfg *config.Config, sel config.Selection, rt *agent.Runti
 		loaded.CWD = root
 		nextRT.Session = loaded
 		fmt.Fprintf(out, "loaded: %s\n", path)
-		return false, nextRT, nextSel2, streaming, nil
+		return false, nextRT, nextSel2, streaming, autosave, nil
 	default:
-		return false, rt, sel, streaming, fmt.Errorf("unknown command: %s", cmd)
+		return false, rt, sel, streaming, autosave, fmt.Errorf("unknown command: %s", cmd)
 	}
 }
 
@@ -413,4 +447,63 @@ func startThinkingIndicator(out io.Writer) func() {
 		}
 		<-done
 	}
+}
+
+func saveSession(rt *agent.Runtime, sel config.Selection) (string, error) {
+	return saveSessionNamed(rt, sel, "")
+}
+
+func saveSessionNamed(rt *agent.Runtime, sel config.Selection, name string) (string, error) {
+	if rt == nil || rt.Session == nil {
+		return "", fmt.Errorf("no session to save")
+	}
+	target := rt.Session
+	if name != "" {
+		if err := validateSessionName(name); err != nil {
+			return "", err
+		}
+		clone := *rt.Session
+		if rt.Session.Messages != nil {
+			clone.Messages = append([]session.Message(nil), rt.Session.Messages...)
+		}
+		clone.ID = name
+		target = &clone
+	}
+	target.Provider = sel.Provider
+	target.Model = sel.Model
+	root, err := workspace.DetectRoot(rt.Policy.Root)
+	if err == nil {
+		target.CWD = root
+	}
+	return session.Save(config.SessionsDir(), target)
+}
+
+func exitChat(reader *bufio.Reader, out io.Writer, rt *agent.Runtime, sel config.Selection, autosave bool) error {
+	if _, err := saveSession(rt, sel); err != nil {
+		return err
+	}
+	if !autosave {
+		fmt.Fprintln(out, "session saved on exit")
+	}
+	fmt.Fprint(out, "Save named snapshot before exit? [y/N] ")
+	answer, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return err
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer != "y" && answer != "yes" {
+		return nil
+	}
+	fmt.Fprint(out, "Snapshot name (blank = current id): ")
+	name, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	path, err := saveSessionNamed(rt, sel, name)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "saved snapshot: %s\n", path)
+	return nil
 }

@@ -77,11 +77,14 @@ oi chat
 - `/provider [name]`
 - `/model [name]`
 - `/stream [on|off]`
+- `/autosave [on|off]`
 - `/new`
 - `/sessions`
 - `/save [name]`
 - `/load <name|path>`
 - `/exit`
+
+Chat autosaves the rolling session by default after successful turns, saves on exit, and can optionally save a named snapshot when exiting.
 
 ## Debug logging
 
