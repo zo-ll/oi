@@ -125,6 +125,54 @@ func LoadAuth() (*Auth, error) {
 	return auth, nil
 }
 
+// Save writes config.json.
+func Save(c *Config) error {
+	if c == nil {
+		return fmt.Errorf("nil config")
+	}
+	if c.Providers == nil {
+		c.Providers = make(map[string]ProviderConfig)
+	}
+	c.applyDefaults()
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(ConfigPath(), data, 0o644)
+}
+
+// SaveAuth writes auth.json using private file permissions.
+func SaveAuth(auth *Auth) error {
+	if auth == nil {
+		auth = &Auth{Keys: make(map[string]string)}
+	}
+	if auth.Keys == nil {
+		auth.Keys = make(map[string]string)
+	}
+	clean := &Auth{Keys: make(map[string]string, len(auth.Keys))}
+	for name, key := range auth.Keys {
+		if key = firstNonEmpty(key); key != "" {
+			clean.Keys[name] = key
+		}
+	}
+	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(clean, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(AuthPath(), data, 0o600)
+}
+
 // Validate checks structural config issues.
 func (c *Config) Validate() error {
 	if c == nil {

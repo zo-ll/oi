@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -23,15 +24,15 @@ var (
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "oi:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string, stdout, stderr io.Writer) error {
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return runChat(nil, os.Stdin, stdout)
+		return runChat(nil, stdin, stdout)
 	}
 
 	switch args[0] {
@@ -45,12 +46,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runDoctor(args[1:], stdout)
 	case "models":
 		return runModels(args[1:], stdout)
+	case "providers":
+		return runProviders(stdout)
+	case "login":
+		return runLogin(args[1:], stdin, stdout)
+	case "logout":
+		return runLogout(args[1:], stdout)
 	case "run":
-		return runTask(args[1:], stdout)
+		return runTask(args[1:], stdin, stdout)
 	case "rpc":
-		return runRPC(stdout)
+		return runRPC(stdin, stdout)
 	case "chat":
-		return runChat(args[1:], os.Stdin, stdout)
+		return runChat(args[1:], stdin, stdout)
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
@@ -64,12 +71,15 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  oi help")
 	fmt.Fprintln(w, "  oi doctor")
 	fmt.Fprintln(w, "  oi models")
+	fmt.Fprintln(w, "  oi providers")
+	fmt.Fprintln(w, "  oi login [provider]")
+	fmt.Fprintln(w, "  oi logout [provider]")
 	fmt.Fprintln(w, "  oi version")
 	fmt.Fprintln(w, "  oi chat")
 	fmt.Fprintln(w, "  oi run \"task\"")
 	fmt.Fprintln(w, "  oi rpc")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Current status: chat is the default mode; doctor, models, version, run, and rpc are also available.")
+	fmt.Fprintln(w, "Current status: chat is the default mode; doctor, models, providers, login, logout, version, run, and rpc are available.")
 }
 
 func printVersion(w io.Writer) {
@@ -166,7 +176,173 @@ func runModels(args []string, w io.Writer) error {
 	return nil
 }
 
-func runTask(args []string, w io.Writer) error {
+func runProviders(w io.Writer) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	auth, err := config.LoadAuth()
+	if err != nil {
+		return err
+	}
+	names := config.ProviderNames(cfg)
+	if len(names) == 0 {
+		fmt.Fprintln(w, "no providers configured")
+		return nil
+	}
+	for _, name := range names {
+		pc := cfg.Providers[name]
+		marker := " "
+		if name == cfg.DefaultProvider {
+			marker = "*"
+		}
+		fmt.Fprintf(w, "%s %s\n", marker, name)
+		fmt.Fprintf(w, "  base_url: %s\n", pc.BaseURL)
+		if pc.APIKeyEnv != "" {
+			fmt.Fprintf(w, "  api_key_env: %s\n", pc.APIKeyEnv)
+		}
+		fmt.Fprintf(w, "  key_source: %s\n", authSource(name, pc, auth))
+	}
+	return nil
+}
+
+func runLogin(args []string, in io.Reader, w io.Writer) error {
+	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var opts struct {
+		provider    string
+		apiKey      string
+		baseURL     string
+		model       string
+		makeDefault bool
+	}
+	fs.StringVar(&opts.provider, "provider", "", "provider name")
+	fs.StringVar(&opts.apiKey, "api-key", "", "API key to save")
+	fs.StringVar(&opts.baseURL, "base-url", "", "provider base URL")
+	fs.StringVar(&opts.model, "model", "", "default model")
+	fs.BoolVar(&opts.makeDefault, "default", false, "set as default provider")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if opts.provider == "" && len(fs.Args()) > 0 {
+		opts.provider = strings.TrimSpace(fs.Args()[0])
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	auth, err := config.LoadAuth()
+	if err != nil {
+		return err
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]config.ProviderConfig)
+	}
+	providerName := strings.TrimSpace(opts.provider)
+	if providerName == "" {
+		providerName = cfg.DefaultProvider
+	}
+	if providerName == "" {
+		return fmt.Errorf("usage: oi login <provider> [--api-key KEY] [--base-url URL] [--model MODEL]")
+	}
+
+	pc, ok := cfg.Providers[providerName]
+	if !ok {
+		if known, ok := knownProviderProfile(providerName); ok {
+			pc = known
+		}
+	}
+	if opts.baseURL != "" {
+		pc.BaseURL = opts.baseURL
+	}
+	if pc.BaseURL == "" {
+		return fmt.Errorf("provider %q is not configured; pass --base-url or add it to config.json", providerName)
+	}
+	cfg.Providers[providerName] = pc
+	if cfg.DefaultProvider == "" || opts.makeDefault {
+		cfg.DefaultProvider = providerName
+	}
+	if opts.model != "" && (cfg.DefaultModel == "" || opts.makeDefault || cfg.DefaultProvider == providerName) {
+		cfg.DefaultModel = opts.model
+	}
+
+	key := normalizeAPIKey(opts.apiKey)
+	if key == "" {
+		fmt.Fprintf(w, "Paste API key for %s (input will be visible): ", providerName)
+		line, err := promptLine(in)
+		if err != nil {
+			return err
+		}
+		key = normalizeAPIKey(line)
+	}
+	if key == "" {
+		return fmt.Errorf("API key is required")
+	}
+	if auth.Keys == nil {
+		auth.Keys = make(map[string]string)
+	}
+	auth.Keys[providerName] = key
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	if err := config.SaveAuth(auth); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(w, "saved provider: %s\n", providerName)
+	fmt.Fprintf(w, "config: %s\n", config.ConfigPath())
+	fmt.Fprintf(w, "auth: %s\n", config.AuthPath())
+	if providerName == "openai" {
+		fmt.Fprintln(w, "note: OpenAI requires an API key from platform.openai.com. A ChatGPT web subscription does not provide API access.")
+	}
+	sel, err := config.ResolveSelection(cfg, auth, providerName, firstNonEmpty(opts.model, cfg.DefaultModel), "")
+	if err == nil {
+		fmt.Fprintf(w, "connectivity: %s\n", doctorConnectivity(sel))
+	}
+	return nil
+}
+
+func runLogout(args []string, w io.Writer) error {
+	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var providerName string
+	fs.StringVar(&providerName, "provider", "", "provider name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if providerName == "" && len(fs.Args()) > 0 {
+		providerName = strings.TrimSpace(fs.Args()[0])
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if providerName == "" {
+		providerName = cfg.DefaultProvider
+	}
+	if providerName == "" {
+		return fmt.Errorf("usage: oi logout <provider>")
+	}
+	auth, err := config.LoadAuth()
+	if err != nil {
+		return err
+	}
+	delete(auth.Keys, providerName)
+	if err := config.SaveAuth(auth); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "removed saved key for %s\n", providerName)
+	if pc, ok := cfg.Providers[providerName]; ok && pc.APIKeyEnv != "" && os.Getenv(pc.APIKeyEnv) != "" {
+		fmt.Fprintf(w, "note: %s is still set in the environment and will continue to take precedence\n", pc.APIKeyEnv)
+	}
+	return nil
+}
+
+func runTask(args []string, stdin io.Reader, w io.Writer) error {
 	opts, err := parseCommonOptions("run", args)
 	if err != nil {
 		return err
@@ -195,7 +371,7 @@ func runTask(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	runtime := buildRuntime(cfg, sel, p, root, os.Stdin, os.Stdout, logger)
+	runtime := buildRuntime(cfg, sel, p, root, stdin, w, logger)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.ToolTimeoutSeconds*cfg.Agent.MaxSteps+30)*time.Second)
 	defer cancel()
 	out, err := runtime.RunOnce(ctx, prompt)
@@ -206,12 +382,12 @@ func runTask(args []string, w io.Writer) error {
 	return nil
 }
 
-func runRPC(w io.Writer) error {
+func runRPC(in io.Reader, w io.Writer) error {
 	srv, err := irpc.NewServer()
 	if err != nil {
 		return err
 	}
-	return srv.Serve(os.Stdin, w)
+	return srv.Serve(in, w)
 }
 
 func doctorConnectivity(sel config.Selection) string {
@@ -284,6 +460,48 @@ type commonOptions struct {
 	apiKey   string
 	debug    bool
 	rest     []string
+}
+
+func knownProviderProfile(name string) (config.ProviderConfig, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "openai":
+		return config.ProviderConfig{BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY"}, true
+	case "opencode-go":
+		return config.ProviderConfig{BaseURL: "https://opencode.ai/zen/go/v1", APIKeyEnv: "OPENCODE_API_KEY"}, true
+	default:
+		return config.ProviderConfig{}, false
+	}
+}
+
+func authSource(name string, pc config.ProviderConfig, auth *config.Auth) string {
+	if pc.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(pc.APIKeyEnv)) != "" {
+		return "env:" + pc.APIKeyEnv
+	}
+	if auth != nil && strings.TrimSpace(auth.Keys[name]) != "" {
+		return "auth.json"
+	}
+	return "none"
+}
+
+func normalizeAPIKey(v string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), "Bearer "))
+}
+
+func promptLine(in io.Reader) (string, error) {
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func valueOr(v, fallback string) string {

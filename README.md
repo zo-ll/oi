@@ -47,6 +47,9 @@ oi
 
 oi doctor
 oi models
+oi providers
+oi login openai
+oi logout openai
 oi version
 oi run "task"
 oi chat
@@ -63,6 +66,9 @@ oi
 
 oi doctor
 oi models
+oi providers
+oi login openai
+oi logout openai
 oi version
 oi run "task"
 oi rpc
@@ -97,11 +103,32 @@ Chat autosaves the rolling session by default after successful turns, saves on e
 /autosave off
 ```
 
+## Provider login
+
+List configured providers:
+
+```bash
+oi providers
+```
+
+Save credentials for a provider:
+
+```bash
+oi login openai --model gpt-4.1
+oi login opencode-go --model deepseek-v4-pro
+```
+
+`oi login openai` uses the standard OpenAI API endpoint (`https://api.openai.com/v1`).
+
+Important: a ChatGPT web subscription does not automatically provide API access. For `openai`, you need an API key from `platform.openai.com`.
+
 ## RPC example
 
 ```bash
 printf '{"id":"1","type":"ping"}\n{"id":"2","type":"get_state"}\n' | oi rpc
 ```
+
+See also: `RPC.md`
 
 ## Debug logging
 

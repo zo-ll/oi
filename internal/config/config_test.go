@@ -102,3 +102,17 @@ func TestLoadParsesConfigFile(t *testing.T) {
 		t.Fatalf("DefaultProvider = %q", cfg.DefaultProvider)
 	}
 }
+
+func TestSaveAuthWritesPrivateFile(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := SaveAuth(&Auth{Keys: map[string]string{"demo": "key"}}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(AuthPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("perm = %o", got)
+	}
+}
