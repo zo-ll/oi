@@ -16,16 +16,17 @@ import (
 
 // Runtime is the core agent runtime boundary.
 type Runtime struct {
-	Provider     provider.Provider
-	Tools        *tool.Registry
-	Policy       workspace.Policy
-	Session      *session.Session
-	MaxSteps     int
-	ToolTimeout  time.Duration
-	SystemPrompt string
-	OnToolStart  func(tool.Call)
-	OnToolResult func(tool.Call, tool.Result)
-	Logger       *ilog.Logger
+	Provider       provider.Provider
+	Tools          *tool.Registry
+	Policy         workspace.Policy
+	Session        *session.Session
+	MaxSteps       int
+	ToolTimeout    time.Duration
+	RequestTimeout time.Duration
+	SystemPrompt   string
+	OnToolStart    func(tool.Call)
+	OnToolResult   func(tool.Call, tool.Result)
+	Logger         *ilog.Logger
 }
 
 // RunOnce executes one user request through the bounded agent loop.
@@ -53,6 +54,9 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 	}
 	if r.ToolTimeout <= 0 {
 		r.ToolTimeout = 20 * time.Second
+	}
+	if r.RequestTimeout <= 0 {
+		r.RequestTimeout = 10 * time.Minute
 	}
 	if r.Session == nil {
 		r.Session = session.New(r.Provider.Name(), r.Provider.Model(), r.Policy.Root)
@@ -143,15 +147,27 @@ func jsonRaw(raw []byte) any {
 
 func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, onDelta func(string), streaming bool) (provider.Response, error) {
 	req := provider.Request{Model: r.Provider.Model(), Messages: history, Tools: providerToolSpecs(r.Tools)}
+	requestCtx, cancel := context.WithTimeout(ctx, r.RequestTimeout)
+	defer cancel()
 	if !streaming {
-		return r.Provider.Chat(ctx, req)
+		return r.Provider.Chat(requestCtx, req)
 	}
-	stream, err := r.Provider.ChatStream(ctx, req)
+	stream, err := r.Provider.ChatStream(requestCtx, req)
 	if err != nil {
 		return provider.Response{}, err
 	}
 	var resp provider.Response
-	for ev := range stream {
+	for {
+		var ev provider.Event
+		var ok bool
+		select {
+		case <-requestCtx.Done():
+			return provider.Response{}, requestCtx.Err()
+		case ev, ok = <-stream:
+			if !ok {
+				return resp, nil
+			}
+		}
 		if ev.Err != nil {
 			return provider.Response{}, ev.Err
 		}

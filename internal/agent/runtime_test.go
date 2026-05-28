@@ -16,6 +16,12 @@ type fakeProvider struct {
 	model     string
 	responses []provider.Response
 	requests  []provider.Request
+	deadlines []deadlineRecord
+}
+
+type deadlineRecord struct {
+	deadline time.Time
+	ok       bool
 }
 
 func (f *fakeProvider) Name() string                                         { return f.name }
@@ -25,8 +31,10 @@ func (f *fakeProvider) ListModels(context.Context) ([]provider.Model, error) { r
 func (f *fakeProvider) ChatStream(context.Context, provider.Request) (<-chan provider.Event, error) {
 	return nil, nil
 }
-func (f *fakeProvider) Chat(_ context.Context, req provider.Request) (provider.Response, error) {
+func (f *fakeProvider) Chat(ctx context.Context, req provider.Request) (provider.Response, error) {
 	f.requests = append(f.requests, req)
+	deadline, ok := ctx.Deadline()
+	f.deadlines = append(f.deadlines, deadlineRecord{deadline: deadline, ok: ok})
 	if len(f.responses) == 0 {
 		return provider.Response{}, nil
 	}
@@ -47,6 +55,21 @@ func (fakeTool) Run(_ context.Context, call tool.Call) tool.Result {
 	}
 	_ = json.Unmarshal(call.Args, &args)
 	return tool.Result{Tool: "echo", OK: true, Output: args.Text}
+}
+
+type deadlineTool struct {
+	deadline time.Time
+	ok       bool
+}
+
+func (d *deadlineTool) Name() string { return "wait" }
+func (d *deadlineTool) Spec() tool.Spec {
+	return tool.Spec{Name: "wait", InputSchema: json.RawMessage(`{"type":"object"}`)}
+}
+func (d *deadlineTool) Run(ctx context.Context, _ tool.Call) tool.Result {
+	d.deadline, d.ok = ctx.Deadline()
+	time.Sleep(20 * time.Millisecond)
+	return tool.Result{Tool: "wait", OK: true, Output: "waited"}
 }
 
 func TestRunOnceFinalAnswer(t *testing.T) {
@@ -107,5 +130,42 @@ func TestRunOnceMaxStepsExceeded(t *testing.T) {
 	r := &Runtime{Provider: p, Tools: tool.NewRegistry(fakeTool{}), Policy: workspace.Policy{Root: "."}, MaxSteps: 1, ToolTimeout: time.Second}
 	if _, err := r.RunOnce(context.Background(), "loop"); err == nil {
 		t.Fatal("expected max steps error")
+	}
+}
+
+func TestRunOnceAppliesIndependentProviderAndToolTimeouts(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{
+		{ToolCalls: []provider.ToolCall{{ID: "1", Name: "wait", Args: json.RawMessage(`{}`)}}},
+		{Content: "done"},
+	}}
+	wait := &deadlineTool{}
+	r := &Runtime{
+		Provider:       p,
+		Tools:          tool.NewRegistry(wait),
+		Policy:         workspace.Policy{Root: "."},
+		MaxSteps:       2,
+		ToolTimeout:    100 * time.Millisecond,
+		RequestTimeout: 100 * time.Millisecond,
+	}
+	out, err := r.RunOnce(context.Background(), "use a tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "done" {
+		t.Fatalf("out = %q", out)
+	}
+	if len(p.deadlines) != 2 {
+		t.Fatalf("provider calls = %d", len(p.deadlines))
+	}
+	for i, d := range p.deadlines {
+		if !d.ok {
+			t.Fatalf("provider call %d did not receive a deadline", i+1)
+		}
+	}
+	if !wait.ok {
+		t.Fatal("tool did not receive a deadline")
+	}
+	if !p.deadlines[1].deadline.After(p.deadlines[0].deadline) {
+		t.Fatalf("second provider deadline was not refreshed: first=%s second=%s", p.deadlines[0].deadline, p.deadlines[1].deadline)
 	}
 }

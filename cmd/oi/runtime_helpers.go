@@ -28,13 +28,14 @@ func buildRuntime(cfg *config.Config, sel config.Selection, p provider.Provider,
 		model = p.Model()
 	}
 	return &agent.Runtime{
-		Provider:    p,
-		Tools:       tools,
-		Policy:      policy,
-		Session:     session.New(sel.Provider, model, root),
-		MaxSteps:    cfg.Agent.MaxSteps,
-		ToolTimeout: time.Duration(cfg.Agent.ToolTimeoutSeconds) * time.Second,
-		Logger:      logger,
+		Provider:       p,
+		Tools:          tools,
+		Policy:         policy,
+		Session:        session.New(sel.Provider, model, root),
+		MaxSteps:       cfg.Agent.MaxSteps,
+		ToolTimeout:    time.Duration(cfg.Agent.ToolTimeoutSeconds) * time.Second,
+		RequestTimeout: time.Duration(cfg.Agent.RequestTimeoutSeconds) * time.Second,
+		Logger:         logger,
 	}
 }
 

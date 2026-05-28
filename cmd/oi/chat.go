@@ -82,7 +82,7 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.RequestTimeoutSeconds)*time.Second)
+		ctx := context.Background()
 		if streaming {
 			spinnerStop := startThinkingIndicator(out)
 			startedOutput := false
@@ -94,7 +94,6 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 				fmt.Fprint(out, delta)
 			})
 			spinnerStop()
-			cancel()
 			if runErr != nil {
 				if startedOutput {
 					fmt.Fprintln(out)
@@ -114,7 +113,6 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 			}
 		} else {
 			resp, runErr := rt.RunOnce(ctx, line)
-			cancel()
 			if runErr != nil {
 				fmt.Fprintf(out, "error: %v\n", runErr)
 			} else {

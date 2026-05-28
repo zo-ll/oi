@@ -151,16 +151,8 @@ func (s *Server) prompt(req Request) error {
 		return fmt.Errorf("no provider configured")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	timeout := time.Duration(s.cfg.Agent.RequestTimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 2 * time.Minute
-	}
-	ctx, deadlineCancel := context.WithTimeout(ctx, timeout)
 	s.busy = true
-	s.cancel = func() {
-		cancel()
-		deadlineCancel()
-	}
+	s.cancel = cancel
 	runtime := s.runtime
 	runtime.OnToolStart = func(call tool.Call) {
 		_ = s.emit(Event{Type: "tool_start", ID: req.ID, Data: map[string]any{"name": call.Name, "args": jsonRaw(call.Args)}})
@@ -292,12 +284,13 @@ func (s *Server) resetRuntime() error {
 	}
 	s.mu.Lock()
 	s.runtime = &agent.Runtime{
-		Provider:    p,
-		Tools:       s.tools,
-		Policy:      s.policy,
-		Session:     session.New(s.selection.Provider, model, s.policy.Root),
-		MaxSteps:    s.cfg.Agent.MaxSteps,
-		ToolTimeout: time.Duration(s.cfg.Agent.ToolTimeoutSeconds) * time.Second,
+		Provider:       p,
+		Tools:          s.tools,
+		Policy:         s.policy,
+		Session:        session.New(s.selection.Provider, model, s.policy.Root),
+		MaxSteps:       s.cfg.Agent.MaxSteps,
+		ToolTimeout:    time.Duration(s.cfg.Agent.ToolTimeoutSeconds) * time.Second,
+		RequestTimeout: time.Duration(s.cfg.Agent.RequestTimeoutSeconds) * time.Second,
 	}
 	s.mu.Unlock()
 	return nil

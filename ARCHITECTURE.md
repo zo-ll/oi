@@ -206,6 +206,7 @@ Fallbacks:
     "max_steps": 12,
     "max_tool_output_bytes": 65536,
     "tool_timeout_seconds": 20,
+    "request_timeout_seconds": 600,
     "approval_mode": "prompt"
   }
 }
@@ -399,7 +400,7 @@ The loop should be simple and explicit.
 - max steps
 - max tool output bytes
 - per-tool timeout
-- overall request timeout
+- per-provider-request timeout
 
 ### Failure behavior
 

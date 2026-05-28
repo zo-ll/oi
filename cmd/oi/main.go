@@ -433,9 +433,7 @@ func runTask(args []string, stdin io.Reader, w io.Writer) error {
 		return err
 	}
 	runtime := buildRuntime(cfg, sel, p, root, stdin, w, logger)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.RequestTimeoutSeconds)*time.Second)
-	defer cancel()
-	out, err := runtime.RunOnce(ctx, prompt)
+	out, err := runtime.RunOnce(context.Background(), prompt)
 	if err != nil {
 		return err
 	}

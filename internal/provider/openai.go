@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 )
 
 // OpenAIProvider implements the Provider interface for OpenAI-compatible APIs.
@@ -37,7 +36,7 @@ func NewOpenAI(name, baseURL, apiKey, model string) (*OpenAIProvider, error) {
 		baseURL:    baseURL,
 		apiKey:     strings.TrimSpace(strings.TrimPrefix(apiKey, "Bearer ")),
 		model:      model,
-		client:     &http.Client{Timeout: 60 * time.Second},
+		client:     &http.Client{},
 		maxRetries: 2,
 	}, nil
 }
