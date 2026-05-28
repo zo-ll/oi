@@ -144,6 +144,7 @@ func runDoctor(args []string, w io.Writer) error {
 
 	fmt.Fprintf(w, "agent max steps: %d\n", cfg.Agent.MaxSteps)
 	fmt.Fprintf(w, "tool timeout seconds: %d\n", cfg.Agent.ToolTimeoutSeconds)
+	fmt.Fprintf(w, "request timeout seconds: %d\n", cfg.Agent.RequestTimeoutSeconds)
 	fmt.Fprintf(w, "approval mode: %s\n", cfg.Agent.ApprovalMode)
 	return nil
 }
@@ -432,7 +433,7 @@ func runTask(args []string, stdin io.Reader, w io.Writer) error {
 		return err
 	}
 	runtime := buildRuntime(cfg, sel, p, root, stdin, w, logger)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.ToolTimeoutSeconds*cfg.Agent.MaxSteps+30)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.RequestTimeoutSeconds)*time.Second)
 	defer cancel()
 	out, err := runtime.RunOnce(ctx, prompt)
 	if err != nil {

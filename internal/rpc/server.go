@@ -151,7 +151,7 @@ func (s *Server) prompt(req Request) error {
 		return fmt.Errorf("no provider configured")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	timeout := time.Duration(s.cfg.Agent.ToolTimeoutSeconds*s.cfg.Agent.MaxSteps+30) * time.Second
+	timeout := time.Duration(s.cfg.Agent.RequestTimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 2 * time.Minute
 	}

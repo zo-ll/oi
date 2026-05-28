@@ -82,7 +82,7 @@ func runChat(args []string, in io.Reader, out io.Writer) error {
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.ToolTimeoutSeconds*cfg.Agent.MaxSteps+30)*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Agent.RequestTimeoutSeconds)*time.Second)
 		if streaming {
 			spinnerStop := startThinkingIndicator(out)
 			startedOutput := false

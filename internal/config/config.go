@@ -20,10 +20,11 @@ type ProviderConfig struct {
 
 // AgentConfig holds global runtime defaults.
 type AgentConfig struct {
-	MaxSteps           int    `json:"max_steps,omitempty"`
-	MaxToolOutputBytes int    `json:"max_tool_output_bytes,omitempty"`
-	ToolTimeoutSeconds int    `json:"tool_timeout_seconds,omitempty"`
-	ApprovalMode       string `json:"approval_mode,omitempty"`
+	MaxSteps              int    `json:"max_steps,omitempty"`
+	MaxToolOutputBytes    int    `json:"max_tool_output_bytes,omitempty"`
+	ToolTimeoutSeconds    int    `json:"tool_timeout_seconds,omitempty"`
+	RequestTimeoutSeconds int    `json:"request_timeout_seconds,omitempty"`
+	ApprovalMode          string `json:"approval_mode,omitempty"`
 }
 
 // Config is the top-level user configuration document.
@@ -54,10 +55,11 @@ func Default() *Config {
 	return &Config{
 		Providers: make(map[string]ProviderConfig),
 		Agent: AgentConfig{
-			MaxSteps:           12,
-			MaxToolOutputBytes: 64 * 1024,
-			ToolTimeoutSeconds: 20,
-			ApprovalMode:       "prompt",
+			MaxSteps:              12,
+			MaxToolOutputBytes:    64 * 1024,
+			ToolTimeoutSeconds:    20,
+			RequestTimeoutSeconds: 600,
+			ApprovalMode:          "prompt",
 		},
 	}
 }
@@ -268,6 +270,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Agent.ToolTimeoutSeconds == 0 {
 		c.Agent.ToolTimeoutSeconds = def.Agent.ToolTimeoutSeconds
+	}
+	if c.Agent.RequestTimeoutSeconds == 0 {
+		c.Agent.RequestTimeoutSeconds = def.Agent.RequestTimeoutSeconds
 	}
 	if c.Agent.ApprovalMode == "" {
 		c.Agent.ApprovalMode = def.Agent.ApprovalMode
