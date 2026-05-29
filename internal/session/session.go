@@ -10,13 +10,21 @@ import (
 	"time"
 )
 
+// ToolCall is one persisted assistant tool invocation.
+type ToolCall struct {
+	ID   string          `json:"id,omitempty"`
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args"`
+}
+
 // Message is one persisted transcript entry.
 type Message struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	Reasoning  string `json:"reasoning,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	Kind       string `json:"kind,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	Reasoning  string     `json:"reasoning,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // Session stores transcript and runtime metadata.

@@ -8,19 +8,36 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 )
 
 const defaultCodexBaseURL = "https://chatgpt.com/backend-api"
 
 var codexModels = []Model{
-	{ID: "gpt-5.2", Name: "GPT-5.2"},
+	// The ChatGPT Codex backend does not expose the normal OpenAI
+	// Platform /v1/models endpoint, so keep a broad built-in picker list.
+	// Some accounts may not have access to every model here.
+	{ID: "gpt-5-codex", Name: "GPT-5 Codex"},
+	{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex"},
 	{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex"},
 	{ID: "gpt-5.3-codex-spark", Name: "GPT-5.3 Codex Spark"},
+	{ID: "gpt-5", Name: "GPT-5"},
+	{ID: "gpt-5-mini", Name: "GPT-5 mini"},
+	{ID: "gpt-5-nano", Name: "GPT-5 nano"},
+	{ID: "gpt-5.1", Name: "GPT-5.1"},
+	{ID: "gpt-5.1-mini", Name: "GPT-5.1 mini"},
+	{ID: "gpt-5.2", Name: "GPT-5.2"},
 	{ID: "gpt-5.4", Name: "GPT-5.4"},
 	{ID: "gpt-5.4-mini", Name: "GPT-5.4 mini"},
 	{ID: "gpt-5.5", Name: "GPT-5.5"},
+	{ID: "gpt-4.1", Name: "GPT-4.1"},
+	{ID: "gpt-4.1-mini", Name: "GPT-4.1 mini"},
+	{ID: "gpt-4.1-nano", Name: "GPT-4.1 nano"},
+	{ID: "gpt-4o", Name: "GPT-4o"},
+	{ID: "gpt-4o-mini", Name: "GPT-4o mini"},
+	{ID: "o3", Name: "o3"},
+	{ID: "o3-mini", Name: "o3 mini"},
+	{ID: "o4-mini", Name: "o4 mini"},
 }
 
 // OpenAICodexProvider implements ChatGPT Codex Responses API access.
@@ -119,9 +136,7 @@ func (p *OpenAICodexProvider) ChatStream(ctx context.Context, req Request) (<-ch
 }
 
 func (p *OpenAICodexProvider) ListModels(context.Context) ([]Model, error) {
-	out := append([]Model(nil), codexModels...)
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return append([]Model(nil), codexModels...), nil
 }
 
 func (p *OpenAICodexProvider) buildRequest(req Request) (map[string]any, error) {
@@ -278,12 +293,16 @@ func sanitizeCodexID(id string) string {
 }
 
 type codexEvent struct {
-	Type      string `json:"type"`
-	Delta     string `json:"delta,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-	Code      string `json:"code,omitempty"`
-	Message   string `json:"message,omitempty"`
-	Response  *struct {
+	Type         string `json:"type"`
+	Delta        string `json:"delta,omitempty"`
+	Text         string `json:"text,omitempty"`
+	Arguments    string `json:"arguments,omitempty"`
+	ItemID       string `json:"item_id,omitempty"`
+	OutputIndex  int    `json:"output_index,omitempty"`
+	ContentIndex int    `json:"content_index,omitempty"`
+	Code         string `json:"code,omitempty"`
+	Message      string `json:"message,omitempty"`
+	Response     *struct {
 		Status string `json:"status,omitempty"`
 		Usage  *struct {
 			InputTokens  int `json:"input_tokens,omitempty"`
@@ -311,6 +330,13 @@ type codexEvent struct {
 	} `json:"item,omitempty"`
 }
 
+type codexStreamState struct {
+	pendingCalls map[string]*pendingCodexCall
+	callOrder    []string
+	currentCall  string
+	emittedText  bool
+}
+
 type pendingCodexCall struct {
 	id   string
 	name string
@@ -323,12 +349,12 @@ func (p *OpenAICodexProvider) readStream(body io.ReadCloser, ch chan<- Event) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var block []string
-	var currentCall *pendingCodexCall
+	state := &codexStreamState{pendingCalls: make(map[string]*pendingCodexCall)}
 	done := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" {
-			finished, err := emitCodexBlock(ch, block, &currentCall)
+			finished, err := emitCodexBlock(ch, block, state)
 			if err != nil {
 				ch <- Event{Err: err}
 				return
@@ -347,7 +373,7 @@ func (p *OpenAICodexProvider) readStream(body io.ReadCloser, ch chan<- Event) {
 		return
 	}
 	if !done {
-		finished, err := emitCodexBlock(ch, block, &currentCall)
+		finished, err := emitCodexBlock(ch, block, state)
 		if err != nil {
 			ch <- Event{Err: err}
 			return
@@ -358,7 +384,7 @@ func (p *OpenAICodexProvider) readStream(body io.ReadCloser, ch chan<- Event) {
 	}
 }
 
-func emitCodexBlock(ch chan<- Event, lines []string, currentCall **pendingCodexCall) (bool, error) {
+func emitCodexBlock(ch chan<- Event, lines []string, state *codexStreamState) (bool, error) {
 	if len(lines) == 0 {
 		return false, nil
 	}
@@ -374,8 +400,13 @@ func emitCodexBlock(ch chan<- Event, lines []string, currentCall **pendingCodexC
 		return false, nil
 	}
 	payload := strings.TrimSpace(strings.Join(dataLines, "\n"))
-	if payload == "" || payload == "[DONE]" {
+	if payload == "" {
 		return false, nil
+	}
+	if payload == "[DONE]" {
+		emitPendingCodexCalls(ch, state)
+		ch <- Event{Type: EventDone, Done: true}
+		return true, nil
 	}
 	var ev codexEvent
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
@@ -398,45 +429,135 @@ func emitCodexBlock(ch chan<- Event, lines []string, currentCall **pendingCodexC
 		}
 	case "response.output_text.delta", "response.refusal.delta":
 		if ev.Delta != "" {
+			state.emittedText = true
 			ch <- Event{Type: EventDelta, Delta: ev.Delta}
+		}
+	case "response.output_text.done", "response.refusal.done":
+		if !state.emittedText && ev.Text != "" {
+			state.emittedText = true
+			ch <- Event{Type: EventDelta, Delta: ev.Text}
 		}
 	case "response.output_item.added":
 		if ev.Item != nil && ev.Item.Type == "function_call" {
-			call := &pendingCodexCall{id: ev.Item.CallID, name: ev.Item.Name}
+			key := codexCallKey(ev, state)
+			call := ensureCodexCall(state, key)
+			if ev.Item.CallID != "" {
+				call.id = ev.Item.CallID
+			}
+			if ev.Item.Name != "" {
+				call.name = ev.Item.Name
+			}
 			call.args.WriteString(ev.Item.Arguments)
-			*currentCall = call
 		}
 	case "response.function_call_arguments.delta":
-		if *currentCall != nil {
-			(*currentCall).args.WriteString(ev.Delta)
+		key := codexCallKey(ev, state)
+		if key != "" {
+			ensureCodexCall(state, key).args.WriteString(ev.Delta)
 		}
 	case "response.function_call_arguments.done":
-		if *currentCall != nil && ev.Arguments != "" {
-			(*currentCall).args.Reset()
-			(*currentCall).args.WriteString(ev.Arguments)
+		key := codexCallKey(ev, state)
+		if key != "" && ev.Arguments != "" {
+			call := ensureCodexCall(state, key)
+			call.args.Reset()
+			call.args.WriteString(ev.Arguments)
 		}
 	case "response.output_item.done":
 		if ev.Item != nil && ev.Item.Type == "function_call" {
-			callID := ev.Item.CallID
-			name := ev.Item.Name
-			args := ev.Item.Arguments
-			if *currentCall != nil {
-				if callID == "" {
-					callID = (*currentCall).id
-				}
-				if name == "" {
-					name = (*currentCall).name
-				}
-				if strings.TrimSpace((*currentCall).args.String()) != "" {
-					args = (*currentCall).args.String()
-				}
+			emitCodexCall(ch, state, codexCallKey(ev, state), ev.Item.CallID, ev.Item.Name, ev.Item.Arguments)
+		}
+		if ev.Item != nil && ev.Item.Type == "message" && !state.emittedText {
+			if text := codexItemText(ev); text != "" {
+				state.emittedText = true
+				ch <- Event{Type: EventDelta, Delta: text}
 			}
-			ch <- Event{Type: EventToolCall, ToolCall: &ToolCall{ID: callID, Name: name, Args: normalizeArgs([]byte(args))}}
-			*currentCall = nil
 		}
 	case "response.done", "response.completed", "response.incomplete":
+		emitPendingCodexCalls(ch, state)
 		ch <- Event{Type: EventDone, Done: true}
 		return true, nil
 	}
 	return false, nil
+}
+
+func codexCallKey(ev codexEvent, state *codexStreamState) string {
+	if ev.Item != nil {
+		if ev.Item.ID != "" {
+			return ev.Item.ID
+		}
+		if ev.Item.CallID != "" {
+			return ev.Item.CallID
+		}
+	}
+	if ev.ItemID != "" {
+		return ev.ItemID
+	}
+	if state != nil && state.currentCall != "" {
+		return state.currentCall
+	}
+	return ""
+}
+
+func ensureCodexCall(state *codexStreamState, key string) *pendingCodexCall {
+	if key == "" {
+		key = fmt.Sprintf("call_%d", len(state.callOrder)+1)
+	}
+	if state.pendingCalls == nil {
+		state.pendingCalls = make(map[string]*pendingCodexCall)
+	}
+	if call := state.pendingCalls[key]; call != nil {
+		return call
+	}
+	call := &pendingCodexCall{}
+	state.pendingCalls[key] = call
+	state.callOrder = append(state.callOrder, key)
+	state.currentCall = key
+	return call
+}
+
+func emitCodexCall(ch chan<- Event, state *codexStreamState, key, callID, name, args string) {
+	if key == "" {
+		key = state.currentCall
+	}
+	if call := state.pendingCalls[key]; call != nil {
+		if callID == "" {
+			callID = call.id
+		}
+		if name == "" {
+			name = call.name
+		}
+		if strings.TrimSpace(call.args.String()) != "" {
+			args = call.args.String()
+		}
+	}
+	if name != "" {
+		ch <- Event{Type: EventToolCall, ToolCall: &ToolCall{ID: callID, Name: name, Args: normalizeArgs([]byte(args))}}
+	}
+	delete(state.pendingCalls, key)
+	if state.currentCall == key {
+		state.currentCall = ""
+	}
+}
+
+func emitPendingCodexCalls(ch chan<- Event, state *codexStreamState) {
+	for _, key := range state.callOrder {
+		if call := state.pendingCalls[key]; call != nil && call.name != "" {
+			emitCodexCall(ch, state, key, call.id, call.name, call.args.String())
+		}
+	}
+}
+
+func codexItemText(ev codexEvent) string {
+	if ev.Item == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range ev.Item.Content {
+		switch part.Type {
+		case "output_text", "text":
+			b.WriteString(part.Text)
+		case "refusal":
+			b.WriteString(part.Refusal)
+		}
+	}
+	return b.String()
 }

@@ -75,6 +75,50 @@ func TestOpenAICodexProviderChatStream(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexProviderHandlesDoneTextAndMultipleCalls(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.done\",\"text\":\"fallback text\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"item_1\",\"call_id\":\"call_1\",\"name\":\"read_file\"}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"item_2\",\"call_id\":\"call_2\",\"name\":\"list_files\"}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"item_2\",\"delta\":\"{\\\"path\\\":\\\".\\\"}\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"item_1\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"id\":\"item_1\",\"call_id\":\"call_1\",\"name\":\"read_file\"}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"id\":\"item_2\",\"call_id\":\"call_2\",\"name\":\"list_files\"}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAICodex("openai-codex", ts.URL, "tok", "acct", "gpt-5.3-codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	var calls []ToolCall
+	for ev := range stream {
+		if ev.Err != nil {
+			t.Fatal(ev.Err)
+		}
+		text += ev.Delta
+		if ev.ToolCall != nil {
+			calls = append(calls, *ev.ToolCall)
+		}
+	}
+	if text != "fallback text" {
+		t.Fatalf("text = %q", text)
+	}
+	if len(calls) != 2 || calls[0].ID != "call_1" || calls[1].ID != "call_2" {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if string(calls[0].Args) != `{"path":"README.md"}` || string(calls[1].Args) != `{"path":"."}` {
+		t.Fatalf("args = %s / %s", calls[0].Args, calls[1].Args)
+	}
+}
+
 func TestOpenAICodexProviderChat(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

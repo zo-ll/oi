@@ -125,6 +125,38 @@ func TestRunOnceToolThenFinal(t *testing.T) {
 	}
 }
 
+func TestRunOncePersistsAssistantToolCallContentAndIDs(t *testing.T) {
+	args := json.RawMessage(`{"text":"tool output"}`)
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{
+		{Content: "I'll check.", ToolCalls: []provider.ToolCall{{Name: "echo", Args: args}}},
+		{Content: "all done"},
+	}}
+	r := &Runtime{
+		Provider:    p,
+		Tools:       tool.NewRegistry(fakeTool{}),
+		Policy:      workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
+		MaxSteps:    3,
+		ToolTimeout: time.Second,
+	}
+	if _, err := r.RunOnce(context.Background(), "use a tool"); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Session.Messages) < 2 {
+		t.Fatalf("session messages = %d", len(r.Session.Messages))
+	}
+	toolMsg := r.Session.Messages[1]
+	if toolMsg.Content != "I'll check." {
+		t.Fatalf("stored assistant content = %q", toolMsg.Content)
+	}
+	if len(toolMsg.ToolCalls) != 1 || toolMsg.ToolCalls[0].ID == "" {
+		t.Fatalf("stored tool calls = %+v", toolMsg.ToolCalls)
+	}
+	replayed := p.requests[1].Messages[2]
+	if replayed.Content != "I'll check." || len(replayed.ToolCalls) != 1 || replayed.ToolCalls[0].ID == "" {
+		t.Fatalf("replayed assistant message = %+v", replayed)
+	}
+}
+
 func TestRunOnceMaxStepsExceeded(t *testing.T) {
 	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{ToolCalls: []provider.ToolCall{{ID: "1", Name: "echo", Args: json.RawMessage(`{"text":"x"}`)}}}}}
 	r := &Runtime{Provider: p, Tools: tool.NewRegistry(fakeTool{}), Policy: workspace.Policy{Root: "."}, MaxSteps: 1, ToolTimeout: time.Second}

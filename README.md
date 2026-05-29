@@ -48,9 +48,9 @@ oi
 oi doctor
 oi models
 oi providers
-oi login openai
-oi login openai-codex
-oi logout openai
+oi login openai-codex  # ChatGPT browser login, uses your subscription
+oi login openai        # OpenAI Platform API key, separate from ChatGPT
+oi logout openai-codex
 oi version
 oi run "task"
 oi chat
@@ -68,9 +68,9 @@ oi
 oi doctor
 oi models
 oi providers
-oi login openai
 oi login openai-codex
-oi logout openai
+oi login openai
+oi logout openai-codex
 oi version
 oi run "task"
 oi rpc
@@ -82,7 +82,8 @@ oi chat
 ## Chat slash commands
 
 - `/help`
-- `/provider [name]`
+- `/login` (choose `sub` or `api`, then provider)
+- `/provider [name]` (blank opens a picker)
 - `/model [name]`
 - `/stream [on|off]`
 - `/autosave [on|off]`
@@ -113,18 +114,24 @@ List configured providers:
 oi providers
 ```
 
-Save credentials for a provider:
+In chat, `/login` is a two-step flow:
+
+1. Choose `sub` or `api`.
+2. Choose a provider. For `sub`, the only provider is `openai` and it uses ChatGPT browser login.
+
+Save credentials from the CLI:
 
 ```bash
-oi login openai --model gpt-4.1
-oi login openai-codex --model gpt-5.3-codex
+oi login openai-codex --model gpt-5.3-codex  # ChatGPT browser login
+oi login chatgpt --model gpt-5.3-codex       # alias for openai-codex
+oi login openai --model gpt-4.1              # OpenAI Platform API key
 oi login opencode-go --model deepseek-v4-pro
 ```
 
-- `oi login openai` uses the standard OpenAI API endpoint (`https://api.openai.com/v1`) and requires an API key from `platform.openai.com`.
-- `oi login openai-codex` uses ChatGPT Plus/Pro browser OAuth against the Codex backend (`https://chatgpt.com/backend-api`).
+- `oi login openai-codex` uses ChatGPT Plus/Pro browser OAuth against the Codex backend (`https://chatgpt.com/backend-api`). This is the ChatGPT subscription path, like browser-based login in coding tools.
+- `oi login openai` uses the standard OpenAI API endpoint (`https://api.openai.com/v1`) and requires a separate API key from `platform.openai.com`.
 
-If you have a ChatGPT Plus/Pro subscription and want browser login, use `openai-codex`, not `openai`.
+If you have a ChatGPT Plus/Pro subscription and want browser login, use `openai-codex` / `chatgpt`, not `openai`.
 
 ## RPC example
 

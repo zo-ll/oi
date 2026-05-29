@@ -91,13 +91,14 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 			return resp.Content, nil
 		}
 
-		assistantMsg := provider.Message{Role: "assistant", ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning}
-		if resp.Content != "" {
-			assistantMsg.Content = resp.Content
+		for i := range resp.ToolCalls {
+			if resp.ToolCalls[i].ID == "" {
+				resp.ToolCalls[i].ID = fmt.Sprintf("call_%d_%d", step+1, i+1)
+			}
 		}
+		assistantMsg := provider.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning}
 		history = append(history, assistantMsg)
-		toolCallJSON, _ := json.Marshal(resp.ToolCalls)
-		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: string(toolCallJSON), Reasoning: resp.Reasoning, Kind: "tool_call"})
+		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning, Kind: "tool_call", ToolCalls: providerCallsToSession(resp.ToolCalls)})
 
 		for _, tc := range resp.ToolCalls {
 			call := tool.Call{ID: tc.ID, Name: tc.Name, Args: tc.Args}
@@ -211,10 +212,13 @@ func (r *Runtime) historyToProviderMessages() []provider.Message {
 	for _, m := range r.Session.Messages {
 		switch m.Kind {
 		case "tool_call":
-			var calls []provider.ToolCall
-			if json.Unmarshal([]byte(m.Content), &calls) == nil {
-				out = append(out, provider.Message{Role: "assistant", Reasoning: m.Reasoning, ToolCalls: calls})
+			calls := sessionCallsToProvider(m.ToolCalls)
+			if len(calls) == 0 {
+				// Backward compatibility with sessions saved before tool_calls was
+				// a first-class field: content contained the serialized calls.
+				_ = json.Unmarshal([]byte(m.Content), &calls)
 			}
+			out = append(out, provider.Message{Role: "assistant", Content: contentForToolCallMessage(m, calls), Reasoning: m.Reasoning, ToolCalls: calls})
 		case "tool_result":
 			out = append(out, provider.Message{Role: "tool", ToolCallID: m.ToolCallID, Content: m.Content})
 		default:
@@ -222,6 +226,38 @@ func (r *Runtime) historyToProviderMessages() []provider.Message {
 		}
 	}
 	return out
+}
+
+func providerCallsToSession(calls []provider.ToolCall) []session.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]session.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		out = append(out, session.ToolCall{ID: call.ID, Name: call.Name, Args: json.RawMessage(append([]byte(nil), call.Args...))})
+	}
+	return out
+}
+
+func sessionCallsToProvider(calls []session.ToolCall) []provider.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]provider.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		out = append(out, provider.ToolCall{ID: call.ID, Name: call.Name, Args: json.RawMessage(append([]byte(nil), call.Args...))})
+	}
+	return out
+}
+
+func contentForToolCallMessage(m session.Message, calls []provider.ToolCall) string {
+	if len(m.ToolCalls) > 0 {
+		return m.Content
+	}
+	if len(calls) > 0 {
+		return ""
+	}
+	return m.Content
 }
 
 func (r *Runtime) systemPrompt() string {

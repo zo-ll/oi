@@ -245,7 +245,7 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]config.ProviderConfig)
 	}
-	providerName := strings.TrimSpace(opts.provider)
+	providerName := canonicalProviderName(opts.provider)
 	if providerName == "" {
 		providerName = cfg.DefaultProvider
 	}
@@ -515,8 +515,17 @@ type commonOptions struct {
 	rest     []string
 }
 
-func knownProviderProfile(name string) (config.ProviderConfig, bool) {
+func canonicalProviderName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "chatgpt", "codex", "openai-browser", "openai-chatgpt":
+		return "openai-codex"
+	default:
+		return strings.TrimSpace(name)
+	}
+}
+
+func knownProviderProfile(name string) (config.ProviderConfig, bool) {
+	switch canonicalProviderName(name) {
 	case "openai":
 		return config.ProviderConfig{BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY"}, true
 	case "openai-codex":
@@ -548,7 +557,11 @@ func normalizeAPIKey(v string) string {
 }
 
 func promptLine(in io.Reader) (string, error) {
-	line, err := bufio.NewReader(in).ReadString('\n')
+	reader, ok := in.(*bufio.Reader)
+	if !ok {
+		reader = bufio.NewReader(in)
+	}
+	line, err := reader.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return "", err
 	}

@@ -15,6 +15,20 @@ func TestKnownProviderProfile(t *testing.T) {
 	if got != want {
 		t.Fatalf("profile = %+v want %+v", got, want)
 	}
+	got, ok = knownProviderProfile("chatgpt")
+	if !ok {
+		t.Fatal("expected chatgpt alias")
+	}
+	want = config.ProviderConfig{BaseURL: "https://chatgpt.com/backend-api"}
+	if got != want {
+		t.Fatalf("profile = %+v want %+v", got, want)
+	}
+}
+
+func TestCanonicalProviderName(t *testing.T) {
+	if got := canonicalProviderName("chatgpt"); got != "openai-codex" {
+		t.Fatalf("got %q", got)
+	}
 }
 
 func TestNormalizeAPIKey(t *testing.T) {

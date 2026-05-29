@@ -7,6 +7,7 @@ import (
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
+	"github.com/zo-ll/oi/internal/provider"
 	"github.com/zo-ll/oi/internal/session"
 	"github.com/zo-ll/oi/internal/workspace"
 )
@@ -47,6 +48,88 @@ func TestSaveSessionNamedDoesNotMutateRollingSessionID(t *testing.T) {
 	}
 	if rt.Session.ID != "rolling" {
 		t.Fatalf("session id mutated: %q", rt.Session.ID)
+	}
+}
+
+func TestLoginArgsSelection(t *testing.T) {
+	provider, model := loginArgsSelection([]string{"--provider", "openai", "--model=gpt-test"})
+	if provider != "openai" || model != "gpt-test" {
+		t.Fatalf("provider=%q model=%q", provider, model)
+	}
+	provider, model = loginArgsSelection([]string{"openai-codex", "--model", "gpt-5.3-codex"})
+	if provider != "openai-codex" || model != "gpt-5.3-codex" {
+		t.Fatalf("provider=%q model=%q", provider, model)
+	}
+	provider, model = loginArgsSelection([]string{"--api-key", "secret", "--base-url=https://example.invalid", "--model", "m"})
+	if provider != "" || model != "m" {
+		t.Fatalf("provider=%q model=%q", provider, model)
+	}
+	provider, model = loginArgsSelection([]string{"chatgpt"})
+	if provider != "openai-codex" || model != "" {
+		t.Fatalf("provider=%q model=%q", provider, model)
+	}
+}
+
+func TestProviderChoiceNamesPrioritizesBrowserLogin(t *testing.T) {
+	names := providerChoiceNames(&config.Config{Providers: map[string]config.ProviderConfig{"opencode-go": {BaseURL: "x"}}})
+	if len(names) == 0 || names[0] != "openai-codex" {
+		t.Fatalf("names = %#v", names)
+	}
+}
+
+func TestChatLoginFlowHelpers(t *testing.T) {
+	kind, args := stripLoginKindArg([]string{"sub", "openai", "--model", "gpt-5.3-codex"})
+	if kind != "sub" || len(args) != 3 || args[0] != "openai" {
+		t.Fatalf("kind=%q args=%#v", kind, args)
+	}
+	provider, err := providerForLoginKind("sub", "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider != "openai-codex" {
+		t.Fatalf("provider = %q", provider)
+	}
+	if _, err := providerForLoginKind("sub", "opencode-go"); err == nil {
+		t.Fatal("expected sub provider restriction")
+	}
+	if got := loginProviderNames(&config.Config{}, "sub"); len(got) != 1 || got[0] != "openai" {
+		t.Fatalf("sub providers = %#v", got)
+	}
+	got := withLoginProviderArg([]string{"--model", "m"}, "openai-codex")
+	if len(got) != 3 || got[2] != "openai-codex" {
+		t.Fatalf("args = %#v", got)
+	}
+	got = ensureLoginDefaultArg(got)
+	if got[len(got)-1] != "--default" {
+		t.Fatalf("default args = %#v", got)
+	}
+}
+
+func TestResolveModelChoiceFromList(t *testing.T) {
+	models := []provider.Model{{ID: "gpt-5-codex"}, {ID: "gpt-4.1"}}
+	got, err := resolveModelChoiceFromList(models, "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "gpt-4.1" {
+		t.Fatalf("got %q", got)
+	}
+	got, err = resolveModelChoiceFromList(models, "GPT-5-CODEX")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "gpt-5-codex" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResolveProviderChoiceFromNames(t *testing.T) {
+	got, err := resolveProviderChoiceFromNames([]string{"a", "b"}, "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "b" {
+		t.Fatalf("got %q", got)
 	}
 }
 
