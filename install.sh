@@ -21,7 +21,11 @@ tmp="$(mktemp "$INSTALL_DIR/.oi-build-XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 
 cd "$ROOT_DIR"
-go build -ldflags "$LDFLAGS" -o "$tmp" ./cmd/oi
+if ! go build -ldflags "$LDFLAGS" -o "$tmp" ./cmd/oi; then
+  echo "go build failed; retrying after go clean -cache -testcache" >&2
+  go clean -cache -testcache
+  go build -ldflags "$LDFLAGS" -o "$tmp" ./cmd/oi
+fi
 mv "$tmp" "$TARGET"
 chmod 0755 "$TARGET"
 
