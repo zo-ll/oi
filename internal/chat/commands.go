@@ -23,9 +23,8 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 	switch cmd {
 	case "/help":
 		fmt.Fprintln(out, "/help                show commands")
-		fmt.Fprintln(out, "/login [provider]    log in and switch provider")
-		fmt.Fprintln(out, "/provider [name]     show, pick, or set provider")
-		fmt.Fprintln(out, "/model [name]        show models or set model")
+		fmt.Fprintln(out, "/login [provider]    set up provider authentication")
+		fmt.Fprintln(out, "/model [name]        show ready models and set model")
 		fmt.Fprintln(out, "/stream [on|off]     show or set streaming mode")
 		fmt.Fprintln(out, "/autosave [on|off]   show or set autosave mode")
 		fmt.Fprintln(out, "/new                 start a new session")
@@ -68,29 +67,10 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		}
 		return false, nextRT, nextSel, streaming, autosave, nil
 	case "/provider":
-		if arg == "" {
-			choice, err := promptProviderChoice(reader, out, cfg, sel.Provider)
-			if err != nil {
-				return false, rt, sel, streaming, autosave, err
-			}
-			if choice == "" {
-				return false, rt, sel, streaming, autosave, nil
-			}
-			arg = choice
-		}
-		nextRT, nextSel, err := switchChatProvider(deps, cfg, sel, rt, reader, out, arg)
-		if err != nil {
-			return false, rt, sel, streaming, autosave, err
-		}
-		if autosave {
-			if _, err := saveSession(nextRT, nextSel); err != nil {
-				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
-			}
-		}
-		return false, nextRT, nextSel, streaming, autosave, nil
+		return false, rt, sel, streaming, autosave, fmt.Errorf("/provider was removed; use /model")
 	case "/model":
 		if arg == "" {
-			choice, err := promptModelChoice(reader, out, rt, sel.Model)
+			choice, err := promptModelChoice(reader, out, sel)
 			if err != nil {
 				return false, rt, sel, streaming, autosave, err
 			}

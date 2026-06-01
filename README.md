@@ -90,7 +90,6 @@ Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
 
 - `/help`
 - `/login` (choose `sub` or `api`, then provider)
-- `/provider [name]` (blank opens a picker)
 - `/model [name]`
 - `/stream [on|off]`
 - `/autosave [on|off]`
@@ -125,6 +124,8 @@ In interactive mode, `/login` is a two-step flow:
 
 1. Choose `sub` or `api`.
 2. Choose a provider. For `sub`, the only provider is `openai` and it uses ChatGPT browser login.
+
+After login, use `/model` to switch models. `/model` only shows models from ready providers.
 
 Save credentials from the CLI:
 
