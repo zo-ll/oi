@@ -83,19 +83,6 @@ func TestInteractiveProviderAllowsMissingProvider(t *testing.T) {
 	}
 }
 
-func TestInteractiveProviderAllowsMissingProvider(t *testing.T) {
-	p, notice, err := interactiveProvider(config.Selection{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p != nil {
-		t.Fatal("expected nil provider")
-	}
-	if notice == "" {
-		t.Fatal("expected startup notice")
-	}
-}
-
 func TestChatLoginFlowHelpers(t *testing.T) {
 	kind, args := stripLoginKindArg([]string{"sub", "openai", "--model", "gpt-5.3-codex"})
 	if kind != "sub" || len(args) != 3 || args[0] != "openai" {

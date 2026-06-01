@@ -120,7 +120,7 @@ func (ui *terminalUI) renderPrompt(text string) {
 	lines := wrapPromptLines(ui.prompt, text, ui.width)
 	for i, line := range lines {
 		if i > 0 {
-			_, _ = io.WriteString(ui.out, "\n")
+			_, _ = io.WriteString(ui.out, "\r\n")
 		}
 		_, _ = io.WriteString(ui.out, line)
 	}
@@ -311,7 +311,7 @@ func (ui *terminalUI) writeWrapped(s string) {
 			_, _ = io.WriteString(ui.out, "\r")
 			ui.outputColumn = 0
 		case '\n':
-			_, _ = io.WriteString(ui.out, "\n")
+			_, _ = io.WriteString(ui.out, "\r\n")
 			ui.outputColumn = 0
 		case '\t':
 			for i := 0; i < 4; i++ {
@@ -328,7 +328,7 @@ func (ui *terminalUI) writeRuneLocked(r rune) {
 		ui.width = 80
 	}
 	if ui.outputColumn >= ui.width {
-		_, _ = io.WriteString(ui.out, "\n")
+		_, _ = io.WriteString(ui.out, "\r\n")
 		ui.outputColumn = 0
 	}
 	_, _ = io.WriteString(ui.out, string(r))
