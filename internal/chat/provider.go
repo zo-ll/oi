@@ -61,7 +61,7 @@ func loginAndSwitchChatProvider(deps Dependencies, cfg *config.Config, sel confi
 	if deps.Login == nil {
 		return nil, sel, fmt.Errorf("login is unavailable")
 	}
-	if err := deps.Login(loginArgs, reader, out); err != nil {
+	if err := deps.Login(loginArgs, chatLoginReader(providerName, reader), out); err != nil {
 		return nil, sel, err
 	}
 	cfg2, nextSel, err := reloadSelectionForChat(providerName, modelName)
@@ -575,6 +575,13 @@ func loginArgsSelection(args []string) (providerName, modelName string) {
 		}
 	}
 	return canonicalProviderName(providerName), modelName
+}
+
+func chatLoginReader(providerName string, reader *bufio.Reader) io.Reader {
+	if canonicalProviderName(providerName) == "openai-codex" {
+		return strings.NewReader("")
+	}
+	return reader
 }
 
 func promptYesNo(reader *bufio.Reader, out io.Writer, prompt string) (bool, error) {

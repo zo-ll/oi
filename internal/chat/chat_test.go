@@ -1,7 +1,9 @@
 package chat
 
 import (
+	"bufio"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,6 +145,16 @@ func TestResolveReadyModelChoicePrefersCurrentProvider(t *testing.T) {
 	}
 	if got.Provider != "p2" {
 		t.Fatalf("got = %+v", got)
+	}
+}
+
+func TestChatLoginReaderSkipsStdinForBrowserLogin(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("hello\n"))
+	if got := chatLoginReader("openai-codex", reader); got == reader {
+		t.Fatal("expected replacement reader for browser login")
+	}
+	if got := chatLoginReader("openai", reader); got != reader {
+		t.Fatal("expected original reader for api login")
 	}
 }
 
