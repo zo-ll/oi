@@ -49,7 +49,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	promptInput := &promptInput{ui: ui, reader: reader}
 	rt := buildRuntime(cfg, sel, p, root, promptInput, ui, logger)
 	configureChatRuntime(rt, ui)
-	ui.notify(fmt.Sprintf("oi\nprovider: %s\nmodel: %s\nworkspace: %s", valueOr(sel.Provider, "(none)"), valueOr(sel.Model, "(none)"), root))
+	ui.notify(styleText(ui, "dim", formatHeader(sel.Model, root)))
 	if startupNotice != "" {
 		ui.notify(startupNotice)
 	}
@@ -98,6 +98,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 				ui.notify("error: " + runErr.Error())
 			} else {
 				lastAssistant = resp
+				ui.blankLine()
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {
 						ui.notify("warning: autosave failed: " + saveErr.Error())
@@ -111,6 +112,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 			} else {
 				lastAssistant = resp
 				ui.notify(resp)
+				ui.blankLine()
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {
 						ui.notify("warning: autosave failed: " + saveErr.Error())
@@ -148,14 +150,13 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 	rt := buildRuntime(cfg, sel, p, root, reader, out, logger)
 	configureChatRuntime(rt, out)
 
-	fmt.Fprintf(out, "oi\nprovider: %s\nmodel: %s\nworkspace: %s\n", valueOr(sel.Provider, "(none)"), valueOr(sel.Model, "(none)"), root)
+	fmt.Fprintln(out, formatHeader(sel.Model, root))
 	if startupNotice != "" {
 		fmt.Fprintln(out, startupNotice)
 	}
-	fmt.Fprintln(out, "Type /help for commands.")
 
 	for {
-		fmt.Fprint(out, "oi> ")
+		fmt.Fprint(out, "> ")
 		line, err := reader.ReadString('\n')
 		if err != nil && err != io.EOF {
 			return err
@@ -196,9 +197,12 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 			fmt.Fprintln(out)
 			if runErr != nil {
 				fmt.Fprintf(out, "error: %v\n", runErr)
-			} else if autosave {
-				if _, saveErr := saveSession(rt, sel); saveErr != nil {
-					fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)
+			} else {
+				fmt.Fprintln(out)
+				if autosave {
+					if _, saveErr := saveSession(rt, sel); saveErr != nil {
+						fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)
+					}
 				}
 			}
 		} else {
@@ -207,6 +211,7 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 				fmt.Fprintf(out, "error: %v\n", runErr)
 			} else {
 				fmt.Fprintln(out, resp)
+				fmt.Fprintln(out)
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {
 						fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)

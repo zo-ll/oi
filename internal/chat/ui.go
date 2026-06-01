@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,20 +18,25 @@ func configureChatRuntime(rt *agent.Runtime, out io.Writer) {
 		return
 	}
 	rt.OnToolStart = func(call tool.Call) {
-		fmt.Fprintf(out, "[tool:start] %s %s\n", call.Name, summarizeToolArgs(call.Args))
+		line := fmt.Sprintf("  tool:start %s %s", call.Name, summarizeToolArgs(call.Args))
+		fmt.Fprintln(out, styleText(out, "dim", line))
 	}
 	rt.OnToolResult = func(call tool.Call, result tool.Result) {
 		status := "ok"
 		if !result.OK {
 			status = "error"
 		}
-		fmt.Fprintf(out, "[tool:%s] %s", status, call.Name)
+		line := fmt.Sprintf("  tool:%s %s", status, call.Name)
 		if result.Error != "" {
-			fmt.Fprintf(out, ": %s", result.Error)
+			line += ": " + result.Error
 		} else if text := summarizeToolOutput(result.Output); text != "" {
-			fmt.Fprintf(out, ": %s", text)
+			line += ": " + text
 		}
-		fmt.Fprintln(out)
+		kind := "dim"
+		if !result.OK {
+			kind = "warn"
+		}
+		fmt.Fprintln(out, styleText(out, kind, line))
 	}
 }
 
@@ -59,6 +66,43 @@ func summarizeToolOutput(s string) string {
 		s = s[:97] + "..."
 	}
 	return s
+}
+
+type styledWriter interface {
+	Styled(kind, text string) string
+}
+
+func styleText(out io.Writer, kind, text string) string {
+	if sw, ok := out.(styledWriter); ok {
+		return sw.Styled(kind, text)
+	}
+	return text
+}
+
+func printHelpLine(out io.Writer, left, right string) {
+	fmt.Fprintf(out, "%-22s %s\n", styleText(out, "command", left), right)
+}
+
+func formatHeader(model, root string) string {
+	return fmt.Sprintf("oi · %s · %s", valueOr(model, "(none)"), shortenPath(root))
+}
+
+func shortenPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "(none)"
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		if path == home {
+			return "~"
+		}
+		prefix := home + string(filepath.Separator)
+		if strings.HasPrefix(path, prefix) {
+			return "~" + string(filepath.Separator) + strings.TrimPrefix(path, prefix)
+		}
+	}
+	return path
 }
 
 func onOff(v bool) string {

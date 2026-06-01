@@ -48,7 +48,7 @@ func newTerminalUI(in io.Reader, out io.Writer) (*terminalUI, bool) {
 		in:        inFile,
 		out:       outFile,
 		width:     terminalWidth(inFile),
-		prompt:    "oi> ",
+		prompt:    "> ",
 		resizeCh:  make(chan os.Signal, 1),
 		clipboard: clipboard{out: outFile},
 	}
@@ -163,10 +163,45 @@ func (ui *terminalUI) notify(message string) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
+	message = ui.decorateMessage(message)
 	ui.writeWrapped(message)
 	if !strings.HasSuffix(message, "\n") {
 		ui.writeWrapped("\n")
 	}
+}
+
+func (ui *terminalUI) Styled(kind, text string) string {
+	if text == "" {
+		return ""
+	}
+	switch kind {
+	case "dim":
+		return "\x1b[2m" + text + "\x1b[0m"
+	case "warn":
+		return "\x1b[33m" + text + "\x1b[0m"
+	case "error":
+		return "\x1b[31m" + text + "\x1b[0m"
+	case "command":
+		return "\x1b[36m" + text + "\x1b[0m"
+	default:
+		return text
+	}
+}
+
+func (ui *terminalUI) decorateMessage(message string) string {
+	trimmed := strings.TrimSpace(message)
+	switch {
+	case strings.HasPrefix(trimmed, "error:"):
+		return ui.Styled("error", message)
+	case strings.HasPrefix(trimmed, "warning:"), strings.HasPrefix(trimmed, "No provider configured."), strings.HasPrefix(trimmed, "Provider "):
+		return ui.Styled("warn", message)
+	default:
+		return message
+	}
+}
+
+func (ui *terminalUI) blankLine() {
+	ui.writeWrapped("\n")
 }
 
 func (ui *terminalUI) commitInput(text string) {
@@ -323,8 +358,28 @@ func (ui *terminalUI) writeWrapped(s string) {
 		ui.clearPromptLocked()
 	}
 	ui.refreshSize()
+	escapeState := 0
 	for _, r := range s {
+		if escapeState > 0 {
+			_, _ = io.WriteString(ui.out, string(r))
+			switch escapeState {
+			case 1:
+				if r == '[' {
+					escapeState = 2
+				} else if ansiEscapeFinal(r) {
+					escapeState = 0
+				}
+			case 2:
+				if ansiEscapeFinal(r) {
+					escapeState = 0
+				}
+			}
+			continue
+		}
 		switch r {
+		case 27:
+			escapeState = 1
+			_, _ = io.WriteString(ui.out, string(r))
 		case '\r':
 			_, _ = io.WriteString(ui.out, "\r")
 			ui.outputColumn = 0
@@ -339,6 +394,10 @@ func (ui *terminalUI) writeWrapped(s string) {
 			ui.writeRuneLocked(r)
 		}
 	}
+}
+
+func ansiEscapeFinal(r rune) bool {
+	return r >= '@' && r <= '~' && r != '['
 }
 
 func (ui *terminalUI) writeRuneLocked(r rune) {
@@ -590,12 +649,46 @@ func wrapLine(s string, width int) []string {
 	runes := []rune(s)
 	var lines []string
 	for len(runes) > 0 {
-		n := width
-		if n > len(runes) {
-			n = len(runes)
+		if len(runes) <= width {
+			lines = append(lines, string(runes))
+			break
 		}
-		lines = append(lines, string(runes[:n]))
-		runes = runes[n:]
+		cut := width
+		for i := width; i > 0; i-- {
+			if runes[i-1] == ' ' || runes[i-1] == '\t' {
+				cut = i
+				break
+			}
+		}
+		if cut == width {
+			for i := width; i < len(runes); i++ {
+				if runes[i] == ' ' || runes[i] == '\t' {
+					cut = i
+					break
+				}
+			}
+		}
+		piece := strings.TrimRight(string(runes[:cut]), " \t")
+		if piece == "" {
+			piece = string(runes[:minInt(width, len(runes))])
+			cut = minInt(width, len(runes))
+		}
+		lines = append(lines, piece)
+		runes = trimLeadingSpaceRunes(runes[cut:])
 	}
 	return lines
+}
+
+func trimLeadingSpaceRunes(runes []rune) []rune {
+	for len(runes) > 0 && (runes[0] == ' ' || runes[0] == '\t') {
+		runes = runes[1:]
+	}
+	return runes
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

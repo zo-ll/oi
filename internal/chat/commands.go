@@ -22,20 +22,20 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 
 	switch cmd {
 	case "/help":
-		fmt.Fprintln(out, "/help                show commands")
-		fmt.Fprintln(out, "/login [provider]    set up provider authentication")
-		fmt.Fprintln(out, "/model [name]        show ready models and set model")
-		fmt.Fprintln(out, "/stream [on|off]     show or set streaming mode")
-		fmt.Fprintln(out, "/autosave [on|off]   show or set autosave mode")
-		fmt.Fprintln(out, "/new                 start a new session")
-		fmt.Fprintln(out, "/sessions            list saved sessions")
-		fmt.Fprintln(out, "/save [name]         save current session")
-		fmt.Fprintln(out, "/load <name|path>    load a saved session")
-		fmt.Fprintln(out, "/exit                exit interactive mode")
-		fmt.Fprintln(out, "Ctrl+V               paste system clipboard")
-		fmt.Fprintln(out, "Ctrl+Y               copy last assistant reply")
-		fmt.Fprintln(out, "Ctrl+K               insert newline")
-		fmt.Fprintln(out, "Ctrl+D               exit on empty input")
+		printHelpLine(out, "/help", "show commands")
+		printHelpLine(out, "/login [provider]", "set up provider authentication")
+		printHelpLine(out, "/model [name]", "show ready models and set model")
+		printHelpLine(out, "/stream [on|off]", "show or set streaming mode")
+		printHelpLine(out, "/autosave [on|off]", "show or set autosave mode")
+		printHelpLine(out, "/new", "start a new session")
+		printHelpLine(out, "/sessions", "list saved sessions")
+		printHelpLine(out, "/save [name]", "save current session")
+		printHelpLine(out, "/load <name|path>", "load a saved session")
+		printHelpLine(out, "/exit", "exit interactive mode")
+		printHelpLine(out, "Ctrl+V", "paste system clipboard")
+		printHelpLine(out, "Ctrl+Y", "copy last assistant reply")
+		printHelpLine(out, "Ctrl+K", "insert newline")
+		printHelpLine(out, "Ctrl+D", "exit on empty input")
 		return false, rt, sel, streaming, autosave, nil
 	case "/exit", "/quit":
 		if err := exitChat(reader, out, rt, sel, autosave); err != nil {
