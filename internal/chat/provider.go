@@ -72,6 +72,12 @@ func loginAndSwitchChatProvider(deps Dependencies, cfg *config.Config, sel confi
 	if err != nil {
 		return nil, sel, err
 	}
+	if modelName == "" {
+		cfg2, nextSel, p, err = ensureReadyModelAfterLogin(reader, out, cfg2, nextSel)
+		if err != nil {
+			return nil, sel, err
+		}
+	}
 	root, err := workspace.DetectRoot(rt.Policy.Root)
 	if err != nil {
 		return nil, sel, err
@@ -163,25 +169,7 @@ func promptModelChoice(reader *bufio.Reader, out io.Writer, current config.Selec
 	if err != nil {
 		return "", err
 	}
-	if len(choices) == 0 {
-		fmt.Fprintln(out, "no ready models; use /login")
-		return "", nil
-	}
-	fmt.Fprintf(out, "current model: %s\n", valueOr(current.Model, "(none)"))
-	printReadyModels(out, choices, current)
-	fmt.Fprint(out, "Switch model? [number/name, blank=keep] ")
-	choice, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
-	}
-	choice = strings.TrimSpace(choice)
-	if choice == "" {
-		return "", nil
-	}
-	if _, err := resolveReadyModelChoiceFromList(choices, choice, current.Provider); err != nil {
-		return "", err
-	}
-	return choice, nil
+	return promptReadyModelChoice(reader, out, choices, current, "Switch model? [number/name, blank=keep] ")
 }
 
 func resolveReadyModelChoice(arg string, currentProvider string) (readyModelChoice, error) {
@@ -226,6 +214,82 @@ func resolveReadyModelChoiceFromList(choices []readyModelChoice, arg string, cur
 	return readyModelChoice{}, fmt.Errorf("model %q is available from multiple providers; choose by index", arg)
 }
 
+func ensureReadyModelAfterLogin(reader *bufio.Reader, out io.Writer, cfg *config.Config, sel config.Selection) (*config.Config, config.Selection, provider.Provider, error) {
+	choices, err := listReadyModelChoicesForProvider(sel.Provider)
+	if err != nil || len(choices) == 0 || selectionHasReadyModel(sel, choices) {
+		p, pErr := requireProvider(sel)
+		return cfg, sel, p, pErr
+	}
+	choice, err := promptReadyModelChoice(reader, out, choices, sel, "Choose model? [number/name, blank=keep] ")
+	if err != nil {
+		return nil, sel, nil, err
+	}
+	if choice == "" {
+		p, pErr := requireProvider(sel)
+		return cfg, sel, p, pErr
+	}
+	nextCfg, nextSel, err := loadSelection(commonOptions{provider: sel.Provider, model: choice})
+	if err != nil {
+		return nil, sel, nil, err
+	}
+	p, err := requireProvider(nextSel)
+	if err != nil {
+		return nil, sel, nil, err
+	}
+	return nextCfg, nextSel, p, nil
+}
+
+func selectionHasReadyModel(sel config.Selection, choices []readyModelChoice) bool {
+	if strings.TrimSpace(sel.Model) == "" {
+		return false
+	}
+	for _, choice := range choices {
+		if choice.Provider == sel.Provider && choice.Model.ID == sel.Model {
+			return true
+		}
+	}
+	return false
+}
+
+func listReadyModelChoicesForProvider(providerName string) ([]readyModelChoice, error) {
+	choices, err := listReadyModelChoices()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(providerName) == "" {
+		return choices, nil
+	}
+	var out []readyModelChoice
+	for _, choice := range choices {
+		if choice.Provider == providerName {
+			out = append(out, choice)
+		}
+	}
+	return out, nil
+}
+
+func promptReadyModelChoice(reader *bufio.Reader, out io.Writer, choices []readyModelChoice, current config.Selection, prompt string) (string, error) {
+	if len(choices) == 0 {
+		fmt.Fprintln(out, "no ready models; use /login")
+		return "", nil
+	}
+	fmt.Fprintf(out, "current model: %s\n", valueOr(current.Model, "(none)"))
+	printReadyModels(out, choices, current)
+	fmt.Fprint(out, prompt)
+	choice, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		return "", nil
+	}
+	if _, err := resolveReadyModelChoiceFromList(choices, choice, current.Provider); err != nil {
+		return "", err
+	}
+	return choice, nil
+}
+
 func listReadyModelChoices() ([]readyModelChoice, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -262,6 +326,16 @@ func listReadyModelChoices() ([]readyModelChoice, error) {
 }
 
 func printReadyModels(out io.Writer, choices []readyModelChoice, current config.Selection) {
+	singleProvider := true
+	if len(choices) > 1 {
+		providerName := choices[0].Provider
+		for _, choice := range choices[1:] {
+			if choice.Provider != providerName {
+				singleProvider = false
+				break
+			}
+		}
+	}
 	for i, choice := range choices {
 		marker := " "
 		if choice.Provider == current.Provider && choice.Model.ID == current.Model {
@@ -270,6 +344,10 @@ func printReadyModels(out io.Writer, choices []readyModelChoice, current config.
 		label := choice.Model.ID
 		if strings.TrimSpace(choice.Model.Name) != "" && choice.Model.Name != choice.Model.ID {
 			label += "  " + choice.Model.Name
+		}
+		if singleProvider {
+			fmt.Fprintf(out, "%2d. %s %s\n", i+1, marker, label)
+			continue
 		}
 		fmt.Fprintf(out, "%2d. %s %s  [%s]\n", i+1, marker, label, choice.Provider)
 	}

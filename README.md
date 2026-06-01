@@ -78,12 +78,13 @@ oi rpc
 ```
 
 Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
-- wrapped output
+- wrapped output with cleaner plain-text rendering
 - wrapped multiline input
 - bracketed paste support
 - `Ctrl+V` to paste from the system clipboard when available
 - `Ctrl+Y` to copy the last assistant reply
 - `Ctrl+K` to insert a newline
+- dim one-line header and quieter tool/status output
 - line-mode fallback when not attached to a terminal
 
 ## Interactive slash commands
@@ -92,6 +93,7 @@ Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
 - `/login` (choose `sub` or `api`, then provider)
 - `/model [name]`
 - `/stream [on|off]`
+- `/tools [off|errors|on]`
 - `/autosave [on|off]`
 - `/new`
 - `/sessions [filter]`
@@ -99,7 +101,7 @@ Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
 - `/load [name|path|index]`
 - `/exit`
 
-Interactive mode autosaves the rolling session by default after successful turns, saves on exit, and can optionally save a named snapshot when exiting.
+Interactive mode autosaves the rolling session by default after successful turns and saves on exit. Use `/save [name]` when you want a named snapshot.
 
 ### Session examples
 
@@ -124,8 +126,9 @@ In interactive mode, `/login` is a two-step flow:
 
 1. Choose `sub` or `api`.
 2. Choose a provider. For `sub`, the only provider is `openai` and it uses ChatGPT browser login.
+3. If the provider is ready but no usable model is selected yet, oi immediately offers a ready-model picker.
 
-After login, use `/model` to switch models. `/model` only shows models from ready providers.
+Use `/model` any time to switch models. `/model` only shows models from ready providers.
 
 Save credentials from the CLI:
 

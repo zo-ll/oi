@@ -42,13 +42,14 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	reader := bufio.NewReader(in)
 	streaming := true
 	autosave := true
+	tools := toolVerbosityErrors
 	logger, err := maybeDebugLogger("chat", opts.debug)
 	if err != nil {
 		return err
 	}
 	promptInput := &promptInput{ui: ui, reader: reader}
 	rt := buildRuntime(cfg, sel, p, root, promptInput, ui, logger)
-	configureChatRuntime(rt, ui)
+	configureChatRuntime(rt, ui, tools)
 	ui.notify(styleText(ui, "dim", formatHeader(sel.Model, root)))
 	if startupNotice != "" {
 		ui.notify(startupNotice)
@@ -59,7 +60,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 		line, err := ui.readMessage(lastAssistant)
 		if err != nil {
 			_ = ui.suspendRaw()
-			return exitChat(reader, ui, rt, sel, autosave)
+			return exitChat(ui, rt, sel, autosave)
 		}
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -69,7 +70,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 			if err := ui.suspendRaw(); err != nil {
 				return err
 			}
-			exit, newRT, newSel, newStreaming, newAutosave, cmdErr := handleChatCommand(deps, cfg, sel, rt, reader, ui, line, streaming, autosave)
+			exit, newRT, newSel, newStreaming, newAutosave, newTools, cmdErr := handleChatCommand(deps, cfg, sel, rt, reader, ui, line, streaming, autosave, tools)
 			if resumeErr := ui.resumeRaw(); resumeErr != nil {
 				return resumeErr
 			}
@@ -80,7 +81,8 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 				sel = newSel
 				streaming = newStreaming
 				autosave = newAutosave
-				configureChatRuntime(rt, ui)
+				tools = newTools
+				configureChatRuntime(rt, ui, tools)
 			}
 			if exit {
 				return nil
@@ -90,14 +92,16 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 
 		ctx := context.Background()
 		if streaming {
+			formatter := &outputFormatter{}
 			resp, runErr := rt.RunOnceStream(ctx, line, func(delta string) {
-				fmt.Fprint(ui, delta)
+				fmt.Fprint(ui, formatter.Push(delta))
 			})
+			fmt.Fprint(ui, formatter.Flush())
 			fmt.Fprintln(ui)
 			if runErr != nil {
 				ui.notify("error: " + runErr.Error())
 			} else {
-				lastAssistant = resp
+				lastAssistant = cleanDisplayText(resp)
 				ui.blankLine()
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {
@@ -110,6 +114,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 			if runErr != nil {
 				ui.notify("error: " + runErr.Error())
 			} else {
+				resp = cleanDisplayText(resp)
 				lastAssistant = resp
 				ui.notify(resp)
 				ui.blankLine()
@@ -143,12 +148,13 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 	reader := bufio.NewReader(in)
 	streaming := true
 	autosave := true
+	tools := toolVerbosityErrors
 	logger, err := maybeDebugLogger("chat", opts.debug)
 	if err != nil {
 		return err
 	}
 	rt := buildRuntime(cfg, sel, p, root, reader, out, logger)
-	configureChatRuntime(rt, out)
+	configureChatRuntime(rt, out, tools)
 
 	fmt.Fprintln(out, formatHeader(sel.Model, root))
 	if startupNotice != "" {
@@ -165,12 +171,12 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 		if line == "" {
 			if err == io.EOF {
 				fmt.Fprintln(out)
-				return exitChat(reader, out, rt, sel, autosave)
+				return exitChat(out, rt, sel, autosave)
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "/") {
-			exit, newRT, newSel, newStreaming, newAutosave, cmdErr := handleChatCommand(deps, cfg, sel, rt, reader, out, line, streaming, autosave)
+			exit, newRT, newSel, newStreaming, newAutosave, newTools, cmdErr := handleChatCommand(deps, cfg, sel, rt, reader, out, line, streaming, autosave, tools)
 			if cmdErr != nil {
 				fmt.Fprintf(out, "error: %v\n", cmdErr)
 			} else {
@@ -178,7 +184,8 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 				sel = newSel
 				streaming = newStreaming
 				autosave = newAutosave
-				configureChatRuntime(rt, out)
+				tools = newTools
+				configureChatRuntime(rt, out, tools)
 			}
 			if exit {
 				return nil
@@ -191,9 +198,11 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 
 		ctx := context.Background()
 		if streaming {
+			formatter := &outputFormatter{}
 			_, runErr := rt.RunOnceStream(ctx, line, func(delta string) {
-				fmt.Fprint(out, delta)
+				fmt.Fprint(out, formatter.Push(delta))
 			})
+			fmt.Fprint(out, formatter.Flush())
 			fmt.Fprintln(out)
 			if runErr != nil {
 				fmt.Fprintf(out, "error: %v\n", runErr)
@@ -210,7 +219,7 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 			if runErr != nil {
 				fmt.Fprintf(out, "error: %v\n", runErr)
 			} else {
-				fmt.Fprintln(out, resp)
+				fmt.Fprintln(out, cleanDisplayText(resp))
 				fmt.Fprintln(out)
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {
@@ -220,7 +229,7 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 			}
 		}
 		if err == io.EOF {
-			return exitChat(reader, out, rt, sel, autosave)
+			return exitChat(out, rt, sel, autosave)
 		}
 	}
 }

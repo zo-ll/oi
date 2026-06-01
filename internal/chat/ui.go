@@ -13,15 +13,33 @@ import (
 	"github.com/zo-ll/oi/internal/tool"
 )
 
-func configureChatRuntime(rt *agent.Runtime, out io.Writer) {
+type toolVerbosity string
+
+const (
+	toolVerbosityOff    toolVerbosity = "off"
+	toolVerbosityErrors toolVerbosity = "errors"
+	toolVerbosityOn     toolVerbosity = "on"
+)
+
+func configureChatRuntime(rt *agent.Runtime, out io.Writer, tools toolVerbosity) {
 	if rt == nil {
 		return
 	}
-	rt.OnToolStart = func(call tool.Call) {
-		line := fmt.Sprintf("  tool:start %s %s", call.Name, summarizeToolArgs(call.Args))
-		fmt.Fprintln(out, styleText(out, "dim", line))
+	rt.OnToolStart = nil
+	rt.OnToolResult = nil
+	if tools == toolVerbosityOff {
+		return
+	}
+	if tools == toolVerbosityOn {
+		rt.OnToolStart = func(call tool.Call) {
+			line := fmt.Sprintf("  tool:start %s %s", call.Name, summarizeToolArgs(call.Args))
+			fmt.Fprintln(out, styleText(out, "dim", line))
+		}
 	}
 	rt.OnToolResult = func(call tool.Call, result tool.Result) {
+		if tools == toolVerbosityErrors && result.OK {
+			return
+		}
 		status := "ok"
 		if !result.OK {
 			status = "error"
@@ -103,6 +121,76 @@ func shortenPath(path string) string {
 		}
 	}
 	return path
+}
+
+var displayReplacer = strings.NewReplacer(
+	"**", "",
+	"__", "",
+	"`", "",
+	"\u00a0", " ",
+	"â€™", "’",
+	"â€œ", "“",
+	"â€", "”",
+	"â€˜", "‘",
+	"â€”", "—",
+	"â€“", "–",
+	"â€¦", "…",
+	"ÔÇÖ", "’",
+	"ÔÇ£", "“",
+	"ÔÇ¥", "”",
+)
+
+type outputFormatter struct {
+	tail string
+}
+
+func (f *outputFormatter) Push(text string) string {
+	f.tail += text
+	runes := []rune(f.tail)
+	if len(runes) <= 6 {
+		return ""
+	}
+	flush := string(runes[:len(runes)-6])
+	f.tail = string(runes[len(runes)-6:])
+	return cleanDisplayText(flush)
+}
+
+func (f *outputFormatter) Flush() string {
+	out := cleanDisplayText(f.tail)
+	f.tail = ""
+	return out
+}
+
+func cleanDisplayText(text string) string {
+	text = displayReplacer.Replace(text)
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "# "):
+			lines[i] = strings.Replace(line, "# ", "", 1)
+		case strings.HasPrefix(trimmed, "## "):
+			lines[i] = strings.Replace(line, "## ", "", 1)
+		case strings.HasPrefix(trimmed, "### "):
+			lines[i] = strings.Replace(line, "### ", "", 1)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func parseToolVerbosity(arg string) (toolVerbosity, error) {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "", "errors":
+		return toolVerbosityErrors, nil
+	case "off":
+		return toolVerbosityOff, nil
+	case "on":
+		return toolVerbosityOn, nil
+	default:
+		return "", fmt.Errorf("usage: /tools [off|errors|on]")
+	}
 }
 
 func onOff(v bool) string {

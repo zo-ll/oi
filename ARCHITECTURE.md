@@ -488,9 +488,10 @@ Events:
 ### `oi`
 - interactive terminal loop
 - minimal stdlib-only terminal UI when attached to a TTY
-- wrapped input/output
+- wrapped input/output with plain-text cleanup for display
 - streaming by default
-- commands limited to essentials: `/model`, `/provider`, `/new`, `/save`, `/load`, `/help`, `/exit`
+- commands limited to essentials: `/login`, `/model`, `/stream`, `/tools`, `/new`, `/save`, `/load`, `/help`, `/exit`
+- provider switching is implicit via model selection
 
 ### `oi run`
 - one-shot request

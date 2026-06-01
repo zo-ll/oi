@@ -158,6 +158,38 @@ func TestChatLoginReaderSkipsStdinForBrowserLogin(t *testing.T) {
 	}
 }
 
+func TestSelectionHasReadyModel(t *testing.T) {
+	choices := []readyModelChoice{{Provider: "p1", Model: provider.Model{ID: "m1"}}}
+	if !selectionHasReadyModel(config.Selection{Provider: "p1", Model: "m1"}, choices) {
+		t.Fatal("expected ready model match")
+	}
+	if selectionHasReadyModel(config.Selection{Provider: "p1", Model: "m2"}, choices) {
+		t.Fatal("unexpected ready model match")
+	}
+}
+
+func TestParseToolVerbosity(t *testing.T) {
+	got, err := parseToolVerbosity("on")
+	if err != nil || got != toolVerbosityOn {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+	got, err = parseToolVerbosity("")
+	if err != nil || got != toolVerbosityErrors {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+	if _, err := parseToolVerbosity("loud"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestCleanDisplayText(t *testing.T) {
+	got := cleanDisplayText("IÔÇÖm **oi**\n## Title\n`code`")
+	want := "I’m oi\nTitle\ncode"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestResolveSessionArgByIndexAndFilter(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()

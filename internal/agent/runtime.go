@@ -271,7 +271,8 @@ Rules:
 - Prefer read-only inspection before mutation.
 - Never invent file contents or command results.
 - When editing, make the smallest reasonable change.
-- Return a normal final answer once the task is complete.`
+- Prefer plain text over markdown unless the user asks for markdown.
+- Return normal UTF-8 text once the task is complete.`
 }
 
 func stringsTrim(s string) string {

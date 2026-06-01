@@ -158,32 +158,12 @@ func saveSessionNamed(rt *agent.Runtime, sel config.Selection, name string) (str
 	return session.Save(config.SessionsDir(), target)
 }
 
-func exitChat(reader *bufio.Reader, out io.Writer, rt *agent.Runtime, sel config.Selection, autosave bool) error {
+func exitChat(out io.Writer, rt *agent.Runtime, sel config.Selection, autosave bool) error {
 	if _, err := saveSession(rt, sel); err != nil {
 		return err
 	}
 	if !autosave {
-		fmt.Fprintln(out, "session saved on exit")
+		fmt.Fprintln(out, "session saved")
 	}
-	fmt.Fprint(out, "Save named snapshot before exit? [y/N] ")
-	answer, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return err
-	}
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	if answer != "y" && answer != "yes" {
-		return nil
-	}
-	fmt.Fprint(out, "Snapshot name (blank = current id): ")
-	name, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return err
-	}
-	name = strings.TrimSpace(name)
-	path, err := saveSessionNamed(rt, sel, name)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "saved snapshot: %s\n", path)
 	return nil
 }

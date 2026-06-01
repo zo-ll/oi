@@ -12,7 +12,7 @@ import (
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
-func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, line string, streaming bool, autosave bool) (bool, *agent.Runtime, config.Selection, bool, bool, error) {
+func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, line string, streaming bool, autosave bool, tools toolVerbosity) (bool, *agent.Runtime, config.Selection, bool, bool, toolVerbosity, error) {
 	fields := strings.Fields(line)
 	cmd := fields[0]
 	arg := ""
@@ -26,6 +26,7 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		printHelpLine(out, "/login [provider]", "set up provider authentication")
 		printHelpLine(out, "/model [name]", "show ready models and set model")
 		printHelpLine(out, "/stream [on|off]", "show or set streaming mode")
+		printHelpLine(out, "/tools [off|errors|on]", "show tool events level")
 		printHelpLine(out, "/autosave [on|off]", "show or set autosave mode")
 		printHelpLine(out, "/new", "start a new session")
 		printHelpLine(out, "/sessions", "list saved sessions")
@@ -36,16 +37,16 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		printHelpLine(out, "Ctrl+Y", "copy last assistant reply")
 		printHelpLine(out, "Ctrl+K", "insert newline")
 		printHelpLine(out, "Ctrl+D", "exit on empty input")
-		return false, rt, sel, streaming, autosave, nil
+		return false, rt, sel, streaming, autosave, tools, nil
 	case "/exit", "/quit":
-		if err := exitChat(reader, out, rt, sel, autosave); err != nil {
-			return false, rt, sel, streaming, autosave, err
+		if err := exitChat(out, rt, sel, autosave); err != nil {
+			return false, rt, sel, streaming, autosave, tools, err
 		}
-		return true, rt, sel, streaming, autosave, nil
+		return true, rt, sel, streaming, autosave, tools, nil
 	case "/new":
 		root, err := workspace.DetectRoot(rt.Policy.Root)
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		rt.Session = session.New(sel.Provider, sel.Model, root)
 		fmt.Fprintln(out, "new session started")
@@ -54,60 +55,71 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
 			}
 		}
-		return false, rt, sel, streaming, autosave, nil
+		return false, rt, sel, streaming, autosave, tools, nil
 	case "/login":
 		nextRT, nextSel, err := loginAndSwitchChatProvider(deps, cfg, sel, rt, reader, out, fields[1:])
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		if autosave {
 			if _, err := saveSession(nextRT, nextSel); err != nil {
 				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
 			}
 		}
-		return false, nextRT, nextSel, streaming, autosave, nil
+		return false, nextRT, nextSel, streaming, autosave, tools, nil
 	case "/provider":
-		return false, rt, sel, streaming, autosave, fmt.Errorf("/provider was removed; use /model")
+		return false, rt, sel, streaming, autosave, tools, fmt.Errorf("/provider was removed; use /model")
 	case "/model":
 		if arg == "" {
 			choice, err := promptModelChoice(reader, out, sel)
 			if err != nil {
-				return false, rt, sel, streaming, autosave, err
+				return false, rt, sel, streaming, autosave, tools, err
 			}
 			if choice == "" {
-				return false, rt, sel, streaming, autosave, nil
+				return false, rt, sel, streaming, autosave, tools, nil
 			}
 			arg = choice
 		}
 		nextRT, nextSel, err := switchChatModel(cfg, sel, rt, reader, out, arg)
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		if autosave {
 			if _, err := saveSession(nextRT, nextSel); err != nil {
 				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
 			}
 		}
-		return false, nextRT, nextSel, streaming, autosave, nil
+		return false, nextRT, nextSel, streaming, autosave, tools, nil
 	case "/stream":
 		if arg == "" {
 			fmt.Fprintf(out, "streaming: %s\n", onOff(streaming))
-			return false, rt, sel, streaming, autosave, nil
+			return false, rt, sel, streaming, autosave, tools, nil
 		}
 		switch strings.ToLower(arg) {
 		case "on":
 			fmt.Fprintln(out, "streaming: on")
-			return false, rt, sel, true, autosave, nil
+			return false, rt, sel, true, autosave, tools, nil
 		case "off":
 			fmt.Fprintln(out, "streaming: off")
-			return false, rt, sel, false, autosave, nil
+			return false, rt, sel, false, autosave, tools, nil
 		default:
-			return false, rt, sel, streaming, autosave, fmt.Errorf("usage: /stream [on|off]")
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /stream [on|off]")
 		}
+	case "/tools":
+		if arg == "" {
+			fmt.Fprintf(out, "tools: %s\n", tools)
+			return false, rt, sel, streaming, autosave, tools, nil
+		}
+		nextTools, err := parseToolVerbosity(arg)
+		if err != nil {
+			return false, rt, sel, streaming, autosave, tools, err
+		}
+		fmt.Fprintf(out, "tools: %s\n", nextTools)
+		return false, rt, sel, streaming, autosave, nextTools, nil
 	case "/autosave":
 		if arg == "" {
 			fmt.Fprintf(out, "autosave: %s\n", onOff(autosave))
-			return false, rt, sel, streaming, autosave, nil
+			return false, rt, sel, streaming, autosave, tools, nil
 		}
 		switch strings.ToLower(arg) {
 		case "on":
@@ -115,43 +127,43 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 			if _, err := saveSession(rt, sel); err != nil {
 				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
 			}
-			return false, rt, sel, streaming, true, nil
+			return false, rt, sel, streaming, true, tools, nil
 		case "off":
 			fmt.Fprintln(out, "autosave: off")
-			return false, rt, sel, streaming, false, nil
+			return false, rt, sel, streaming, false, tools, nil
 		default:
-			return false, rt, sel, streaming, autosave, fmt.Errorf("usage: /autosave [on|off]")
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /autosave [on|off]")
 		}
 	case "/sessions":
 		infos, err := filteredSessions(config.SessionsDir(), arg)
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		if len(infos) == 0 {
 			fmt.Fprintln(out, "no saved sessions")
-			return false, rt, sel, streaming, autosave, nil
+			return false, rt, sel, streaming, autosave, tools, nil
 		}
 		printSessions(out, infos)
-		return false, rt, sel, streaming, autosave, nil
+		return false, rt, sel, streaming, autosave, tools, nil
 	case "/save":
 		path, err := saveSessionNamed(rt, sel, arg)
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		fmt.Fprintf(out, "saved: %s\n", path)
-		return false, rt, sel, streaming, autosave, nil
+		return false, rt, sel, streaming, autosave, tools, nil
 	case "/load":
 		path, err := resolveLoadTarget(reader, out, config.SessionsDir(), arg)
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		if path == "" {
 			fmt.Fprintln(out, "load cancelled")
-			return false, rt, sel, streaming, autosave, nil
+			return false, rt, sel, streaming, autosave, tools, nil
 		}
 		loaded, err := session.Load(path)
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		nextSel := sel
 		if loaded.Provider != "" {
@@ -162,11 +174,11 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		}
 		cfg2, nextSel2, err := loadSelection(commonOptions{provider: nextSel.Provider, model: nextSel.Model})
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		p, err := requireProvider(nextSel2)
 		if err != nil {
-			return false, rt, sel, streaming, autosave, err
+			return false, rt, sel, streaming, autosave, tools, err
 		}
 		root := rt.Policy.Root
 		if loaded.CWD != "" {
@@ -181,8 +193,8 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		loaded.CWD = root
 		nextRT.Session = loaded
 		fmt.Fprintf(out, "loaded: %s\n", path)
-		return false, nextRT, nextSel2, streaming, autosave, nil
+		return false, nextRT, nextSel2, streaming, autosave, tools, nil
 	default:
-		return false, rt, sel, streaming, autosave, fmt.Errorf("unknown command: %s", cmd)
+		return false, rt, sel, streaming, autosave, tools, fmt.Errorf("unknown command: %s", cmd)
 	}
 }
