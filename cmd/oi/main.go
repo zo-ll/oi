@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zo-ll/oi/internal/chat"
 	"github.com/zo-ll/oi/internal/config"
 	"github.com/zo-ll/oi/internal/oauth"
 	iprovider "github.com/zo-ll/oi/internal/provider"
@@ -34,7 +35,7 @@ func main() {
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return runChat(nil, stdin, stdout)
+		return chat.Run(nil, stdin, stdout, chat.Dependencies{Login: runLogin})
 	}
 
 	switch args[0] {
@@ -59,7 +60,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	case "rpc":
 		return runRPC(stdin, stdout)
 	case "chat":
-		return runChat(args[1:], stdin, stdout)
+		return chat.Run(args[1:], stdin, stdout, chat.Dependencies{Login: runLogin})
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
