@@ -27,7 +27,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	if err != nil {
 		return err
 	}
-	p, err := requireProvider(sel)
+	p, startupNotice, err := interactiveProvider(sel)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,10 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	promptInput := &promptInput{ui: ui, reader: reader}
 	rt := buildRuntime(cfg, sel, p, root, promptInput, ui, logger)
 	configureChatRuntime(rt, ui)
-	ui.notify(fmt.Sprintf("oi\nprovider: %s\nmodel: %s\nworkspace: %s", sel.Provider, valueOr(sel.Model, "(none)"), root))
+	ui.notify(fmt.Sprintf("oi\nprovider: %s\nmodel: %s\nworkspace: %s", valueOr(sel.Provider, "(none)"), valueOr(sel.Model, "(none)"), root))
+	if startupNotice != "" {
+		ui.notify(startupNotice)
+	}
 	ui.notify("/help commands  Ctrl+V paste  Ctrl+Y copy last reply  Ctrl+K newline  Ctrl+D exit")
 	lastAssistant := ""
 
@@ -127,7 +130,7 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 	if err != nil {
 		return err
 	}
-	p, err := requireProvider(sel)
+	p, startupNotice, err := interactiveProvider(sel)
 	if err != nil {
 		return err
 	}
@@ -145,7 +148,10 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 	rt := buildRuntime(cfg, sel, p, root, reader, out, logger)
 	configureChatRuntime(rt, out)
 
-	fmt.Fprintf(out, "oi\nprovider: %s\nmodel: %s\nworkspace: %s\n", sel.Provider, valueOr(sel.Model, "(none)"), root)
+	fmt.Fprintf(out, "oi\nprovider: %s\nmodel: %s\nworkspace: %s\n", valueOr(sel.Provider, "(none)"), valueOr(sel.Model, "(none)"), root)
+	if startupNotice != "" {
+		fmt.Fprintln(out, startupNotice)
+	}
 	fmt.Fprintln(out, "Type /help for commands.")
 
 	for {
