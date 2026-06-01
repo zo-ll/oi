@@ -169,6 +169,24 @@ func (ui *terminalUI) notify(message string) {
 	}
 }
 
+func (ui *terminalUI) commitInput(text string) {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	if ui.editing {
+		ui.clearPromptLocked()
+	}
+	ui.refreshSize()
+	lines := wrapPromptLines(ui.prompt, text, ui.width)
+	for i, line := range lines {
+		if i > 0 {
+			_, _ = io.WriteString(ui.out, "\r\n")
+		}
+		_, _ = io.WriteString(ui.out, line)
+	}
+	_, _ = io.WriteString(ui.out, "\r\n")
+	ui.outputColumn = 0
+}
+
 func (ui *terminalUI) bell() {
 	_, _ = io.WriteString(ui.out, "\a")
 }

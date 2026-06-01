@@ -64,6 +64,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+		ui.commitInput(line)
 		if strings.HasPrefix(line, "/") {
 			if err := ui.suspendRaw(); err != nil {
 				return err
