@@ -18,7 +18,7 @@ It should be minimal in code size, but strong in architecture, safety, and funct
 `oi` v1 should focus on 3 modes:
 
 ```bash
-oi chat
+oi
 oi run "find where auth is handled"
 oi rpc
 ```
@@ -32,7 +32,7 @@ oi doctor
 
 ### Modes
 
-- `chat`: interactive terminal chat
+- `oi`: interactive terminal mode
 - `run`: one-shot agent task
 - `rpc`: persistent NDJSON stdio protocol
 - `models`: list models for the current provider
@@ -72,10 +72,10 @@ oi doctor
 ## Non-goals for v1
 
 Do not build these first:
-- TUI
+- large/full-screen TUI framework
 - RAG
 - vision/image support
-- clipboard integration
+- heavyweight clipboard abstractions
 - plugin system
 - background autonomous daemons
 - multi-agent orchestration
@@ -90,6 +90,7 @@ cmd/oi/
 internal/config/
 internal/provider/
 internal/agent/
+internal/chat/
 internal/tool/
 internal/workspace/
 internal/rpc/
@@ -117,6 +118,12 @@ internal/log/
 - step loop
 - tool-call handling
 - final answer handling
+
+#### `internal/chat`
+- interactive terminal mode
+- slash command handling
+- wrapped terminal output
+- minimal clipboard integration
 
 #### `internal/tool`
 - tool registry
@@ -478,9 +485,10 @@ Events:
 
 ## CLI behavior
 
-### `oi chat`
+### `oi`
 - interactive terminal loop
-- minimal prompt
+- minimal stdlib-only terminal UI when attached to a TTY
+- wrapped input/output
 - streaming by default
 - commands limited to essentials: `/model`, `/provider`, `/new`, `/save`, `/load`, `/help`, `/exit`
 

@@ -16,11 +16,9 @@ func configureChatRuntime(rt *agent.Runtime, out io.Writer) {
 		return
 	}
 	rt.OnToolStart = func(call tool.Call) {
-		clearStatusLine(out)
 		fmt.Fprintf(out, "[tool:start] %s %s\n", call.Name, summarizeToolArgs(call.Args))
 	}
 	rt.OnToolResult = func(call tool.Call, result tool.Result) {
-		clearStatusLine(out)
 		status := "ok"
 		if !result.OK {
 			status = "error"
@@ -33,10 +31,6 @@ func configureChatRuntime(rt *agent.Runtime, out io.Writer) {
 		}
 		fmt.Fprintln(out)
 	}
-}
-
-func clearStatusLine(out io.Writer) {
-	fmt.Fprint(out, "\r                    \r")
 }
 
 func summarizeToolArgs(raw []byte) string {

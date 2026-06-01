@@ -163,3 +163,20 @@ func TestResolveSessionArgByIndexAndFilter(t *testing.T) {
 		t.Fatalf("path = %q want %q", path, all[0].Path)
 	}
 }
+
+func TestWrapPromptLines(t *testing.T) {
+	lines := wrapPromptLines("oi> ", "abcdefghi", 8)
+	if len(lines) < 2 {
+		t.Fatalf("lines = %#v", lines)
+	}
+	if lines[0] != "oi> abcd" {
+		t.Fatalf("first = %q", lines[0])
+	}
+}
+
+func TestNormalizePastedText(t *testing.T) {
+	got := normalizePastedText("a\r\nb\rc")
+	if got != "a\nb\nc" {
+		t.Fatalf("got %q", got)
+	}
+}

@@ -43,8 +43,10 @@ go build -o ~/.local/bin/oi ./cmd/oi
 
 ```bash
 oi
-# same as: oi chat
+# interactive mode
 
+oi --debug
+oi --provider openai-codex --model gpt-5.3-codex
 oi doctor
 oi models
 oi providers
@@ -53,7 +55,6 @@ oi login openai        # OpenAI Platform API key, separate from ChatGPT
 oi logout openai-codex
 oi version
 oi run "task"
-oi chat
 oi rpc
 ```
 
@@ -63,7 +64,7 @@ Available now:
 
 ```bash
 oi
-# default chat mode
+# default interactive mode
 
 oi doctor
 oi models
@@ -74,12 +75,18 @@ oi logout openai-codex
 oi version
 oi run "task"
 oi rpc
-oi chat
 ```
 
-`chat` is implemented as a minimal interactive mode with slash commands and streaming output.
+Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
+- wrapped output
+- wrapped multiline input
+- bracketed paste support
+- `Ctrl+V` to paste from the system clipboard when available
+- `Ctrl+Y` to copy the last assistant reply
+- `Ctrl+K` to insert a newline
+- line-mode fallback when not attached to a terminal
 
-## Chat slash commands
+## Interactive slash commands
 
 - `/help`
 - `/login` (choose `sub` or `api`, then provider)
@@ -93,7 +100,7 @@ oi chat
 - `/load [name|path|index]`
 - `/exit`
 
-Chat autosaves the rolling session by default after successful turns, saves on exit, and can optionally save a named snapshot when exiting.
+Interactive mode autosaves the rolling session by default after successful turns, saves on exit, and can optionally save a named snapshot when exiting.
 
 ### Session examples
 
@@ -114,7 +121,7 @@ List configured providers:
 oi providers
 ```
 
-In chat, `/login` is a two-step flow:
+In interactive mode, `/login` is a two-step flow:
 
 1. Choose `sub` or `api`.
 2. Choose a provider. For `sub`, the only provider is `openai` and it uses ChatGPT browser login.
@@ -143,7 +150,7 @@ See also: `RPC.md`
 
 ## Debug logging
 
-Use `--debug` with `oi chat` or `oi run` to write JSONL debug logs under:
+Use `--debug` with `oi` or `oi run` to write JSONL debug logs under:
 
 ```bash
 ~/.local/state/oi/logs/

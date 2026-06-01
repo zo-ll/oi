@@ -11,7 +11,115 @@ import (
 )
 
 func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
-	opts, err := parseCommonOptions("chat", args)
+	if ui, ok := newTerminalUI(in, out); ok {
+		defer ui.Close()
+		return runTUIMode(args, in, out, ui, deps)
+	}
+	return runLineMode(args, in, out, deps)
+}
+
+func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps Dependencies) error {
+	opts, err := parseCommonOptions("", args)
+	if err != nil {
+		return err
+	}
+	cfg, sel, err := loadSelection(opts)
+	if err != nil {
+		return err
+	}
+	p, err := requireProvider(sel)
+	if err != nil {
+		return err
+	}
+	root, err := workspace.DetectRoot("")
+	if err != nil {
+		return err
+	}
+	if err := ui.enableRawMode(); err != nil {
+		return runLineMode(args, in, out, deps)
+	}
+	defer ui.disableRawMode()
+	reader := bufio.NewReader(in)
+	streaming := true
+	autosave := true
+	logger, err := maybeDebugLogger("chat", opts.debug)
+	if err != nil {
+		return err
+	}
+	promptInput := &promptInput{ui: ui, reader: reader}
+	rt := buildRuntime(cfg, sel, p, root, promptInput, ui, logger)
+	configureChatRuntime(rt, ui)
+	ui.notify(fmt.Sprintf("oi\nprovider: %s\nmodel: %s\nworkspace: %s", sel.Provider, valueOr(sel.Model, "(none)"), root))
+	ui.notify("/help commands  Ctrl+V paste  Ctrl+Y copy last reply  Ctrl+K newline  Ctrl+D exit")
+	lastAssistant := ""
+
+	for {
+		line, err := ui.readMessage(lastAssistant)
+		if err != nil {
+			_ = ui.suspendRaw()
+			return exitChat(reader, ui, rt, sel, autosave)
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "/") {
+			if err := ui.suspendRaw(); err != nil {
+				return err
+			}
+			exit, newRT, newSel, newStreaming, newAutosave, cmdErr := handleChatCommand(deps, cfg, sel, rt, reader, ui, line, streaming, autosave)
+			if resumeErr := ui.resumeRaw(); resumeErr != nil {
+				return resumeErr
+			}
+			if cmdErr != nil {
+				ui.notify("error: " + cmdErr.Error())
+			} else {
+				rt = newRT
+				sel = newSel
+				streaming = newStreaming
+				autosave = newAutosave
+				configureChatRuntime(rt, ui)
+			}
+			if exit {
+				return nil
+			}
+			continue
+		}
+
+		ctx := context.Background()
+		if streaming {
+			resp, runErr := rt.RunOnceStream(ctx, line, func(delta string) {
+				fmt.Fprint(ui, delta)
+			})
+			fmt.Fprintln(ui)
+			if runErr != nil {
+				ui.notify("error: " + runErr.Error())
+			} else {
+				lastAssistant = resp
+				if autosave {
+					if _, saveErr := saveSession(rt, sel); saveErr != nil {
+						ui.notify("warning: autosave failed: " + saveErr.Error())
+					}
+				}
+			}
+		} else {
+			resp, runErr := rt.RunOnce(ctx, line)
+			if runErr != nil {
+				ui.notify("error: " + runErr.Error())
+			} else {
+				lastAssistant = resp
+				ui.notify(resp)
+				if autosave {
+					if _, saveErr := saveSession(rt, sel); saveErr != nil {
+						ui.notify("warning: autosave failed: " + saveErr.Error())
+					}
+				}
+			}
+		}
+	}
+}
+
+func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
+	opts, err := parseCommonOptions("", args)
 	if err != nil {
 		return err
 	}
@@ -37,7 +145,7 @@ func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
 	rt := buildRuntime(cfg, sel, p, root, reader, out, logger)
 	configureChatRuntime(rt, out)
 
-	fmt.Fprintf(out, "oi chat\nprovider: %s\nmodel: %s\nworkspace: %s\n", sel.Provider, valueOr(sel.Model, "(none)"), root)
+	fmt.Fprintf(out, "oi\nprovider: %s\nmodel: %s\nworkspace: %s\n", sel.Provider, valueOr(sel.Model, "(none)"), root)
 	fmt.Fprintln(out, "Type /help for commands.")
 
 	for {
@@ -76,31 +184,15 @@ func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
 
 		ctx := context.Background()
 		if streaming {
-			spinnerStop := startThinkingIndicator(out)
-			startedOutput := false
-			resp, runErr := rt.RunOnceStream(ctx, line, func(delta string) {
-				if !startedOutput {
-					spinnerStop()
-					startedOutput = true
-				}
+			_, runErr := rt.RunOnceStream(ctx, line, func(delta string) {
 				fmt.Fprint(out, delta)
 			})
-			spinnerStop()
+			fmt.Fprintln(out)
 			if runErr != nil {
-				if startedOutput {
-					fmt.Fprintln(out)
-				}
 				fmt.Fprintf(out, "error: %v\n", runErr)
-			} else {
-				if !startedOutput {
-					fmt.Fprintln(out, resp)
-				} else {
-					fmt.Fprintln(out)
-				}
-				if autosave {
-					if _, saveErr := saveSession(rt, sel); saveErr != nil {
-						fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)
-					}
+			} else if autosave {
+				if _, saveErr := saveSession(rt, sel); saveErr != nil {
+					fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)
 				}
 			}
 		} else {

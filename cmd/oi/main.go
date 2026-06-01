@@ -34,8 +34,8 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	if len(args) == 0 {
-		return chat.Run(nil, stdin, stdout, chat.Dependencies{Login: runLogin})
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return chat.Run(args, stdin, stdout, chat.Dependencies{Login: runLogin})
 	}
 
 	switch args[0] {
@@ -60,7 +60,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	case "rpc":
 		return runRPC(stdin, stdout)
 	case "chat":
-		return chat.Run(args[1:], stdin, stdout, chat.Dependencies{Login: runLogin})
+		return fmt.Errorf("`oi chat` was removed; use `oi`")
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
@@ -70,7 +70,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "oi")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  oi                  # start chat")
+	fmt.Fprintln(w, "  oi [--debug] [--provider NAME] [--model NAME]  # interactive mode")
 	fmt.Fprintln(w, "  oi help")
 	fmt.Fprintln(w, "  oi doctor")
 	fmt.Fprintln(w, "  oi models")
@@ -78,11 +78,10 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  oi login [provider]")
 	fmt.Fprintln(w, "  oi logout [provider]")
 	fmt.Fprintln(w, "  oi version")
-	fmt.Fprintln(w, "  oi chat")
 	fmt.Fprintln(w, "  oi run \"task\"")
 	fmt.Fprintln(w, "  oi rpc")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Current status: chat is the default mode; doctor, models, providers, login, logout, version, run, and rpc are available.")
+	fmt.Fprintln(w, "Current status: interactive mode is the default; doctor, models, providers, login, logout, version, run, and rpc are available.")
 }
 
 func printVersion(w io.Writer) {
