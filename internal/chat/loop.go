@@ -53,7 +53,6 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	if startupNotice != "" {
 		ui.notify(startupNotice)
 	}
-	ui.notify("/help commands  Ctrl+V paste  Ctrl+Y copy last reply  Ctrl+K newline  Ctrl+D exit")
 	lastAssistant := ""
 
 	for {
