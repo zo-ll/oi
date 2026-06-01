@@ -19,7 +19,7 @@ func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
 	if err != nil {
 		return err
 	}
-	p, err := requireProvider(sel)
+	p, startupNotice, err := interactiveProvider(sel)
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,10 @@ func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
 	rt := buildRuntime(cfg, sel, p, root, reader, out, logger)
 	configureChatRuntime(rt, out)
 
-	fmt.Fprintf(out, "oi chat\nprovider: %s\nmodel: %s\nworkspace: %s\n", sel.Provider, valueOr(sel.Model, "(none)"), root)
+	fmt.Fprintf(out, "oi chat\nprovider: %s\nmodel: %s\nworkspace: %s\n", valueOr(sel.Provider, "(none)"), valueOr(sel.Model, "(none)"), root)
+	if startupNotice != "" {
+		fmt.Fprintln(out, startupNotice)
+	}
 	fmt.Fprintln(out, "Type /help for commands.")
 
 	for {

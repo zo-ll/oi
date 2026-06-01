@@ -130,3 +130,14 @@ func canonicalProviderName(name string) string {
 		return strings.TrimSpace(name)
 	}
 }
+
+func interactiveProvider(sel config.Selection) (provider.Provider, string, error) {
+	if sel.Provider == "" {
+		return nil, "No provider configured. Use /login to set one up.", nil
+	}
+	p, err := requireProvider(sel)
+	if err != nil {
+		return nil, fmt.Sprintf("Provider %s is not ready: %v. Use /login, then /model.", sel.Provider, err), nil
+	}
+	return p, "", nil
+}

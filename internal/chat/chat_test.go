@@ -70,10 +70,16 @@ func TestLoginArgsSelection(t *testing.T) {
 	}
 }
 
-func TestProviderChoiceNamesPrioritizesBrowserLogin(t *testing.T) {
-	names := providerChoiceNames(&config.Config{Providers: map[string]config.ProviderConfig{"opencode-go": {BaseURL: "x"}}})
-	if len(names) == 0 || names[0] != "openai-codex" {
-		t.Fatalf("names = %#v", names)
+func TestInteractiveProviderAllowsMissingProvider(t *testing.T) {
+	p, notice, err := interactiveProvider(config.Selection{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p != nil {
+		t.Fatal("expected nil provider")
+	}
+	if notice == "" {
+		t.Fatal("expected startup notice")
 	}
 }
 
@@ -105,31 +111,38 @@ func TestChatLoginFlowHelpers(t *testing.T) {
 	}
 }
 
-func TestResolveModelChoiceFromList(t *testing.T) {
-	models := []provider.Model{{ID: "gpt-5-codex"}, {ID: "gpt-4.1"}}
-	got, err := resolveModelChoiceFromList(models, "2")
+func TestResolveReadyModelChoiceFromList(t *testing.T) {
+	choices := []readyModelChoice{
+		{Provider: "p1", Model: provider.Model{ID: "gpt-5-codex"}},
+		{Provider: "p2", Model: provider.Model{ID: "gpt-4.1"}},
+	}
+	got, err := resolveReadyModelChoiceFromList(choices, "2", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "gpt-4.1" {
-		t.Fatalf("got %q", got)
+	if got.Model.ID != "gpt-4.1" || got.Provider != "p2" {
+		t.Fatalf("got = %+v", got)
 	}
-	got, err = resolveModelChoiceFromList(models, "GPT-5-CODEX")
+	got, err = resolveReadyModelChoiceFromList(choices, "GPT-5-CODEX", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "gpt-5-codex" {
-		t.Fatalf("got %q", got)
+	if got.Model.ID != "gpt-5-codex" {
+		t.Fatalf("got = %+v", got)
 	}
 }
 
-func TestResolveProviderChoiceFromNames(t *testing.T) {
-	got, err := resolveProviderChoiceFromNames([]string{"a", "b"}, "2")
+func TestResolveReadyModelChoicePrefersCurrentProvider(t *testing.T) {
+	choices := []readyModelChoice{
+		{Provider: "p1", Model: provider.Model{ID: "same"}},
+		{Provider: "p2", Model: provider.Model{ID: "same"}},
+	}
+	got, err := resolveReadyModelChoiceFromList(choices, "same", "p2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "b" {
-		t.Fatalf("got %q", got)
+	if got.Provider != "p2" {
+		t.Fatalf("got = %+v", got)
 	}
 }
 

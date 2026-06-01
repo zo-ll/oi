@@ -129,13 +129,21 @@ func switchChatProvider(deps Dependencies, cfg *config.Config, sel config.Select
 	return nil, sel, lastErr
 }
 
+type readyModelChoice struct {
+	Provider string
+	Model    provider.Model
+}
+
 func switchChatModel(cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, model string) (*agent.Runtime, config.Selection, error) {
-	nextSel := sel
-	resolved, err := resolveModelChoice(rt, model)
+	choice, err := resolveReadyModelChoice(model, sel.Provider)
 	if err != nil {
 		return nil, sel, err
 	}
-	nextSel.Model = resolved
+	nextSel := config.Selection{Provider: choice.Provider, Model: choice.Model.ID}
+	cfg2, nextSel, err := loadSelection(commonOptions{provider: nextSel.Provider, model: nextSel.Model})
+	if err != nil {
+		return nil, sel, err
+	}
 	p, err := requireProvider(nextSel)
 	if err != nil {
 		return nil, sel, err
@@ -144,24 +152,23 @@ func switchChatModel(cfg *config.Config, sel config.Selection, rt *agent.Runtime
 	if err != nil {
 		return nil, sel, err
 	}
+	*cfg = *cfg2
 	nextRT := buildRuntime(cfg, nextSel, p, root, reader, out, rt.Logger)
-	fmt.Fprintf(out, "model set to %s\n", resolved)
+	fmt.Fprintf(out, "model set to %s [%s]\n", choice.Model.ID, choice.Provider)
 	return nextRT, nextSel, nil
 }
 
-func promptModelChoice(reader *bufio.Reader, out io.Writer, rt *agent.Runtime, current string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	models, err := rt.Provider.ListModels(ctx)
+func promptModelChoice(reader *bufio.Reader, out io.Writer, current config.Selection) (string, error) {
+	choices, err := listReadyModelChoices()
 	if err != nil {
 		return "", err
 	}
-	if len(models) == 0 {
-		fmt.Fprintln(out, "no models returned")
+	if len(choices) == 0 {
+		fmt.Fprintln(out, "no ready models; use /login")
 		return "", nil
 	}
-	fmt.Fprintf(out, "current model: %s\n", valueOr(current, "(none)"))
-	printModels(out, models, current)
+	fmt.Fprintf(out, "current model: %s\n", valueOr(current.Model, "(none)"))
+	printReadyModels(out, choices, current)
 	fmt.Fprint(out, "Switch model? [number/name, blank=keep] ")
 	choice, err := reader.ReadString('\n')
 	if err != nil && err != io.EOF {
@@ -171,53 +178,100 @@ func promptModelChoice(reader *bufio.Reader, out io.Writer, rt *agent.Runtime, c
 	if choice == "" {
 		return "", nil
 	}
-	return resolveModelChoiceFromList(models, choice)
-}
-
-func resolveModelChoice(rt *agent.Runtime, arg string) (string, error) {
-	arg = strings.TrimSpace(arg)
-	if arg == "" {
-		return "", fmt.Errorf("model is required")
-	}
-	if _, ok := parseSessionIndex(arg); !ok {
-		return arg, nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	models, err := rt.Provider.ListModels(ctx)
-	if err != nil {
+	if _, err := resolveReadyModelChoiceFromList(choices, choice, current.Provider); err != nil {
 		return "", err
 	}
-	return resolveModelChoiceFromList(models, arg)
+	return choice, nil
 }
 
-func resolveModelChoiceFromList(models []provider.Model, arg string) (string, error) {
+func resolveReadyModelChoice(arg string, currentProvider string) (readyModelChoice, error) {
+	choices, err := listReadyModelChoices()
+	if err != nil {
+		return readyModelChoice{}, err
+	}
+	if len(choices) == 0 {
+		return readyModelChoice{}, fmt.Errorf("no ready models; use /login")
+	}
+	return resolveReadyModelChoiceFromList(choices, arg, currentProvider)
+}
+
+func resolveReadyModelChoiceFromList(choices []readyModelChoice, arg string, currentProvider string) (readyModelChoice, error) {
 	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return readyModelChoice{}, fmt.Errorf("model is required")
+	}
 	if idx, ok := parseSessionIndex(arg); ok {
-		if idx < 1 || idx > len(models) {
-			return "", fmt.Errorf("model index out of range: %d", idx)
+		if idx < 1 || idx > len(choices) {
+			return readyModelChoice{}, fmt.Errorf("model index out of range: %d", idx)
 		}
-		return models[idx-1].ID, nil
+		return choices[idx-1], nil
 	}
-	for _, model := range models {
-		if model.ID == arg || strings.EqualFold(model.ID, arg) {
-			return model.ID, nil
+	var matches []readyModelChoice
+	for _, choice := range choices {
+		if choice.Model.ID == arg || strings.EqualFold(choice.Model.ID, arg) {
+			matches = append(matches, choice)
 		}
 	}
-	return arg, nil
+	if len(matches) == 0 {
+		return readyModelChoice{}, fmt.Errorf("ready model not found: %s", arg)
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	for _, choice := range matches {
+		if choice.Provider == currentProvider {
+			return choice, nil
+		}
+	}
+	return readyModelChoice{}, fmt.Errorf("model %q is available from multiple providers; choose by index", arg)
 }
 
-func printModels(out io.Writer, models []provider.Model, current string) {
-	for i, m := range models {
-		marker := " "
-		if m.ID == current {
-			marker = "*"
-		}
-		if strings.TrimSpace(m.Name) != "" && m.Name != m.ID {
-			fmt.Fprintf(out, "%2d. %s %s  %s\n", i+1, marker, m.ID, m.Name)
+func listReadyModelChoices() ([]readyModelChoice, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	auth, err := config.LoadAuth()
+	if err != nil {
+		return nil, err
+	}
+	var out []readyModelChoice
+	for _, name := range config.ProviderNames(cfg) {
+		sel, err := config.ResolveSelection(cfg, auth, name, "", "")
+		if err != nil {
 			continue
 		}
-		fmt.Fprintf(out, "%2d. %s %s\n", i+1, marker, m.ID)
+		p, err := requireProvider(sel)
+		if err != nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		models, err := p.ListModels(ctx)
+		cancel()
+		if err != nil {
+			continue
+		}
+		for _, model := range models {
+			out = append(out, readyModelChoice{Provider: name, Model: model})
+		}
+	}
+	return out, nil
+}
+
+func printReadyModels(out io.Writer, choices []readyModelChoice, current config.Selection) {
+	for i, choice := range choices {
+		marker := " "
+		if choice.Provider == current.Provider && choice.Model.ID == current.Model {
+			marker = "*"
+		}
+		label := choice.Model.ID
+		if strings.TrimSpace(choice.Model.Name) != "" && choice.Model.Name != choice.Model.ID {
+			label += "  " + choice.Model.Name
+		}
+		fmt.Fprintf(out, "%2d. %s %s  [%s]\n", i+1, marker, label, choice.Provider)
 	}
 }
 
