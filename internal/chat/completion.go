@@ -14,7 +14,7 @@ type completionState struct {
 	index      int
 }
 
-const maxCompletionMatchesShown = 8
+const maxCompletionMatchesShown = 7
 
 func (ui *terminalUI) setWorkspaceRoot(root string) {
 	if ui == nil {
@@ -175,22 +175,44 @@ func liveHint(matches []string) string {
 	return fmt.Sprintf("%d matches  tab\u2192pick", len(matches))
 }
 
-func pickerHint(matches []string) string {
+func pickerHint(matches []string, index int) string {
 	if len(matches) == 0 {
 		return ""
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(matches) {
+		index = len(matches) - 1
 	}
 	shown := matches
 	more := 0
 	if len(shown) > maxCompletionMatchesShown {
-		shown = shown[:maxCompletionMatchesShown]
+		start := index - maxCompletionMatchesShown/2
+		if start < 0 {
+			start = 0
+		}
+		if start+maxCompletionMatchesShown > len(matches) {
+			start = len(matches) - maxCompletionMatchesShown
+		}
+		if start < 0 {
+			start = 0
+		}
+		shown = shown[start : start+maxCompletionMatchesShown]
 		more = len(matches) - len(shown)
+		if start > 0 {
+			more += start
+		}
 	}
 	var b strings.Builder
-	b.WriteString("pick (1-")
-	b.WriteString(fmt.Sprintf("%d", len(shown)))
-	b.WriteString("):\n")
-	for i, match := range shown {
-		fmt.Fprintf(&b, " %d. %s\n", i+1, match)
+	b.WriteString(fmt.Sprintf("%d matches", len(matches)))
+	b.WriteString("  \u2191\u2193 nav  enter pick\n")
+	for _, match := range shown {
+		marker := "  "
+		if strings.EqualFold(match, matches[index]) {
+			marker = "\u25b6 "
+		}
+		fmt.Fprintf(&b, "%s%s\n", marker, match)
 	}
 	if more > 0 {
 		fmt.Fprintf(&b, " +%d more", more)

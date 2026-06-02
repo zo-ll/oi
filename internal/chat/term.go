@@ -33,6 +33,7 @@ type terminalUI struct {
 	promptHintLines int
 	pickerMatches   []string
 	pickerActive    bool
+	pickerIndex     int
 	mu              sync.Mutex
 }
 

@@ -142,7 +142,8 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 		}
 		ui.pickerActive = true
 		ui.pickerMatches = matches
-		ui.setPromptHint(pickerHint(matches))
+		ui.pickerIndex = 0
+		ui.setPromptHint(pickerHint(matches, ui.pickerIndex))
 	}
 
 	refreshHint("")
@@ -178,6 +179,22 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 
 		switch b {
 		case '\r', '\n':
+			if ui.pickerActive && len(ui.pickerMatches) > 0 {
+				idx := ui.pickerIndex
+				if idx < 0 {
+					idx = 0
+				}
+				if idx >= len(ui.pickerMatches) {
+					idx = len(ui.pickerMatches) - 1
+				}
+				next := ui.pickMatch(string(buf), idx)
+				buf = []rune(next)
+				ui.pickerActive = false
+				ui.pickerMatches = nil
+				refreshHint(string(buf))
+				ui.renderPrompt(string(buf))
+				continue
+			}
 			text := strings.TrimRight(string(buf), "\n")
 			if strings.TrimSpace(text) == "" {
 				buf = buf[:0]
@@ -289,6 +306,15 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 			}
 			switch kind {
 			case "up":
+				if ui.pickerActive && len(ui.pickerMatches) > 0 {
+					ui.pickerIndex--
+					if ui.pickerIndex < 0 {
+						ui.pickerIndex = len(ui.pickerMatches) - 1
+					}
+					ui.setPromptHint(pickerHint(ui.pickerMatches, ui.pickerIndex))
+					ui.renderPrompt(string(buf))
+					continue
+				}
 				next, ok := ui.historyPrev(string(buf))
 				if !ok {
 					ui.bell()
@@ -301,6 +327,15 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				ui.renderPrompt(string(buf))
 				continue
 			case "down":
+				if ui.pickerActive && len(ui.pickerMatches) > 0 {
+					ui.pickerIndex++
+					if ui.pickerIndex >= len(ui.pickerMatches) {
+						ui.pickerIndex = 0
+					}
+					ui.setPromptHint(pickerHint(ui.pickerMatches, ui.pickerIndex))
+					ui.renderPrompt(string(buf))
+					continue
+				}
 				next, ok := ui.historyNext()
 				if !ok {
 					ui.bell()
