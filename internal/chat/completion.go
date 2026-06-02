@@ -247,7 +247,7 @@ func pickerHint(matches []string, index int) string {
 	for _, match := range shown {
 		marker := "  "
 		if strings.EqualFold(match, matches[index]) {
-			marker = "\u25b6 "
+			marker = "> "
 		}
 		fmt.Fprintf(&b, "%s%s\n", marker, match)
 	}
@@ -274,8 +274,7 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 		ui.clearStatusLocked()
 		if !first {
 			if overlayLines > 0 {
-				_, _ = io.WriteString(ui.out, "\r")
-				for i := 0; i < overlayLines-1; i++ {
+				for i := 0; i < overlayLines; i++ {
 					_, _ = io.WriteString(ui.out, "\x1b[1A")
 				}
 			}
@@ -304,7 +303,7 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 		for _, item := range shown {
 			marker := "  "
 			if idx >= start && items[idx] == item {
-				marker = "\u25b6 "
+				marker = "> "
 			}
 			for _, line := range wrapLine(marker+item, ui.width) {
 				writeLine(line)
