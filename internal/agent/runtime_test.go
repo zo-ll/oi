@@ -186,15 +186,19 @@ func TestRunOnceSkipsRetrievalForChitChat(t *testing.T) {
 	}
 	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "done"}}}
 	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: root}, MaxSteps: 2}
-	if _, err := r.RunOnce(context.Background(), "hello there"); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.requests) != 1 || len(p.requests[0].Messages) < 2 {
-		t.Fatalf("requests = %+v", p.requests)
-	}
-	for _, msg := range p.requests[0].Messages {
-		if msg.Role == "system" && strings.Contains(msg.Content, "Retrieved workspace context:") {
-			t.Fatalf("unexpected retrieval context: %+v", p.requests[0].Messages)
+	for _, input := range []string{"hello there", "what do you think of this project?"} {
+		p.requests = nil
+		p.responses = []provider.Response{{Content: "done"}}
+		if _, err := r.RunOnce(context.Background(), input); err != nil {
+			t.Fatal(err)
+		}
+		if len(p.requests) != 1 || len(p.requests[0].Messages) < 2 {
+			t.Fatalf("requests = %+v", p.requests)
+		}
+		for _, msg := range p.requests[0].Messages {
+			if msg.Role == "system" && strings.Contains(msg.Content, "Retrieved workspace context:") {
+				t.Fatalf("unexpected retrieval context for %q: %+v", input, p.requests[0].Messages)
+			}
 		}
 	}
 }

@@ -87,13 +87,15 @@ func ShouldUse(input string) bool {
 		"interface": true, "package": true, "import": true, "type": true, "file": true, "files": true,
 		"path": true, "error": true, "panic": true, "bug": true, "test": true, "config": true,
 		"workspace": true, "rpc": true, "provider": true, "session": true, "model": true,
+		"auth": true, "login": true, "runtime": true, "handler": true, "command": true,
+		"prompt": true, "architecture": true,
 	}
 	for _, token := range tokens {
 		if keywords[token] {
 			return true
 		}
 	}
-	return len(tokens) >= 4
+	return false
 }
 
 func collectCandidates(root, query string, recentPaths []string) ([]chunk, error) {

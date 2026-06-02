@@ -11,8 +11,14 @@ func TestShouldUse(t *testing.T) {
 	if ShouldUse("hello there") {
 		t.Fatal("unexpected retrieval for chit-chat")
 	}
+	if ShouldUse("what do you think of this project?") {
+		t.Fatal("unexpected retrieval for broad opinion prompt")
+	}
 	if !ShouldUse("where is RunOnce implemented in runtime.go") {
 		t.Fatal("expected retrieval for code question")
+	}
+	if !ShouldUse("where is auth handled") {
+		t.Fatal("expected retrieval for codebase auth question")
 	}
 }
 
@@ -57,7 +63,7 @@ func TestBuildContextBoostsRecentPaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "other.go"), []byte("package demo\n\nfunc HelperThing() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ctx, notice, err := BuildContext(root, "where is HelperThing implemented", []string{"recent.go"})
+	ctx, notice, err := BuildContext(root, "where is HelperThing function implemented", []string{"recent.go"})
 	if err != nil {
 		t.Fatal(err)
 	}

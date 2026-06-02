@@ -30,12 +30,7 @@ func configureChatRuntime(rt *agent.Runtime, out io.Writer, tools toolVerbosity)
 		return
 	}
 	indicator := newActivityIndicator(out)
-	rt.OnRetrieve = func(notice retrieval.Notice) {
-		if notice.SnippetCount <= 0 {
-			return
-		}
-		fmt.Fprintln(out, styleText(out, "dim", formatRetrievalNotice(notice)))
-	}
+	rt.OnRetrieve = nil
 	rt.OnModelStart = indicator.StartThinking
 	rt.OnModelStop = indicator.Clear
 	rt.OnToolStart = nil
