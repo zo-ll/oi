@@ -95,14 +95,25 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		return false, rt, sel, streaming, autosave, tools, fmt.Errorf("/provider was removed; use /model")
 	case "/model":
 		if arg == "" {
-			choice, err := promptModelChoice(reader, out, sel)
-			if err != nil {
-				return false, rt, sel, streaming, autosave, tools, err
+			if picker, ok := out.(pickerUI); ok {
+				choice, err := modelPickerPick(picker, sel.Provider)
+				if err != nil {
+					return false, rt, sel, streaming, autosave, tools, err
+				}
+				if choice == "" {
+					return false, rt, sel, streaming, autosave, tools, nil
+				}
+				arg = choice
+			} else {
+				choice, err := promptModelChoice(reader, out, sel)
+				if err != nil {
+					return false, rt, sel, streaming, autosave, tools, err
+				}
+				if choice == "" {
+					return false, rt, sel, streaming, autosave, tools, nil
+				}
+				arg = choice
 			}
-			if choice == "" {
-				return false, rt, sel, streaming, autosave, tools, nil
-			}
-			arg = choice
 		}
 		nextRT, nextSel, err := switchChatModel(cfg, sel, rt, reader, out, arg)
 		if err != nil {

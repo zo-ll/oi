@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,10 @@ import (
 type completionState struct {
 	candidates []string
 	index      int
+}
+
+type pickerUI interface {
+	overlayPicker(title string, items []string) (string, bool)
 }
 
 const maxCompletionMatchesShown = 7
@@ -217,6 +222,120 @@ func (ui *terminalUI) pickMatch(current string, idx int) string {
 		return current
 	}
 	return replaceTrailingToken(current, ui.pickerMatches[idx])
+}
+
+func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool) {
+	if ui == nil || len(items) == 0 {
+		return "", false
+	}
+	idx := 0
+	renderOverlay := func() {
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		ui.refreshSize()
+		ui.clearStatusLocked()
+		ui.clearPromptLocked()
+		start := idx - idx%maxCompletionMatchesShown
+		if start+maxCompletionMatchesShown > len(items) {
+			start = len(items) - maxCompletionMatchesShown
+		}
+		if start < 0 {
+			start = 0
+		}
+		shown := items[start : start+maxCompletionMatchesShown]
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s  \u2191\u2193 nav  enter pick  esc cancel", title)
+		lines := wrapLine(b.String(), ui.width)
+		for _, line := range lines {
+			_, _ = io.WriteString(ui.out, ui.Styled("dim", line))
+			_, _ = io.WriteString(ui.out, "\r\n")
+			ui.promptHintLines++
+		}
+		for i, item := range shown {
+			marker := "  "
+			if idx >= start && items[idx] == item {
+				marker = "\u25b6 "
+			}
+			display := fmt.Sprintf("%s%s", marker, item)
+			for _, line := range wrapLine(display, ui.width) {
+				_, _ = io.WriteString(ui.out, ui.Styled("dim", line))
+				_, _ = io.WriteString(ui.out, "\r\n")
+				ui.promptHintLines++
+			}
+			_ = i
+		}
+	}
+	clearOverlay := func() {
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		total := ui.promptHintLines
+		ui.promptHintLines = 0
+		if total <= 0 {
+			return
+		}
+		_, _ = io.WriteString(ui.out, "\r")
+		for i := 0; i < total-1; i++ {
+			_, _ = io.WriteString(ui.out, "\x1b[1A")
+		}
+		for i := 0; i < total; i++ {
+			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
+			if i < total-1 {
+				_, _ = io.WriteString(ui.out, "\x1b[1B")
+			}
+		}
+		for i := 0; i < total-1; i++ {
+			_, _ = io.WriteString(ui.out, "\x1b[1A")
+		}
+		_, _ = io.WriteString(ui.out, "\r")
+		ui.outputColumn = 0
+	}
+	renderOverlay()
+	defer clearOverlay()
+	for {
+		b, err := readByte(ui.in)
+		if err != nil {
+			return "", false
+		}
+		switch b {
+		case 3:
+			return "", false
+		case 27:
+			kind, _, handled, _ := ui.readEscapeSequence()
+			if !handled {
+				return "", false
+			}
+			switch kind {
+			case "up":
+				idx--
+				if idx < 0 {
+					idx = len(items) - 1
+				}
+				renderOverlay()
+			case "down":
+				idx++
+				if idx >= len(items) {
+					idx = 0
+				}
+				renderOverlay()
+			default:
+				return "", false
+			}
+		case '\r', '\n':
+			return items[idx], true
+		case '1', '2', '3', '4', '5', '6', '7':
+			digit := int(b - '1')
+			start := idx - idx%maxCompletionMatchesShown
+			pos := start + digit
+			if pos >= 0 && pos < len(items) {
+				idx = pos
+				renderOverlay()
+			} else {
+				ui.bell()
+			}
+		default:
+			ui.bell()
+		}
+	}
 }
 
 func formatCompletionMatches(matches []string) string {

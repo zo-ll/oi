@@ -213,6 +213,42 @@ func listReadyModelChoices() ([]readyModelChoice, error) {
 	return out, nil
 }
 
+func modelPickerPick(picker pickerUI, currentProvider string) (string, error) {
+	choices, err := listReadyModelChoices()
+	if err != nil {
+		return "", err
+	}
+	if len(choices) == 0 {
+		return "", fmt.Errorf("no ready models; use /login")
+	}
+	singleProvider := len(choices) > 0
+	providerName := choices[0].Provider
+	for _, choice := range choices[1:] {
+		if choice.Provider != providerName {
+			singleProvider = false
+			break
+		}
+	}
+	labels := make([]string, 0, len(choices))
+	modelToLabel := make(map[string]readyModelChoice, len(choices))
+	for _, choice := range choices {
+		label := choice.Model.ID
+		if !singleProvider {
+			label += "  [" + choice.Provider + "]"
+		}
+		labels = append(labels, label)
+		modelToLabel[label] = choice
+	}
+	selected, ok := picker.overlayPicker("choose model", labels)
+	if !ok || selected == "" {
+		return "", nil
+	}
+	if mc, found := modelToLabel[selected]; found {
+		return mc.Model.ID, nil
+	}
+	return selected, nil
+}
+
 func printReadyModels(out io.Writer, choices []readyModelChoice, current config.Selection) {
 	singleProvider := true
 	if len(choices) > 1 {
