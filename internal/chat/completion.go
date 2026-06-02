@@ -14,6 +14,8 @@ type completionState struct {
 	index      int
 }
 
+const maxCompletionMatchesShown = 8
+
 func (ui *terminalUI) setWorkspaceRoot(root string) {
 	if ui == nil {
 		return
@@ -74,49 +76,59 @@ func (ui *terminalUI) historyNext() (string, bool) {
 	return ui.historyDraft, true
 }
 
-func (ui *terminalUI) completeAtPath(current string) (next string, status string, changed bool, err error) {
+func (ui *terminalUI) completeAtPath(current string) (next string, status string, matches []string, changed bool, err error) {
 	if ui == nil {
-		return current, "", false, nil
+		return current, "", nil, false, nil
 	}
 	start, end, token, ok := trailingToken(current)
 	if !ok {
-		return current, "", false, nil
-	}
-	if len(ui.completion.candidates) > 1 && token != "" && token == ui.completion.candidates[ui.completion.index] {
-		ui.completion.index = (ui.completion.index + 1) % len(ui.completion.candidates)
-		candidate := ui.completion.candidates[ui.completion.index]
-		return current[:start] + candidate + current[end:], completionStatus(ui.completion), true, nil
+		return current, "", nil, false, nil
 	}
 	if !strings.HasPrefix(token, "@") {
 		ui.completion = completionState{}
-		return current, "", false, nil
+		return current, "", nil, false, nil
 	}
 	query := strings.TrimSpace(strings.TrimPrefix(token, "@"))
 	if query == "" {
-		return current, "type more after @", false, nil
+		return current, "type more after @", nil, false, nil
 	}
 	files, err := ui.workspaceFiles()
 	if err != nil {
-		return current, "", false, err
+		return current, "", nil, false, err
 	}
-	matches := fuzzyFileMatches(query, files, 8)
+	matches = fuzzyFileMatches(query, files, maxCompletionMatchesShown+1)
 	if len(matches) == 0 {
 		ui.completion = completionState{}
-		return current, fmt.Sprintf("no file match for %q", query), false, nil
+		return current, fmt.Sprintf("no file match for %q", query), nil, false, nil
 	}
-	ui.completion = completionState{candidates: matches, index: 0}
-	candidate := matches[0]
-	return current[:start] + candidate + current[end:], completionStatus(ui.completion), true, nil
+	if len(matches) == 1 {
+		ui.completion = completionState{candidates: matches, index: 0}
+		candidate := matches[0]
+		return current[:start] + candidate + current[end:], candidate, matches, true, nil
+	}
+	ui.completion = completionState{}
+	return current, formatCompletionMatches(matches), matches, false, nil
 }
 
-func completionStatus(state completionState) string {
-	if len(state.candidates) == 0 {
+func formatCompletionMatches(matches []string) string {
+	if len(matches) == 0 {
 		return ""
 	}
-	if len(state.candidates) == 1 {
-		return state.candidates[0]
+	shown := matches
+	more := 0
+	if len(shown) > maxCompletionMatchesShown {
+		shown = shown[:maxCompletionMatchesShown]
+		more = len(matches) - len(shown)
 	}
-	return fmt.Sprintf("%d/%d %s", state.index+1, len(state.candidates), state.candidates[state.index])
+	var b strings.Builder
+	b.WriteString("matches:")
+	for i, match := range shown {
+		fmt.Fprintf(&b, "\n %d. %s", i+1, match)
+	}
+	if more > 0 {
+		fmt.Fprintf(&b, "\n +%d more", more)
+	}
+	return b.String()
 }
 
 func trailingToken(s string) (start, end int, token string, ok bool) {

@@ -167,14 +167,14 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				ui.bell()
 			}
 		case 9:
-			next, status, changed, err := ui.completeAtPath(string(buf))
+			next, status, matches, changed, err := ui.completeAtPath(string(buf))
 			if err != nil {
 				ui.bell()
 				ui.notify("error: " + err.Error())
 				ui.renderPrompt(string(buf))
 				continue
 			}
-			if !changed && status == "" {
+			if !changed && status == "" && len(matches) == 0 {
 				buf = append(buf, '\t')
 				ui.completion = completionState{}
 				ui.renderPrompt(string(buf))
@@ -182,8 +182,17 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 			}
 			if changed {
 				buf = []rune(next)
-			} else {
-				ui.bell()
+				ui.renderPrompt(string(buf))
+				if status != "" {
+					ui.ShowStatus(status)
+				}
+				continue
+			}
+			ui.bell()
+			if len(matches) > 1 {
+				ui.notify(styleText(ui, "dim", status))
+				ui.renderPrompt(string(buf))
+				continue
 			}
 			ui.renderPrompt(string(buf))
 			if status != "" {

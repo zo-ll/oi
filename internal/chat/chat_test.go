@@ -387,6 +387,13 @@ func TestFuzzyFileMatchesPrefersBasename(t *testing.T) {
 	}
 }
 
+func TestFormatCompletionMatches(t *testing.T) {
+	got := formatCompletionMatches([]string{"a.go", "b.go", "c.go"})
+	if !strings.Contains(got, "matches:") || !strings.Contains(got, "1. a.go") || !strings.Contains(got, "3. c.go") {
+		t.Fatalf("got = %q", got)
+	}
+}
+
 func TestPromptHistoryNavigation(t *testing.T) {
 	ui := &terminalUI{historyIndex: -1}
 	ui.addHistoryEntry("first")
