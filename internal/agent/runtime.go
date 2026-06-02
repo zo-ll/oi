@@ -68,7 +68,6 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 	}
 
 	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: input, Kind: "talk"})
-	r.compactSession()
 	r.logEvent("user_input", map[string]any{"input": input})
 
 	lastToolPlan := ""
@@ -77,7 +76,6 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 	repeatedToolErr := 0
 
 	for step := 0; step < r.MaxSteps; step++ {
-		r.compactSession()
 		history := r.providerHistory()
 		r.logEvent("provider_request", map[string]any{"step": step + 1, "streaming": streaming, "message_count": len(history)})
 		resp, err := r.callProvider(ctx, history, onDelta, streaming)
@@ -251,17 +249,18 @@ func (r *Runtime) providerHistory() []provider.Message {
 	return out
 }
 
-func (r *Runtime) compactSession() {
+func (r *Runtime) CompactSession() (bool, int) {
 	if r == nil || r.Session == nil {
-		return
+		return false, 0
 	}
 	budget := r.compactionBudget()
 	compacted, changed := session.CompactMessages(r.Session.Messages, budget)
 	if !changed {
-		return
+		return false, budget
 	}
 	r.Session.Messages = compacted
 	r.logEvent("session_compacted", map[string]any{"message_count": len(compacted), "budget_tokens": budget})
+	return true, budget
 }
 
 func (r *Runtime) compactionBudget() int {

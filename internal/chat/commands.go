@@ -32,12 +32,32 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		printHelpLine(out, "/sessions", "list saved sessions")
 		printHelpLine(out, "/save [name]", "save current session")
 		printHelpLine(out, "/load <name|path>", "load a saved session")
+		printHelpLine(out, "/compact", "compact older session history")
 		printHelpLine(out, "/clear", "clear the screen")
 		printHelpLine(out, "/exit", "exit interactive mode")
 		printHelpLine(out, "Ctrl+V", "paste system clipboard")
 		printHelpLine(out, "Ctrl+Y", "copy last assistant reply")
 		printHelpLine(out, "Ctrl+K", "insert newline")
 		printHelpLine(out, "Ctrl+D", "exit on empty input")
+		return false, rt, sel, streaming, autosave, tools, nil
+	case "/compact":
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /compact")
+		}
+		if rt == nil || rt.Session == nil {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("no session to compact")
+		}
+		changed, _ := rt.CompactSession()
+		if changed {
+			fmt.Fprintln(out, "session compacted")
+			if autosave {
+				if _, err := saveSession(rt, sel); err != nil {
+					fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
+				}
+			}
+		} else {
+			fmt.Fprintln(out, "session already fits")
+		}
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/clear":
 		clearScreen(out)

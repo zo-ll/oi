@@ -118,7 +118,26 @@ func TestRunOncePrependsSystemPromptEveryTurn(t *testing.T) {
 	}
 }
 
-func TestRunOnceCompactsLargeSession(t *testing.T) {
+func TestCompactSessionCompactsLargeSession(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m"}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, ContextWindow: 100}
+	r.Session = session.New("fake", "m", ".")
+	for i := 0; i < 10; i++ {
+		r.Session.Messages = append(r.Session.Messages,
+			session.Message{Role: "user", Kind: "talk", Content: strings.Repeat("old user text ", 20)},
+			session.Message{Role: "assistant", Kind: "talk", Content: strings.Repeat("old assistant text ", 20)},
+		)
+	}
+	changed, _ := r.CompactSession()
+	if !changed {
+		t.Fatal("expected compaction")
+	}
+	if len(r.Session.Messages) == 0 || r.Session.Messages[0].Kind != "summary" {
+		t.Fatalf("session messages = %+v", r.Session.Messages)
+	}
+}
+
+func TestRunOnceDoesNotCompactAutomatically(t *testing.T) {
 	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "done"}}}
 	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, MaxSteps: 2, ContextWindow: 100}
 	r.Session = session.New("fake", "m", ".")
@@ -131,8 +150,8 @@ func TestRunOnceCompactsLargeSession(t *testing.T) {
 	if _, err := r.RunOnce(context.Background(), "latest"); err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Session.Messages) == 0 || r.Session.Messages[0].Kind != "summary" {
-		t.Fatalf("session messages = %+v", r.Session.Messages)
+	if len(r.Session.Messages) > 0 && r.Session.Messages[0].Kind == "summary" {
+		t.Fatalf("session compacted unexpectedly: %+v", r.Session.Messages[0])
 	}
 }
 
