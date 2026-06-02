@@ -26,6 +26,7 @@ type Runtime struct {
 	MaxSteps       int
 	ToolTimeout    time.Duration
 	RequestTimeout time.Duration
+	ContextWindow  int
 	LastUsage      provider.Usage
 	SystemPrompt   string
 	OnToolStart    func(tool.Call)
@@ -66,12 +67,8 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 		r.Session = session.New(r.Provider.Name(), r.Provider.Model(), r.Policy.Root)
 	}
 
-	history := r.historyToProviderMessages()
-	if len(history) == 0 {
-		history = append(history, provider.Message{Role: "system", Content: r.systemPrompt()})
-	}
-	history = append(history, provider.Message{Role: "user", Content: input})
 	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: input, Kind: "talk"})
+	r.compactSession()
 	r.logEvent("user_input", map[string]any{"input": input})
 
 	lastToolPlan := ""
@@ -80,6 +77,8 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 	repeatedToolErr := 0
 
 	for step := 0; step < r.MaxSteps; step++ {
+		r.compactSession()
+		history := r.providerHistory()
 		r.logEvent("provider_request", map[string]any{"step": step + 1, "streaming": streaming, "message_count": len(history)})
 		resp, err := r.callProvider(ctx, history, onDelta, streaming)
 		if err != nil {
@@ -96,7 +95,6 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 				r.logEvent("provider_error", map[string]any{"step": step + 1, "error": err.Error()})
 				return "", err
 			}
-			history = append(history, provider.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning})
 			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning, Kind: "talk"})
 			r.Session.UpdatedAt = time.Now().UTC()
 			r.logEvent("assistant_final", map[string]any{"step": step + 1, "content": resp.Content})
@@ -120,8 +118,6 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 			r.logEvent("agent_error", map[string]any{"error": err.Error(), "step": step + 1})
 			return "", err
 		}
-		assistantMsg := provider.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning}
-		history = append(history, assistantMsg)
 		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning, Kind: "tool_call", ToolCalls: providerCallsToSession(resp.ToolCalls)})
 
 		for _, tc := range resp.ToolCalls {
@@ -161,7 +157,6 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 			if err != nil {
 				payload = []byte(fmt.Sprintf(`{"tool":%q,"ok":false,"error":%q}`, tc.Name, err.Error()))
 			}
-			history = append(history, provider.Message{Role: "tool", ToolCallID: tc.ID, Content: string(payload)})
 			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "tool", ToolCallID: tc.ID, Content: string(payload), Kind: "tool_result"})
 		}
 	}
@@ -248,6 +243,64 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 	return resp, nil
 }
 
+func (r *Runtime) providerHistory() []provider.Message {
+	history := r.historyToProviderMessages()
+	out := make([]provider.Message, 0, len(history)+1)
+	out = append(out, provider.Message{Role: "system", Content: r.systemPrompt()})
+	out = append(out, history...)
+	return out
+}
+
+func (r *Runtime) compactSession() {
+	if r == nil || r.Session == nil {
+		return
+	}
+	budget := r.compactionBudget()
+	compacted, changed := session.CompactMessages(r.Session.Messages, budget)
+	if !changed {
+		return
+	}
+	r.Session.Messages = compacted
+	r.logEvent("session_compacted", map[string]any{"message_count": len(compacted), "budget_tokens": budget})
+}
+
+func (r *Runtime) compactionBudget() int {
+	window := r.contextWindow()
+	if window > 0 {
+		budget := window * 70 / 100
+		if budget > 0 {
+			return budget
+		}
+	}
+	return 24000
+}
+
+func (r *Runtime) contextWindow() int {
+	if r == nil || r.Provider == nil {
+		return 0
+	}
+	if r.ContextWindow > 0 {
+		return r.ContextWindow
+	}
+	model := r.Provider.Model()
+	if stringsTrim(model) == "" {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	models, err := r.Provider.ListModels(ctx)
+	if err != nil {
+		return 0
+	}
+	for _, item := range models {
+		if item.ID == model {
+			r.ContextWindow = item.ContextWindow
+			return r.ContextWindow
+		}
+	}
+	return 0
+}
+
 func providerToolSpecs(reg *tool.Registry) []provider.ToolSpec {
 	specs := reg.Specs()
 	out := make([]provider.ToolSpec, 0, len(specs))
@@ -268,6 +321,8 @@ func (r *Runtime) historyToProviderMessages() []provider.Message {
 	var out []provider.Message
 	for _, m := range r.Session.Messages {
 		switch m.Kind {
+		case "summary":
+			out = append(out, provider.Message{Role: "system", Content: m.Content})
 		case "tool_call":
 			calls := sessionCallsToProvider(m.ToolCalls)
 			if len(calls) == 0 {

@@ -1,0 +1,295 @@
+package chat
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/zo-ll/oi/internal/agent"
+	"github.com/zo-ll/oi/internal/config"
+)
+
+func mustLoadAuth() *config.Auth {
+	auth, _ := config.LoadAuth()
+	if auth == nil {
+		return &config.Auth{}
+	}
+	return auth
+}
+
+func loginAndSwitchChatProvider(deps Dependencies, cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, args []string) (*agent.Runtime, config.Selection, error) {
+	kind, loginArgs := stripLoginKindArg(args)
+	providerName := loginArgsProvider(loginArgs)
+	if kind == "" && providerName == "" {
+		var err error
+		kind, err = promptLoginKind(reader, out)
+		if err != nil {
+			return nil, sel, err
+		}
+		if kind == "" {
+			fmt.Fprintln(out, "login cancelled")
+			return rt, sel, nil
+		}
+	}
+	if kind != "" {
+		if providerName == "" {
+			choice, err := promptLoginProviderChoice(reader, out, cfg, kind, sel.Provider)
+			if err != nil {
+				return nil, sel, err
+			}
+			if choice == "" {
+				fmt.Fprintln(out, "login cancelled")
+				return rt, sel, nil
+			}
+			providerName = choice
+		}
+		var err error
+		providerName, err = providerForLoginKind(kind, providerName)
+		if err != nil {
+			return nil, sel, err
+		}
+		loginArgs = withLoginProviderArg(loginArgs, providerName)
+	} else if providerName == "" {
+		return nil, sel, fmt.Errorf("provider is required")
+	}
+	if deps.Login == nil {
+		return nil, sel, fmt.Errorf("login is unavailable")
+	}
+	if err := deps.Login(loginArgs, chatLoginReader(providerName, reader), out); err != nil {
+		return nil, sel, err
+	}
+	fmt.Fprintln(out, "login saved; use /model")
+	return rt, sel, nil
+}
+
+func promptLoginKind(reader *bufio.Reader, out io.Writer) (string, error) {
+	fmt.Fprintln(out, "Login type?")
+	fmt.Fprintln(out, " 1. sub  ChatGPT subscription / browser login")
+	fmt.Fprintln(out, " 2. api  Provider API key")
+	fmt.Fprint(out, "Login type? [sub/api, blank=cancel] ")
+	choice, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		return "", nil
+	}
+	return normalizeLoginKind(choice)
+}
+
+func promptLoginProviderChoice(reader *bufio.Reader, out io.Writer, cfg *config.Config, kind, current string) (string, error) {
+	names := loginProviderNames(cfg, kind)
+	if len(names) == 0 {
+		fmt.Fprintln(out, "available providers: (none)")
+		return "", nil
+	}
+	fmt.Fprintln(out, "Provider?")
+	for i, name := range names {
+		marker := " "
+		if providerForDisplaySelection(kind, name) == current {
+			marker = "*"
+		}
+		note := "configured"
+		if _, ok := cfg.Providers[providerForDisplaySelection(kind, name)]; !ok {
+			note = "known profile"
+		}
+		fmt.Fprintf(out, "%2d. %s %s  %s\n", i+1, marker, loginProviderDisplayName(kind, name), note)
+	}
+	fmt.Fprint(out, "Provider? [number/name, blank=cancel] ")
+	choice, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		return "", nil
+	}
+	return resolveProviderChoiceFromNames(names, choice)
+}
+
+func normalizeLoginKind(choice string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(choice)) {
+	case "1", "sub", "subscription", "subscriber":
+		return "sub", nil
+	case "2", "api", "key", "apikey", "api-key":
+		return "api", nil
+	default:
+		return "", fmt.Errorf("usage: choose sub or api")
+	}
+}
+
+func stripLoginKindArg(args []string) (string, []string) {
+	out := append([]string(nil), args...)
+	for i := 0; i < len(out); i++ {
+		arg := strings.TrimSpace(out[i])
+		switch {
+		case arg == "--provider" || arg == "--model" || arg == "--api-key" || arg == "--base-url":
+			i++
+			continue
+		case strings.HasPrefix(arg, "-"):
+			continue
+		}
+		kind, err := normalizeLoginKind(arg)
+		if err != nil {
+			return "", out
+		}
+		return kind, append(out[:i], out[i+1:]...)
+	}
+	return "", out
+}
+
+func loginProviderNames(cfg *config.Config, kind string) []string {
+	switch kind {
+	case "sub":
+		return []string{"openai"}
+	case "api":
+		var out []string
+		seen := make(map[string]bool)
+		add := func(name string) {
+			name = canonicalProviderName(name)
+			if name == "" || name == "openai-codex" || seen[name] {
+				return
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+		for _, name := range []string{"openai", "opencode-go"} {
+			add(name)
+		}
+		for _, name := range config.ProviderNames(cfg) {
+			add(name)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func providerForLoginKind(kind, providerName string) (string, error) {
+	providerName = canonicalProviderName(providerName)
+	switch kind {
+	case "sub":
+		switch providerName {
+		case "openai", "openai-codex":
+			return "openai-codex", nil
+		default:
+			return "", fmt.Errorf("subscription login currently supports only openai")
+		}
+	case "api":
+		if providerName == "openai-codex" {
+			return "", fmt.Errorf("api login does not use ChatGPT subscription; choose sub for openai browser login")
+		}
+		return providerName, nil
+	default:
+		return "", fmt.Errorf("usage: choose sub or api")
+	}
+}
+
+func providerForDisplaySelection(kind, name string) string {
+	providerName, err := providerForLoginKind(kind, name)
+	if err != nil {
+		return canonicalProviderName(name)
+	}
+	return providerName
+}
+
+func loginProviderDisplayName(kind, name string) string {
+	if kind == "sub" && name == "openai" {
+		return "openai / ChatGPT subscription browser login"
+	}
+	return providerDisplayName(name)
+}
+
+func resolveProviderChoiceFromNames(names []string, arg string) (string, error) {
+	if arg == "" {
+		return "", fmt.Errorf("provider name is required")
+	}
+	if idx, ok := parseSessionIndex(arg); ok {
+		if idx < 1 || idx > len(names) {
+			return "", fmt.Errorf("provider index out of range: %d", idx)
+		}
+		return names[idx-1], nil
+	}
+	return canonicalProviderName(arg), nil
+}
+
+func providerDisplayName(name string) string {
+	switch canonicalProviderName(name) {
+	case "openai-codex":
+		return "openai-codex / ChatGPT browser login (uses your subscription)"
+	case "openai":
+		return "openai / OpenAI API key (platform billing, not ChatGPT subscription)"
+	case "opencode-go":
+		return "opencode-go / OpenCode API key"
+	default:
+		return name
+	}
+}
+
+func withLoginProviderArg(args []string, providerName string) []string {
+	out := append([]string(nil), args...)
+	for i := 0; i < len(out); i++ {
+		arg := strings.TrimSpace(out[i])
+		switch {
+		case arg == "--provider":
+			if i+1 < len(out) {
+				out[i+1] = providerName
+				return out
+			}
+			return append(out, providerName)
+		case strings.HasPrefix(arg, "--provider="):
+			out[i] = "--provider=" + providerName
+			return out
+		case arg == "--model" || arg == "--api-key" || arg == "--base-url":
+			i++
+			continue
+		case strings.HasPrefix(arg, "-"):
+			continue
+		default:
+			out[i] = providerName
+			return out
+		}
+	}
+	return append(out, providerName)
+}
+
+func loginArgsProvider(args []string) string {
+	var providerName string
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "--provider" && i+1 < len(args):
+			providerName = strings.TrimSpace(args[i+1])
+			i++
+		case strings.HasPrefix(arg, "--provider="):
+			providerName = strings.TrimSpace(strings.TrimPrefix(arg, "--provider="))
+		case arg == "--api-key" || arg == "--base-url":
+			if i+1 < len(args) {
+				i++
+			}
+		case strings.HasPrefix(arg, "--api-key=") || strings.HasPrefix(arg, "--base-url="):
+		case !strings.HasPrefix(arg, "-") && providerName == "":
+			providerName = arg
+		}
+	}
+	return canonicalProviderName(providerName)
+}
+
+func chatLoginReader(providerName string, reader *bufio.Reader) io.Reader {
+	if canonicalProviderName(providerName) == "openai-codex" {
+		return strings.NewReader("")
+	}
+	return reader
+}
+
+func promptYesNo(reader *bufio.Reader, out io.Writer, prompt string) (bool, error) {
+	fmt.Fprint(out, prompt)
+	answer, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes", nil
+}

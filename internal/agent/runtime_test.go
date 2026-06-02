@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/zo-ll/oi/internal/provider"
+	"github.com/zo-ll/oi/internal/session"
 	"github.com/zo-ll/oi/internal/tool"
 	"github.com/zo-ll/oi/internal/workspace"
 )
@@ -94,6 +96,43 @@ func TestRunOnceFinalAnswer(t *testing.T) {
 	}
 	if len(p.requests) != 1 {
 		t.Fatalf("requests = %d", len(p.requests))
+	}
+}
+
+func TestRunOncePrependsSystemPromptEveryTurn(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "one"}, {Content: "two"}}}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, MaxSteps: 2}
+	if _, err := r.RunOnce(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.RunOnce(context.Background(), "again"); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 2 {
+		t.Fatalf("requests = %d", len(p.requests))
+	}
+	for i, req := range p.requests {
+		if len(req.Messages) == 0 || req.Messages[0].Role != "system" {
+			t.Fatalf("request %d messages = %+v", i+1, req.Messages)
+		}
+	}
+}
+
+func TestRunOnceCompactsLargeSession(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "done"}}}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, MaxSteps: 2, ContextWindow: 100}
+	r.Session = session.New("fake", "m", ".")
+	for i := 0; i < 10; i++ {
+		r.Session.Messages = append(r.Session.Messages,
+			session.Message{Role: "user", Kind: "talk", Content: strings.Repeat("old user text ", 20)},
+			session.Message{Role: "assistant", Kind: "talk", Content: strings.Repeat("old assistant text ", 20)},
+		)
+	}
+	if _, err := r.RunOnce(context.Background(), "latest"); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Session.Messages) == 0 || r.Session.Messages[0].Kind != "summary" {
+		t.Fatalf("session messages = %+v", r.Session.Messages)
 	}
 }
 
