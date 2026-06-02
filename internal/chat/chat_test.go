@@ -372,3 +372,39 @@ func TestFormatToolResultLine(t *testing.T) {
 		t.Fatalf("bad = %q", got)
 	}
 }
+
+func TestTrailingToken(t *testing.T) {
+	start, end, token, ok := trailingToken("read @chat/ui")
+	if !ok || token != "@chat/ui" || start != 5 || end != 13 {
+		t.Fatalf("start=%d end=%d token=%q ok=%v", start, end, token, ok)
+	}
+}
+
+func TestFuzzyFileMatchesPrefersBasename(t *testing.T) {
+	matches := fuzzyFileMatches("ui.go", []string{"internal/chat/ui.go", "internal/provider/openai.go"}, 8)
+	if len(matches) == 0 || matches[0] != "internal/chat/ui.go" {
+		t.Fatalf("matches = %#v", matches)
+	}
+}
+
+func TestPromptHistoryNavigation(t *testing.T) {
+	ui := &terminalUI{historyIndex: -1}
+	ui.addHistoryEntry("first")
+	ui.addHistoryEntry("second")
+	got, ok := ui.historyPrev("draft")
+	if !ok || got != "second" {
+		t.Fatalf("prev1 = %q ok=%v", got, ok)
+	}
+	got, ok = ui.historyPrev("draft")
+	if !ok || got != "first" {
+		t.Fatalf("prev2 = %q ok=%v", got, ok)
+	}
+	got, ok = ui.historyNext()
+	if !ok || got != "second" {
+		t.Fatalf("next1 = %q ok=%v", got, ok)
+	}
+	got, ok = ui.historyNext()
+	if !ok || got != "draft" {
+		t.Fatalf("next2 = %q ok=%v", got, ok)
+	}
+}

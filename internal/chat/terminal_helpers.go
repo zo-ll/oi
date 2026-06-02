@@ -186,20 +186,20 @@ func ansiEscapeFinal(r rune) bool {
 	return r >= '@' && r <= '~' && r != '['
 }
 
-func (ui *terminalUI) readEscapeSequence() (string, bool, error) {
+func (ui *terminalUI) readEscapeSequence() (kind, text string, handled bool, err error) {
 	first, err := readByte(ui.in)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	if first != '[' {
-		return "", false, nil
+		return "", "", false, nil
 	}
 	var seq bytes.Buffer
 	seq.WriteByte(first)
 	for seq.Len() < 16 {
 		b, err := readByte(ui.in)
 		if err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
 		seq.WriteByte(b)
 		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '~' {
@@ -208,12 +208,20 @@ func (ui *terminalUI) readEscapeSequence() (string, bool, error) {
 	}
 	s := seq.String()
 	switch s {
-	case "[A", "[B", "[C", "[D", "[H", "[F", "[1~", "[4~", "[3~":
-		return "", true, nil
+	case "[A":
+		return "up", "", true, nil
+	case "[B":
+		return "down", "", true, nil
+	case "[C":
+		return "right", "", true, nil
+	case "[D":
+		return "left", "", true, nil
+	case "[H", "[F", "[1~", "[4~", "[3~":
+		return "nav", "", true, nil
 	case "[200~":
 		text, err := readBracketedPaste(ui.in)
-		return text, true, err
+		return "paste", text, true, err
 	default:
-		return "", false, nil
+		return "", "", false, nil
 	}
 }

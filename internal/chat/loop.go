@@ -45,6 +45,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	if err != nil {
 		return err
 	}
+	ui.setWorkspaceRoot(root)
 	if err := ui.enableRawMode(); err != nil {
 		return runLineMode(args, in, out, deps)
 	}

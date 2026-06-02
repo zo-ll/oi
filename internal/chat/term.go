@@ -23,6 +23,12 @@ type terminalUI struct {
 	clipboard       clipboard
 	clipboardStatus string
 	statusVisible   bool
+	workspaceRoot   string
+	fileList        []string
+	history         []string
+	historyIndex    int
+	historyDraft    string
+	completion      completionState
 	mu              sync.Mutex
 }
 
@@ -36,12 +42,13 @@ func newTerminalUI(in io.Reader, out io.Writer) (*terminalUI, bool) {
 		return nil, false
 	}
 	ui := &terminalUI{
-		in:        inFile,
-		out:       outFile,
-		width:     terminalWidth(inFile),
-		prompt:    "> ",
-		resizeCh:  make(chan os.Signal, 1),
-		clipboard: clipboard{out: outFile},
+		in:           inFile,
+		out:          outFile,
+		width:        terminalWidth(inFile),
+		prompt:       "> ",
+		resizeCh:     make(chan os.Signal, 1),
+		clipboard:    clipboard{out: outFile},
+		historyIndex: -1,
 	}
 	signal.Notify(ui.resizeCh, syscall.SIGWINCH)
 	return ui, true

@@ -122,6 +122,9 @@ func minInt(a, b int) int {
 
 func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 	var buf []rune
+	ui.historyIndex = -1
+	ui.historyDraft = ""
+	ui.completion = completionState{}
 	ui.renderPrompt("")
 	defer ui.clearPrompt()
 	for {
@@ -142,27 +145,56 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				ui.renderPrompt("")
 				continue
 			}
+			ui.addHistoryEntry(text)
 			ui.clearPrompt()
 			return text, nil
 		case 3:
+			ui.completion = completionState{}
 			ui.clearPrompt()
 			return "", io.EOF
 		case 4:
 			if len(buf) == 0 {
+				ui.completion = completionState{}
 				ui.clearPrompt()
 				return "", io.EOF
 			}
 		case 8, 127:
+			ui.completion = completionState{}
 			if len(buf) > 0 {
 				buf = buf[:len(buf)-1]
 				ui.renderPrompt(string(buf))
 			} else {
 				ui.bell()
 			}
+		case 9:
+			next, status, changed, err := ui.completeAtPath(string(buf))
+			if err != nil {
+				ui.bell()
+				ui.notify("error: " + err.Error())
+				ui.renderPrompt(string(buf))
+				continue
+			}
+			if !changed && status == "" {
+				buf = append(buf, '\t')
+				ui.completion = completionState{}
+				ui.renderPrompt(string(buf))
+				continue
+			}
+			if changed {
+				buf = []rune(next)
+			} else {
+				ui.bell()
+			}
+			ui.renderPrompt(string(buf))
+			if status != "" {
+				ui.ShowStatus(status)
+			}
 		case 11:
+			ui.completion = completionState{}
 			buf = append(buf, '\n')
 			ui.renderPrompt(string(buf))
 		case 22:
+			ui.completion = completionState{}
 			text, err := ui.clipboard.Read()
 			if err != nil {
 				ui.bell()
@@ -175,6 +207,7 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				ui.renderPrompt(string(buf))
 			}
 		case 25:
+			ui.completion = completionState{}
 			if strings.TrimSpace(lastAssistant) == "" {
 				ui.bell()
 				continue
@@ -187,7 +220,7 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 			ui.notify("copied last reply")
 			ui.renderPrompt(string(buf))
 		case 27:
-			text, handled, err := ui.readEscapeSequence()
+			kind, text, handled, err := ui.readEscapeSequence()
 			if err != nil {
 				return "", err
 			}
@@ -195,12 +228,35 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				ui.bell()
 				continue
 			}
-			if text != "" {
-				buf = append(buf, []rune(normalizePastedText(text))...)
+			switch kind {
+			case "up":
+				next, ok := ui.historyPrev(string(buf))
+				if !ok {
+					ui.bell()
+					continue
+				}
+				buf = []rune(next)
 				ui.renderPrompt(string(buf))
+			case "down":
+				next, ok := ui.historyNext()
+				if !ok {
+					ui.bell()
+					continue
+				}
+				buf = []rune(next)
+				ui.renderPrompt(string(buf))
+			case "paste":
+				ui.completion = completionState{}
+				if text != "" {
+					buf = append(buf, []rune(normalizePastedText(text))...)
+					ui.renderPrompt(string(buf))
+				}
+			default:
+				continue
 			}
 		default:
-			if b >= 32 || b == '\t' {
+			if b >= 32 {
+				ui.completion = completionState{}
 				buf = append(buf, rune(b))
 				ui.renderPrompt(string(buf))
 			}
