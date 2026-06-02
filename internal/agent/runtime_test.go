@@ -62,6 +62,8 @@ type deadlineTool struct {
 	ok       bool
 }
 
+type failingTool struct{}
+
 func (d *deadlineTool) Name() string { return "wait" }
 func (d *deadlineTool) Spec() tool.Spec {
 	return tool.Spec{Name: "wait", InputSchema: json.RawMessage(`{"type":"object"}`)}
@@ -70,6 +72,14 @@ func (d *deadlineTool) Run(ctx context.Context, _ tool.Call) tool.Result {
 	d.deadline, d.ok = ctx.Deadline()
 	time.Sleep(20 * time.Millisecond)
 	return tool.Result{Tool: "wait", OK: true, Output: "waited"}
+}
+
+func (failingTool) Name() string { return "fail" }
+func (failingTool) Spec() tool.Spec {
+	return tool.Spec{Name: "fail", InputSchema: json.RawMessage(`{"type":"object"}`)}
+}
+func (failingTool) Run(_ context.Context, _ tool.Call) tool.Result {
+	return tool.Result{Tool: "fail", OK: false, Error: "boom"}
 }
 
 func TestRunOnceFinalAnswer(t *testing.T) {
@@ -162,6 +172,30 @@ func TestRunOnceMaxStepsExceeded(t *testing.T) {
 	r := &Runtime{Provider: p, Tools: tool.NewRegistry(fakeTool{}), Policy: workspace.Policy{Root: "."}, MaxSteps: 1, ToolTimeout: time.Second}
 	if _, err := r.RunOnce(context.Background(), "loop"); err == nil {
 		t.Fatal("expected max steps error")
+	}
+}
+
+func TestRunOnceStopsRepeatedIdenticalToolCalls(t *testing.T) {
+	args := json.RawMessage(`{"text":"x"}`)
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{
+		{ToolCalls: []provider.ToolCall{{Name: "echo", Args: args}}},
+		{ToolCalls: []provider.ToolCall{{Name: "echo", Args: args}}},
+		{ToolCalls: []provider.ToolCall{{Name: "echo", Args: args}}},
+	}}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(fakeTool{}), Policy: workspace.Policy{Root: "."}, MaxSteps: 10, ToolTimeout: time.Second}
+	if _, err := r.RunOnce(context.Background(), "loop"); err == nil || err.Error() != "stalled: repeated identical tool calls" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunOnceStopsRepeatedIdenticalToolErrors(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{
+		{ToolCalls: []provider.ToolCall{{Name: "fail", Args: json.RawMessage(`{}`)}}},
+		{ToolCalls: []provider.ToolCall{{Name: "fail", Args: json.RawMessage(`{}`)}}},
+	}}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(failingTool{}), Policy: workspace.Policy{Root: "."}, MaxSteps: 10, ToolTimeout: time.Second}
+	if _, err := r.RunOnce(context.Background(), "loop"); err == nil || err.Error() != "stalled: repeated identical tool error" {
+		t.Fatalf("err = %v", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -138,5 +139,29 @@ func interactiveProvider(sel config.Selection) (provider.Provider, string, error
 	if err != nil {
 		return nil, fmt.Sprintf("Provider %s is not ready: %v. Use /login, then /model.", sel.Provider, err), nil
 	}
+	if strings.TrimSpace(sel.Model) == "" {
+		return p, "No model selected. Use /model.", nil
+	}
+	if notice := selectedModelStartupNotice(p, sel.Model); notice != "" {
+		return p, notice, nil
+	}
 	return p, "", nil
+}
+
+func selectedModelStartupNotice(p provider.Provider, model string) string {
+	if p == nil || strings.TrimSpace(model) == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	models, err := p.ListModels(ctx)
+	if err != nil || len(models) == 0 {
+		return ""
+	}
+	for _, item := range models {
+		if item.ID == model {
+			return ""
+		}
+	}
+	return fmt.Sprintf("Selected model %s is unavailable. Use /model.", model)
 }

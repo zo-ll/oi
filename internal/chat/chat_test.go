@@ -2,6 +2,7 @@ package chat
 
 import (
 	"bufio"
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,21 @@ import (
 	"github.com/zo-ll/oi/internal/session"
 	"github.com/zo-ll/oi/internal/workspace"
 )
+
+type fakeChatProvider struct{ models []provider.Model }
+
+func (f *fakeChatProvider) Name() string    { return "fake" }
+func (f *fakeChatProvider) Model() string   { return "m" }
+func (f *fakeChatProvider) SetModel(string) {}
+func (f *fakeChatProvider) Chat(context.Context, provider.Request) (provider.Response, error) {
+	return provider.Response{}, nil
+}
+func (f *fakeChatProvider) ChatStream(context.Context, provider.Request) (<-chan provider.Event, error) {
+	return nil, nil
+}
+func (f *fakeChatProvider) ListModels(context.Context) ([]provider.Model, error) {
+	return f.models, nil
+}
 
 func TestResolveSessionPath(t *testing.T) {
 	dir := "/tmp/sessions"
@@ -189,6 +205,16 @@ func TestCleanDisplayText(t *testing.T) {
 func TestFormatContextUsage(t *testing.T) {
 	got := formatContextUsage(272000, provider.Usage{InputTokens: 136000})
 	if got != "ctx 136.0k / 272.0k (50%)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSelectedModelStartupNotice(t *testing.T) {
+	p := &fakeChatProvider{models: []provider.Model{{ID: "m1"}}}
+	if got := selectedModelStartupNotice(p, "m1"); got != "" {
+		t.Fatalf("got %q", got)
+	}
+	if got := selectedModelStartupNotice(p, "m2"); got != "Selected model m2 is unavailable. Use /model." {
 		t.Fatalf("got %q", got)
 	}
 }

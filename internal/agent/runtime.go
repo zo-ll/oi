@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	ilog "github.com/zo-ll/oi/internal/log"
@@ -73,6 +74,11 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: input, Kind: "talk"})
 	r.logEvent("user_input", map[string]any{"input": input})
 
+	lastToolPlan := ""
+	repeatedToolPlan := 0
+	lastToolErr := ""
+	repeatedToolErr := 0
+
 	for step := 0; step < r.MaxSteps; step++ {
 		r.logEvent("provider_request", map[string]any{"step": step + 1, "streaming": streaming, "message_count": len(history)})
 		resp, err := r.callProvider(ctx, history, onDelta, streaming)
@@ -102,6 +108,18 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 				resp.ToolCalls[i].ID = fmt.Sprintf("call_%d_%d", step+1, i+1)
 			}
 		}
+		planSig := toolCallsSignature(resp.ToolCalls)
+		if planSig != "" && planSig == lastToolPlan {
+			repeatedToolPlan++
+		} else {
+			lastToolPlan = planSig
+			repeatedToolPlan = 1
+		}
+		if repeatedToolPlan >= 3 {
+			err := fmt.Errorf("stalled: repeated identical tool calls")
+			r.logEvent("agent_error", map[string]any{"error": err.Error(), "step": step + 1})
+			return "", err
+		}
 		assistantMsg := provider.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls, Reasoning: resp.Reasoning}
 		history = append(history, assistantMsg)
 		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning, Kind: "tool_call", ToolCalls: providerCallsToSession(resp.ToolCalls)})
@@ -119,6 +137,25 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 				r.OnToolResult(call, res)
 			}
 			r.logEvent("tool_result", map[string]any{"step": step + 1, "tool": call.Name, "ok": res.OK, "error": res.Error})
+
+			errSig := ""
+			if !res.OK {
+				errSig = call.Name + "\n" + string(call.Args) + "\n" + res.Error
+				if errSig == lastToolErr {
+					repeatedToolErr++
+				} else {
+					lastToolErr = errSig
+					repeatedToolErr = 1
+				}
+				if repeatedToolErr >= 2 {
+					err := fmt.Errorf("stalled: repeated identical tool error")
+					r.logEvent("agent_error", map[string]any{"error": err.Error(), "step": step + 1})
+					return "", err
+				}
+			} else {
+				lastToolErr = ""
+				repeatedToolErr = 0
+			}
 
 			payload, err := json.Marshal(res)
 			if err != nil {
@@ -139,6 +176,17 @@ func (r *Runtime) logEvent(kind string, fields map[string]any) {
 		return
 	}
 	_ = r.Logger.Event(kind, fields)
+}
+
+func toolCallsSignature(calls []provider.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(calls))
+	for _, call := range calls {
+		parts = append(parts, call.Name+"\n"+string(call.Args))
+	}
+	return strings.Join(parts, "\n---\n")
 }
 
 func jsonRaw(raw []byte) any {

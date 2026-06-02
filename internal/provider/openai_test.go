@@ -138,6 +138,37 @@ func TestOpenAIProviderChat(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderChatStreamReportsUsage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAI("demo", ts.URL, "key", "demo-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := Usage{}
+	for ev := range stream {
+		if ev.Err != nil {
+			t.Fatal(ev.Err)
+		}
+		if ev.Usage.InputTokens > 0 || ev.Usage.OutputTokens > 0 {
+			usage = ev.Usage
+		}
+	}
+	if usage.InputTokens != 12 || usage.OutputTokens != 3 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
 func TestOpenAIProviderChatStreamWithToolCall(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

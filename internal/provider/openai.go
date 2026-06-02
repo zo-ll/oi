@@ -102,7 +102,10 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	var resp struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			Name          string `json:"name"`
+			ContextWindow int    `json:"context_window"`
+			MaxContext    int    `json:"max_context_window"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
@@ -110,7 +113,15 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	models := make([]Model, 0, len(resp.Data))
 	for _, m := range resp.Data {
-		models = append(models, Model{ID: m.ID, Name: m.ID})
+		name := strings.TrimSpace(m.Name)
+		if name == "" {
+			name = m.ID
+		}
+		window := m.ContextWindow
+		if window == 0 {
+			window = m.MaxContext
+		}
+		models = append(models, Model{ID: m.ID, Name: name, ContextWindow: window})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil
@@ -132,6 +143,9 @@ func (p *OpenAIProvider) buildRequest(req Request, stream bool) (map[string]any,
 		"model":    model,
 		"messages": messages,
 		"stream":   stream,
+	}
+	if stream {
+		body["stream_options"] = map[string]any{"include_usage": true}
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = toOpenAITools(req.Tools)
@@ -296,6 +310,9 @@ func (p *OpenAIProvider) readStream(body io.ReadCloser, ch chan<- Event) {
 			ch <- Event{Err: fmt.Errorf("parse stream chunk: %w", err)}
 			return
 		}
+		if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
+			ch <- Event{Usage: Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}}
+		}
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Reasoning != "" {
 				ch <- Event{Type: EventDelta, Reasoning: choice.Delta.Reasoning}
@@ -344,6 +361,10 @@ type streamToolCall struct {
 }
 
 type streamChunk struct {
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 	Choices []struct {
 		Delta struct {
 			Content   string `json:"content"`
