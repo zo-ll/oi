@@ -3,6 +3,7 @@ package chat
 import (
 	"bufio"
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -391,6 +392,22 @@ func TestFormatCompletionMatches(t *testing.T) {
 	got := formatCompletionMatches([]string{"a.go", "b.go", "c.go"})
 	if !strings.Contains(got, "matches:") || !strings.Contains(got, "1. a.go") || !strings.Contains(got, "3. c.go") {
 		t.Fatalf("got = %q", got)
+	}
+}
+
+func TestCompletionMatchesForBareAt(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ui := &terminalUI{historyIndex: -1}
+	ui.setWorkspaceRoot(root)
+	matches, err := ui.completionMatchesForText("@")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("expected matches for bare @")
 	}
 }
 

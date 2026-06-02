@@ -82,9 +82,6 @@ func (ui *terminalUI) completeAtPath(current string) (next string, status string
 		return current, "", nil, false, err
 	}
 	if len(matches) == 0 {
-		if _, _, token, ok := trailingToken(current); ok && strings.HasPrefix(token, "@") && strings.TrimSpace(strings.TrimPrefix(token, "@")) != "" {
-			return current, fmt.Sprintf("no file match for %q", strings.TrimSpace(strings.TrimPrefix(token, "@"))), nil, false, nil
-		}
 		return current, "", nil, false, nil
 	}
 	if exact := exactFileMatch(current, matches); exact != "" {
@@ -108,12 +105,18 @@ func (ui *terminalUI) completionMatchesForText(current string) ([]string, error)
 		return nil, nil
 	}
 	query := strings.TrimSpace(strings.TrimPrefix(token, "@"))
-	if query == "" {
-		return nil, nil
-	}
 	files, err := ui.workspaceFiles()
 	if err != nil {
 		return nil, err
+	}
+	if query == "" {
+		if len(files) > maxCompletionMatchesShown*3 {
+			files = files[:maxCompletionMatchesShown*3]
+		}
+		if len(files) == 0 {
+			return nil, nil
+		}
+		return files, nil
 	}
 	return fuzzyFileMatches(query, files, maxCompletionMatchesShown+1), nil
 }

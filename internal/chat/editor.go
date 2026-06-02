@@ -136,7 +136,13 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 			ui.setPromptHint("")
 			return
 		}
-		ui.setPromptHint(liveHint(matches))
+		if len(matches) == 1 {
+			ui.setPromptHint(liveHint(matches))
+			return
+		}
+		ui.pickerActive = true
+		ui.pickerMatches = matches
+		ui.setPromptHint(pickerHint(matches))
 	}
 
 	refreshHint("")
@@ -216,10 +222,9 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 			}
 			continue
 		case 9:
-			next, status, matches, replaced, err := ui.completeAtPath(string(buf))
+			next, _, _, replaced, err := ui.completeAtPath(string(buf))
 			if err != nil {
 				ui.bell()
-				ui.notify("error: " + err.Error())
 				ui.renderPrompt(string(buf))
 				continue
 			}
@@ -231,24 +236,7 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				ui.renderPrompt(string(buf))
 				continue
 			}
-			if len(matches) > 1 {
-				ui.pickerActive = true
-				ui.pickerMatches = matches
-				ui.bell()
-				ui.setPromptHint(pickerHint(matches))
-				ui.renderPrompt(string(buf))
-				continue
-			}
-			if status != "" {
-				ui.bell()
-				ui.ShowStatus(status)
-				ui.renderPrompt(string(buf))
-				continue
-			}
-			buf = append(buf, '\t')
-			ui.pickerActive = false
-			ui.pickerMatches = nil
-			refreshHint(string(buf))
+			ui.bell()
 			ui.renderPrompt(string(buf))
 			continue
 		case 11:
