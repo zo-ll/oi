@@ -29,6 +29,10 @@ type terminalUI struct {
 	historyIndex    int
 	historyDraft    string
 	completion      completionState
+	promptHint      string
+	promptHintLines int
+	pickerMatches   []string
+	pickerActive    bool
 	mu              sync.Mutex
 }
 
@@ -116,6 +120,12 @@ func (ui *terminalUI) renderPrompt(text string) {
 	ui.refreshSize()
 	ui.clearStatusLocked()
 	ui.clearPromptLocked()
+	hintLines := ui.wrapHintLinesLocked()
+	for _, line := range hintLines {
+		_, _ = io.WriteString(ui.out, ui.Styled("dim", line))
+		_, _ = io.WriteString(ui.out, "\r\n")
+		ui.promptHintLines++
+	}
 	lines := wrapPromptLines(ui.prompt, text, ui.width)
 	for i, line := range lines {
 		if i > 0 {
@@ -136,25 +146,50 @@ func (ui *terminalUI) clearPrompt() {
 	ui.clearPromptLocked()
 }
 
+func (ui *terminalUI) setPromptHint(text string) {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.promptHint = strings.TrimRight(text, "\n")
+}
+
+func (ui *terminalUI) wrapHintLinesLocked() []string {
+	text := strings.TrimSpace(ui.promptHint)
+	if text == "" {
+		return nil
+	}
+	parts := strings.Split(text, "\n")
+	var out []string
+	for _, part := range parts {
+		if part == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, wrapLine(part, ui.width)...)
+	}
+	return out
+}
+
 func (ui *terminalUI) clearPromptLocked() {
-	if ui.promptLines <= 0 {
+	total := ui.promptLines + ui.promptHintLines
+	if total <= 0 {
 		return
 	}
 	_, _ = io.WriteString(ui.out, "\r")
-	for i := 0; i < ui.promptLines-1; i++ {
+	for i := 0; i < total-1; i++ {
 		_, _ = io.WriteString(ui.out, "\x1b[1A")
 	}
-	for i := 0; i < ui.promptLines; i++ {
+	for i := 0; i < total; i++ {
 		_, _ = io.WriteString(ui.out, "\r\x1b[2K")
-		if i < ui.promptLines-1 {
+		if i < total-1 {
 			_, _ = io.WriteString(ui.out, "\x1b[1B")
 		}
 	}
-	for i := 0; i < ui.promptLines-1; i++ {
+	for i := 0; i < total-1; i++ {
 		_, _ = io.WriteString(ui.out, "\x1b[1A")
 	}
 	_, _ = io.WriteString(ui.out, "\r")
 	ui.promptLines = 0
+	ui.promptHintLines = 0
 	ui.editing = false
 }
 

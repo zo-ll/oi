@@ -77,37 +77,129 @@ func (ui *terminalUI) historyNext() (string, bool) {
 }
 
 func (ui *terminalUI) completeAtPath(current string) (next string, status string, matches []string, changed bool, err error) {
-	if ui == nil {
-		return current, "", nil, false, nil
-	}
-	start, end, token, ok := trailingToken(current)
-	if !ok {
-		return current, "", nil, false, nil
-	}
-	if !strings.HasPrefix(token, "@") {
-		ui.completion = completionState{}
-		return current, "", nil, false, nil
-	}
-	query := strings.TrimSpace(strings.TrimPrefix(token, "@"))
-	if query == "" {
-		return current, "type more after @", nil, false, nil
-	}
-	files, err := ui.workspaceFiles()
+	matches, err = ui.completionMatchesForText(current)
 	if err != nil {
 		return current, "", nil, false, err
 	}
-	matches = fuzzyFileMatches(query, files, maxCompletionMatchesShown+1)
 	if len(matches) == 0 {
-		ui.completion = completionState{}
-		return current, fmt.Sprintf("no file match for %q", query), nil, false, nil
+		if _, _, token, ok := trailingToken(current); ok && strings.HasPrefix(token, "@") && strings.TrimSpace(strings.TrimPrefix(token, "@")) != "" {
+			return current, fmt.Sprintf("no file match for %q", strings.TrimSpace(strings.TrimPrefix(token, "@"))), nil, false, nil
+		}
+		return current, "", nil, false, nil
+	}
+	if exact := exactFileMatch(current, matches); exact != "" {
+		ui.completion = completionState{candidates: []string{exact}, index: 0}
+		return replaceTrailingToken(current, exact), exact, matches, true, nil
 	}
 	if len(matches) == 1 {
 		ui.completion = completionState{candidates: matches, index: 0}
-		candidate := matches[0]
-		return current[:start] + candidate + current[end:], candidate, matches, true, nil
+		return replaceTrailingToken(current, matches[0]), matches[0], matches, true, nil
 	}
 	ui.completion = completionState{}
 	return current, formatCompletionMatches(matches), matches, false, nil
+}
+
+func (ui *terminalUI) completionMatchesForText(current string) ([]string, error) {
+	if ui == nil {
+		return nil, nil
+	}
+	_, _, token, ok := trailingToken(current)
+	if !ok || !strings.HasPrefix(token, "@") {
+		return nil, nil
+	}
+	query := strings.TrimSpace(strings.TrimPrefix(token, "@"))
+	if query == "" {
+		return nil, nil
+	}
+	files, err := ui.workspaceFiles()
+	if err != nil {
+		return nil, err
+	}
+	return fuzzyFileMatches(query, files, maxCompletionMatchesShown+1), nil
+}
+
+func exactFileMatch(current string, matches []string) string {
+	if len(matches) == 0 {
+		return ""
+	}
+	_, _, token, ok := trailingToken(current)
+	if !ok {
+		return ""
+	}
+	query := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(token, "@")))
+	if query == "" {
+		return ""
+	}
+	var exactPath string
+	pathCount := 0
+	var exactBase string
+	baseCount := 0
+	for _, match := range matches {
+		lower := strings.ToLower(filepath.ToSlash(match))
+		if lower == query {
+			exactPath = match
+			pathCount++
+		}
+		if strings.ToLower(filepath.Base(lower)) == query {
+			exactBase = match
+			baseCount++
+		}
+	}
+	if pathCount == 1 {
+		return exactPath
+	}
+	if baseCount == 1 {
+		return exactBase
+	}
+	return ""
+}
+
+func replaceTrailingToken(current, replacement string) string {
+	start, end, _, ok := trailingToken(current)
+	if !ok {
+		return current
+	}
+	return current[:start] + replacement + current[end:]
+}
+
+func liveHint(matches []string) string {
+	if len(matches) == 0 {
+		return ""
+	}
+	if len(matches) == 1 {
+		return "tab \u2192 " + matches[0]
+	}
+	return fmt.Sprintf("%d matches  tab\u2192pick", len(matches))
+}
+
+func pickerHint(matches []string) string {
+	if len(matches) == 0 {
+		return ""
+	}
+	shown := matches
+	more := 0
+	if len(shown) > maxCompletionMatchesShown {
+		shown = shown[:maxCompletionMatchesShown]
+		more = len(matches) - len(shown)
+	}
+	var b strings.Builder
+	b.WriteString("pick (1-")
+	b.WriteString(fmt.Sprintf("%d", len(shown)))
+	b.WriteString("):\n")
+	for i, match := range shown {
+		fmt.Fprintf(&b, " %d. %s\n", i+1, match)
+	}
+	if more > 0 {
+		fmt.Fprintf(&b, " +%d more", more)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (ui *terminalUI) pickMatch(current string, idx int) string {
+	if ui == nil || idx < 0 || idx >= len(ui.pickerMatches) {
+		return current
+	}
+	return replaceTrailingToken(current, ui.pickerMatches[idx])
 }
 
 func formatCompletionMatches(matches []string) string {

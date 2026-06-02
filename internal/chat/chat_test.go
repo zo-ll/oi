@@ -394,6 +394,18 @@ func TestFormatCompletionMatches(t *testing.T) {
 	}
 }
 
+func TestLiveHint(t *testing.T) {
+	if got := liveHint(nil); got != "" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := liveHint([]string{"a.go"}); !strings.Contains(got, "a.go") {
+		t.Fatalf("one = %q", got)
+	}
+	if got := liveHint([]string{"a.go", "b.go"}); !strings.Contains(got, "2 matches") {
+		t.Fatalf("multi = %q", got)
+	}
+}
+
 func TestPromptHistoryNavigation(t *testing.T) {
 	ui := &terminalUI{historyIndex: -1}
 	ui.addHistoryEntry("first")
