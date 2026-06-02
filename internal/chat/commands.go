@@ -32,11 +32,15 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		printHelpLine(out, "/sessions", "list saved sessions")
 		printHelpLine(out, "/save [name]", "save current session")
 		printHelpLine(out, "/load <name|path>", "load a saved session")
+		printHelpLine(out, "/clear", "clear the screen")
 		printHelpLine(out, "/exit", "exit interactive mode")
 		printHelpLine(out, "Ctrl+V", "paste system clipboard")
 		printHelpLine(out, "Ctrl+Y", "copy last assistant reply")
 		printHelpLine(out, "Ctrl+K", "insert newline")
 		printHelpLine(out, "Ctrl+D", "exit on empty input")
+		return false, rt, sel, streaming, autosave, tools, nil
+	case "/clear":
+		clearScreen(out)
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/exit", "/quit":
 		if err := exitChat(out, rt, sel, autosave); err != nil {

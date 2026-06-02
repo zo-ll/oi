@@ -204,6 +204,16 @@ func (ui *terminalUI) blankLine() {
 	ui.writeWrapped("\n")
 }
 
+func (ui *terminalUI) ClearScreen() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.clearPromptLocked()
+	_, _ = io.WriteString(ui.out, "\x1b[2J\x1b[H")
+	ui.outputColumn = 0
+	ui.promptLines = 0
+	ui.editing = false
+}
+
 func (ui *terminalUI) commitInput(text string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()

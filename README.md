@@ -46,7 +46,6 @@ oi
 # interactive mode
 
 oi --debug
-oi --provider openai-codex --model gpt-5.3-codex
 oi doctor
 oi models
 oi providers
@@ -99,6 +98,7 @@ Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
 - `/sessions [filter]`
 - `/save [name]`
 - `/load [name|path|index]`
+- `/clear`
 - `/exit`
 
 Interactive mode autosaves the rolling session by default after successful turns and saves on exit. Use `/save [name]` when you want a named snapshot.
@@ -126,9 +126,8 @@ In interactive mode, `/login` is a two-step flow:
 
 1. Choose `sub` or `api`.
 2. Choose a provider. For `sub`, the only provider is `openai` and it uses ChatGPT browser login.
-3. If the provider is ready but no usable model is selected yet, oi immediately offers a ready-model picker.
 
-Use `/model` any time to switch models. `/model` only shows models from ready providers.
+`/login` only saves authentication. Use `/model` to make the actual selection. `/model` persists both `selected_model` and the inferred `selected_provider`.
 
 Save credentials from the CLI:
 
@@ -140,6 +139,7 @@ oi login opencode-go
 ```
 
 - `oi login openai-codex` uses ChatGPT Plus/Pro browser OAuth against the Codex backend (`https://chatgpt.com/backend-api`). This is the ChatGPT subscription path, like browser-based login in coding tools.
+- `oi` does not keep a default model. The current selection is stored as `selected_model`, and the provider is inferred from that model choice.
 - `oi login openai` uses the standard OpenAI API endpoint (`https://api.openai.com/v1`) and requires a separate API key from `platform.openai.com`.
 
 If you have a ChatGPT Plus/Pro subscription and want browser login, use `openai-codex` / `chatgpt`, not `openai`.

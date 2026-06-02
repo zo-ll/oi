@@ -217,6 +217,22 @@ func TestResolveSessionArgByIndexAndFilter(t *testing.T) {
 	}
 }
 
+type clearRecorder struct{ called bool }
+
+func (c *clearRecorder) Write(p []byte) (int, error) { return len(p), nil }
+func (c *clearRecorder) ClearScreen()                { c.called = true }
+
+func TestHandleChatCommandClear(t *testing.T) {
+	out := &clearRecorder{}
+	_, _, _, _, _, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, nil, bufio.NewReader(strings.NewReader("")), out, "/clear", true, true, toolVerbosityErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.called {
+		t.Fatal("expected clear screen call")
+	}
+}
+
 func TestWrapPromptLines(t *testing.T) {
 	lines := wrapPromptLines("oi> ", "abcdefghi", 8)
 	if len(lines) < 2 {
@@ -224,6 +240,16 @@ func TestWrapPromptLines(t *testing.T) {
 	}
 	if lines[0] != "oi> abcd" {
 		t.Fatalf("first = %q", lines[0])
+	}
+}
+
+func TestWrapLinePrefersWordBoundaries(t *testing.T) {
+	lines := wrapLine("alpha beta gamma", 7)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %#v", lines)
+	}
+	if lines[0] != "alpha" || lines[1] != "beta" || lines[2] != "gamma" {
+		t.Fatalf("lines = %#v", lines)
 	}
 }
 

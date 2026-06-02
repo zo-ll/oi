@@ -90,6 +90,10 @@ type styledWriter interface {
 	Styled(kind, text string) string
 }
 
+type clearer interface {
+	ClearScreen()
+}
+
 func styleText(out io.Writer, kind, text string) string {
 	if sw, ok := out.(styledWriter); ok {
 		return sw.Styled(kind, text)
@@ -99,6 +103,14 @@ func styleText(out io.Writer, kind, text string) string {
 
 func printHelpLine(out io.Writer, left, right string) {
 	fmt.Fprintf(out, "%-22s %s\n", styleText(out, "command", left), right)
+}
+
+func clearScreen(out io.Writer) {
+	if c, ok := out.(clearer); ok {
+		c.ClearScreen()
+		return
+	}
+	fmt.Fprint(out, "\x1b[2J\x1b[H")
 }
 
 func formatHeader(model, root string) string {

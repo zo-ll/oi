@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,7 +94,7 @@ func TestLoadParsesConfigFile(t *testing.T) {
 	if err := os.MkdirAll(oiDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := `{"default_provider":"demo","providers":{"demo":{"base_url":"https://example.invalid/v1"}}}`
+	data := `{"selected_provider":"demo","providers":{"demo":{"base_url":"https://example.invalid/v1"}}}`
 	if err := os.WriteFile(filepath.Join(oiDir, "config.json"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +104,51 @@ func TestLoadParsesConfigFile(t *testing.T) {
 	}
 	if cfg.SelectedProvider != "demo" {
 		t.Fatalf("SelectedProvider = %q", cfg.SelectedProvider)
+	}
+}
+
+func TestLoadMigratesLegacyDefaultKeys(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	oiDir := filepath.Join(dir, "oi")
+	if err := os.MkdirAll(oiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"default_provider":"demo","default_model":"m1","providers":{"demo":{"base_url":"https://example.invalid/v1"}}}`
+	if err := os.WriteFile(filepath.Join(oiDir, "config.json"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SelectedProvider != "demo" || cfg.SelectedModel != "m1" {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+}
+
+func TestSaveDoesNotWriteLegacyDefaultKeys(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := &Config{
+		SelectedProvider: "demo",
+		SelectedModel:    "m1",
+		Providers: map[string]ProviderConfig{
+			"demo": {BaseURL: "https://example.invalid/v1"},
+		},
+	}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"selected_provider": "demo"`) || !strings.Contains(text, `"selected_model": "m1"`) {
+		t.Fatalf("config = %s", text)
+	}
+	if strings.Contains(text, `"default_provider"`) || strings.Contains(text, `"default_model"`) {
+		t.Fatalf("legacy keys still present: %s", text)
 	}
 }
 
