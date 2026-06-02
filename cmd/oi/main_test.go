@@ -23,6 +23,14 @@ func TestKnownProviderProfile(t *testing.T) {
 	if got != want {
 		t.Fatalf("profile = %+v want %+v", got, want)
 	}
+	got, ok = knownProviderProfile("openrouter")
+	if !ok {
+		t.Fatal("expected openrouter profile")
+	}
+	want = config.ProviderConfig{BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY"}
+	if got != want {
+		t.Fatalf("profile = %+v want %+v", got, want)
+	}
 }
 
 func TestCanonicalProviderName(t *testing.T) {

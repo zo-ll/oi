@@ -120,9 +120,50 @@ func TestChatLoginFlowHelpers(t *testing.T) {
 	if got := loginProviderNames(&config.Config{}, "sub"); len(got) != 1 || got[0] != "openai" {
 		t.Fatalf("sub providers = %#v", got)
 	}
+	apiProviders := loginProviderNames(&config.Config{}, "api")
+	for _, want := range []string{"openai", "openrouter", "groq", "deepseek", "together", "fireworks", "perplexity", "mistral", "xai", "cerebras", "sambanova", "opencode-go"} {
+		found := false
+		for _, got := range apiProviders {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("api providers missing %q: %#v", want, apiProviders)
+		}
+	}
 	got := withLoginProviderArg([]string{"--api-key", "k"}, "openai-codex")
 	if len(got) != 3 || got[2] != "openai-codex" {
 		t.Fatalf("args = %#v", got)
+	}
+}
+
+func TestPromptLoginProviderChoiceShowsConfiguredMarker(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := config.Default()
+	cfg.Providers["openrouter"] = config.ProviderConfig{BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY"}
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.SaveAuth(&config.Auth{Keys: map[string]string{"openrouter": "secret"}}); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	var out strings.Builder
+	choice, err := promptLoginProviderChoice(reader, &out, cfg, "api", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if choice != "" {
+		t.Fatalf("choice = %q", choice)
+	}
+	text := out.String()
+	if !strings.Contains(text, "openrouter [configured]") {
+		t.Fatalf("output missing configured marker: %q", text)
+	}
+	if strings.Contains(text, "OpenRouter API key") || strings.Contains(text, "known profile") {
+		t.Fatalf("output too verbose: %q", text)
 	}
 }
 

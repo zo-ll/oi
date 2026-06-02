@@ -72,6 +72,26 @@ func knownProviderProfile(name string) (config.ProviderConfig, bool) {
 		return config.ProviderConfig{BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY"}, true
 	case "openai-codex":
 		return config.ProviderConfig{BaseURL: "https://chatgpt.com/backend-api"}, true
+	case "openrouter":
+		return config.ProviderConfig{BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY"}, true
+	case "groq":
+		return config.ProviderConfig{BaseURL: "https://api.groq.com/openai/v1", APIKeyEnv: "GROQ_API_KEY"}, true
+	case "deepseek":
+		return config.ProviderConfig{BaseURL: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY"}, true
+	case "together":
+		return config.ProviderConfig{BaseURL: "https://api.together.xyz/v1", APIKeyEnv: "TOGETHER_API_KEY"}, true
+	case "fireworks":
+		return config.ProviderConfig{BaseURL: "https://api.fireworks.ai/inference/v1", APIKeyEnv: "FIREWORKS_API_KEY"}, true
+	case "perplexity":
+		return config.ProviderConfig{BaseURL: "https://api.perplexity.ai", APIKeyEnv: "PERPLEXITY_API_KEY"}, true
+	case "mistral":
+		return config.ProviderConfig{BaseURL: "https://api.mistral.ai/v1", APIKeyEnv: "MISTRAL_API_KEY"}, true
+	case "xai":
+		return config.ProviderConfig{BaseURL: "https://api.x.ai/v1", APIKeyEnv: "XAI_API_KEY"}, true
+	case "cerebras":
+		return config.ProviderConfig{BaseURL: "https://api.cerebras.ai/v1", APIKeyEnv: "CEREBRAS_API_KEY"}, true
+	case "sambanova":
+		return config.ProviderConfig{BaseURL: "https://api.sambanova.ai/v1", APIKeyEnv: "SAMBANOVA_API_KEY"}, true
 	case "opencode-go":
 		return config.ProviderConfig{BaseURL: "https://opencode.ai/zen/go/v1", APIKeyEnv: "OPENCODE_API_KEY"}, true
 	default:

@@ -85,17 +85,21 @@ func promptLoginProviderChoice(reader *bufio.Reader, out io.Writer, cfg *config.
 		fmt.Fprintln(out, "available providers: (none)")
 		return "", nil
 	}
+	auth := mustLoadAuth()
 	fmt.Fprintln(out, "Provider?")
 	for i, name := range names {
 		marker := " "
 		if providerForDisplaySelection(kind, name) == current {
 			marker = "*"
 		}
-		note := "configured"
-		if _, ok := cfg.Providers[providerForDisplaySelection(kind, name)]; !ok {
-			note = "known profile"
+		label := canonicalProviderName(name)
+		providerName := providerForDisplaySelection(kind, name)
+		if strings.TrimSpace(auth.Keys[providerName]) != "" {
+			label += " [configured]"
+		} else if _, ok := auth.OAuth[providerName]; ok {
+			label += " [configured]"
 		}
-		fmt.Fprintf(out, "%2d. %s %s  %s\n", i+1, marker, loginProviderDisplayName(kind, name), note)
+		fmt.Fprintf(out, "%2d. %s %s\n", i+1, marker, label)
 	}
 	fmt.Fprint(out, "Provider? [number/name, blank=cancel] ")
 	choice, err := reader.ReadString('\n')
@@ -155,7 +159,7 @@ func loginProviderNames(cfg *config.Config, kind string) []string {
 			seen[name] = true
 			out = append(out, name)
 		}
-		for _, name := range []string{"openai", "opencode-go"} {
+		for _, name := range []string{"openai", "openrouter", "groq", "deepseek", "together", "fireworks", "perplexity", "mistral", "xai", "cerebras", "sambanova", "opencode-go"} {
 			add(name)
 		}
 		for _, name := range config.ProviderNames(cfg) {
@@ -195,13 +199,6 @@ func providerForDisplaySelection(kind, name string) string {
 	return providerName
 }
 
-func loginProviderDisplayName(kind, name string) string {
-	if kind == "sub" && name == "openai" {
-		return "openai / ChatGPT subscription browser login"
-	}
-	return providerDisplayName(name)
-}
-
 func resolveProviderChoiceFromNames(names []string, arg string) (string, error) {
 	if arg == "" {
 		return "", fmt.Errorf("provider name is required")
@@ -216,16 +213,7 @@ func resolveProviderChoiceFromNames(names []string, arg string) (string, error) 
 }
 
 func providerDisplayName(name string) string {
-	switch canonicalProviderName(name) {
-	case "openai-codex":
-		return "openai-codex / ChatGPT browser login (uses your subscription)"
-	case "openai":
-		return "openai / OpenAI API key (platform billing, not ChatGPT subscription)"
-	case "opencode-go":
-		return "opencode-go / OpenCode API key"
-	default:
-		return name
-	}
+	return canonicalProviderName(name)
 }
 
 func withLoginProviderArg(args []string, providerName string) []string {
