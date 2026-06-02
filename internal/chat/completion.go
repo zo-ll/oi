@@ -186,7 +186,6 @@ func pickerHint(matches []string, index int) string {
 		index = len(matches) - 1
 	}
 	shown := matches
-	more := 0
 	if len(shown) > maxCompletionMatchesShown {
 		start := index - maxCompletionMatchesShown/2
 		if start < 0 {
@@ -199,10 +198,6 @@ func pickerHint(matches []string, index int) string {
 			start = 0
 		}
 		shown = shown[start : start+maxCompletionMatchesShown]
-		more = len(matches) - len(shown)
-		if start > 0 {
-			more += start
-		}
 	}
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%d matches", len(matches)))
@@ -213,9 +208,6 @@ func pickerHint(matches []string, index int) string {
 			marker = "\u25b6 "
 		}
 		fmt.Fprintf(&b, "%s%s\n", marker, match)
-	}
-	if more > 0 {
-		fmt.Fprintf(&b, " +%d more", more)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -232,18 +224,13 @@ func formatCompletionMatches(matches []string) string {
 		return ""
 	}
 	shown := matches
-	more := 0
 	if len(shown) > maxCompletionMatchesShown {
 		shown = shown[:maxCompletionMatchesShown]
-		more = len(matches) - len(shown)
 	}
 	var b strings.Builder
 	b.WriteString("matches:")
 	for i, match := range shown {
 		fmt.Fprintf(&b, "\n %d. %s", i+1, match)
-	}
-	if more > 0 {
-		fmt.Fprintf(&b, "\n +%d more", more)
 	}
 	return b.String()
 }
