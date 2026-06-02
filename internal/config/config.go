@@ -20,7 +20,6 @@ type ProviderConfig struct {
 
 // AgentConfig holds global runtime defaults.
 type AgentConfig struct {
-	MaxSteps              int    `json:"max_steps,omitempty"`
 	MaxToolOutputBytes    int    `json:"max_tool_output_bytes,omitempty"`
 	ToolTimeoutSeconds    int    `json:"tool_timeout_seconds,omitempty"`
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds,omitempty"`
@@ -64,7 +63,6 @@ func Default() *Config {
 	return &Config{
 		Providers: make(map[string]ProviderConfig),
 		Agent: AgentConfig{
-			MaxSteps:              12,
 			MaxToolOutputBytes:    64 * 1024,
 			ToolTimeoutSeconds:    20,
 			RequestTimeoutSeconds: 600,
@@ -276,9 +274,6 @@ func ResolveSelection(c *Config, auth *Auth, cliProvider, cliModel, cliKey strin
 
 func (c *Config) applyDefaults() {
 	def := Default()
-	if c.Agent.MaxSteps == 0 {
-		c.Agent.MaxSteps = def.Agent.MaxSteps
-	}
 	if c.Agent.MaxToolOutputBytes == 0 {
 		c.Agent.MaxToolOutputBytes = def.Agent.MaxToolOutputBytes
 	}

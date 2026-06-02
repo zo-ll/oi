@@ -210,7 +210,6 @@ Fallbacks:
     }
   },
   "agent": {
-    "max_steps": 12,
     "max_tool_output_bytes": 65536,
     "tool_timeout_seconds": 20,
     "request_timeout_seconds": 600,
@@ -414,7 +413,7 @@ The loop should be simple and explicit.
 - invalid tool args -> tool error result back to model
 - blocked command -> tool error result back to model
 - provider timeout -> stop and return error
-- max steps exceeded -> stop with explicit failure
+- internal agent step cap exceeded -> stop with explicit failure
 
 ### History model
 

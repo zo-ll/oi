@@ -139,7 +139,6 @@ func runDoctor(args []string, w io.Writer) error {
 		fmt.Fprintf(w, "connectivity: %s\n", doctorConnectivity(sel))
 	}
 
-	fmt.Fprintf(w, "agent max steps: %d\n", cfg.Agent.MaxSteps)
 	fmt.Fprintf(w, "tool timeout seconds: %d\n", cfg.Agent.ToolTimeoutSeconds)
 	fmt.Fprintf(w, "request timeout seconds: %d\n", cfg.Agent.RequestTimeoutSeconds)
 	fmt.Fprintf(w, "approval mode: %s\n", cfg.Agent.ApprovalMode)

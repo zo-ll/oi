@@ -288,7 +288,6 @@ func (s *Server) resetRuntime() error {
 		Tools:          s.tools,
 		Policy:         s.policy,
 		Session:        session.New(s.selection.Provider, model, s.policy.Root),
-		MaxSteps:       s.cfg.Agent.MaxSteps,
 		ToolTimeout:    time.Duration(s.cfg.Agent.ToolTimeoutSeconds) * time.Second,
 		RequestTimeout: time.Duration(s.cfg.Agent.RequestTimeoutSeconds) * time.Second,
 	}

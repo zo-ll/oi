@@ -14,6 +14,8 @@ import (
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
+const defaultAgentStepLimit = 96
+
 // Runtime is the core agent runtime boundary.
 type Runtime struct {
 	Provider       provider.Provider
@@ -50,7 +52,7 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 		return "", errors.New("input is required")
 	}
 	if r.MaxSteps <= 0 {
-		r.MaxSteps = 12
+		r.MaxSteps = defaultAgentStepLimit
 	}
 	if r.ToolTimeout <= 0 {
 		r.ToolTimeout = 20 * time.Second

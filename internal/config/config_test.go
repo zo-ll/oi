@@ -63,8 +63,8 @@ func TestLoadReturnsDefaultsWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Agent.MaxSteps == 0 {
-		t.Fatal("expected default max steps")
+	if cfg.Agent.ToolTimeoutSeconds == 0 {
+		t.Fatal("expected default tool timeout")
 	}
 }
 
