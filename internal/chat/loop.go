@@ -2,7 +2,6 @@ package chat
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -18,19 +17,30 @@ func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
 	return runLineMode(args, in, out, deps)
 }
 
-func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps Dependencies) error {
+func loadChatRuntime(args []string, root string, in io.Reader, out io.Writer) (*chatState, string, error) {
 	opts, err := parseCommonOptions("", args)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	cfg, sel, err := loadSelection(opts)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	p, startupNotice, err := interactiveProvider(sel)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
+	logger, err := maybeDebugLogger("chat", opts.debug)
+	if err != nil {
+		return nil, "", err
+	}
+	rt := buildRuntime(cfg, sel, p, root, in, out, logger)
+	state := newChatState(cfg, sel, rt)
+	state.reconfigureRuntime(out)
+	return state, startupNotice, nil
+}
+
+func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps Dependencies) error {
 	root, err := workspace.DetectRoot("")
 	if err != nil {
 		return err
@@ -40,28 +50,21 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	}
 	defer ui.disableRawMode()
 	reader := bufio.NewReader(in)
-	streaming := true
-	autosave := true
-	tools := toolVerbosityErrors
-	logger, err := maybeDebugLogger("chat", opts.debug)
+	promptInput := &promptInput{ui: ui, reader: reader}
+	state, startupNotice, err := loadChatRuntime(args, root, promptInput, ui)
 	if err != nil {
 		return err
 	}
-	promptInput := &promptInput{ui: ui, reader: reader}
-	rt := buildRuntime(cfg, sel, p, root, promptInput, ui, logger)
-	configureChatRuntime(rt, ui, tools)
-	contextWindow := lookupContextWindow(p, sel.Model)
-	ui.notify(styleText(ui, "dim", formatHeader(sel.Model, root, contextWindow)))
+	ui.notify(styleText(ui, "dim", formatHeader(state.sel.Model, root, state.contextWindow)))
 	if startupNotice != "" {
 		ui.notify(startupNotice)
 	}
-	lastAssistant := ""
 
 	for {
-		line, err := ui.readMessage(lastAssistant)
+		line, err := ui.readMessage(state.lastAssistant)
 		if err != nil {
 			_ = ui.suspendRaw()
-			return exitChat(ui, rt, sel, autosave)
+			return exitChat(ui, state.rt, state.sel, state.autosave)
 		}
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -71,101 +74,38 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 			if err := ui.suspendRaw(); err != nil {
 				return err
 			}
-			exit, newRT, newSel, newStreaming, newAutosave, newTools, cmdErr := handleChatCommand(deps, cfg, sel, rt, reader, ui, line, streaming, autosave, tools)
+			exit, cmdErr := runChatCommand(deps, state, reader, ui, line)
 			if resumeErr := ui.resumeRaw(); resumeErr != nil {
 				return resumeErr
 			}
 			if cmdErr != nil {
 				ui.notify("error: " + cmdErr.Error())
-			} else {
-				rt = newRT
-				sel = newSel
-				streaming = newStreaming
-				autosave = newAutosave
-				tools = newTools
-				contextWindow = lookupContextWindow(rt.Provider, sel.Model)
-				configureChatRuntime(rt, ui, tools)
 			}
 			if exit {
 				return nil
 			}
 			continue
 		}
-
-		ctx := context.Background()
-		if streaming {
-			formatter := &outputFormatter{}
-			resp, runErr := rt.RunOnceStream(ctx, line, func(delta string) {
-				fmt.Fprint(ui, formatter.Push(delta))
-			})
-			fmt.Fprint(ui, formatter.Flush())
-			fmt.Fprintln(ui)
-			if runErr != nil {
-				ui.notify("error: " + runErr.Error())
-			} else {
-				lastAssistant = cleanDisplayText(resp)
-				if ctx := formatContextUsage(contextWindow, rt.LastUsage); ctx != "" {
-					ui.notify(styleText(ui, "dim", ctx))
-				}
-				ui.blankLine()
-				if autosave {
-					if _, saveErr := saveSession(rt, sel); saveErr != nil {
-						ui.notify("warning: autosave failed: " + saveErr.Error())
-					}
-				}
-			}
+		if state.streaming {
+			runStreamingTurnTUI(ui, state, line)
 		} else {
-			resp, runErr := rt.RunOnce(ctx, line)
-			if runErr != nil {
-				ui.notify("error: " + runErr.Error())
-			} else {
-				resp = cleanDisplayText(resp)
-				lastAssistant = resp
-				ui.notify(resp)
-				if ctx := formatContextUsage(contextWindow, rt.LastUsage); ctx != "" {
-					ui.notify(styleText(ui, "dim", ctx))
-				}
-				ui.blankLine()
-				if autosave {
-					if _, saveErr := saveSession(rt, sel); saveErr != nil {
-						ui.notify("warning: autosave failed: " + saveErr.Error())
-					}
-				}
-			}
+			runNonStreamingTurnTUI(ui, state, line)
 		}
 	}
 }
 
 func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
-	opts, err := parseCommonOptions("", args)
-	if err != nil {
-		return err
-	}
-	cfg, sel, err := loadSelection(opts)
-	if err != nil {
-		return err
-	}
-	p, startupNotice, err := interactiveProvider(sel)
-	if err != nil {
-		return err
-	}
 	root, err := workspace.DetectRoot("")
 	if err != nil {
 		return err
 	}
 	reader := bufio.NewReader(in)
-	streaming := true
-	autosave := true
-	tools := toolVerbosityErrors
-	logger, err := maybeDebugLogger("chat", opts.debug)
+	state, startupNotice, err := loadChatRuntime(args, root, reader, out)
 	if err != nil {
 		return err
 	}
-	rt := buildRuntime(cfg, sel, p, root, reader, out, logger)
-	configureChatRuntime(rt, out, tools)
-	contextWindow := lookupContextWindow(p, sel.Model)
 
-	fmt.Fprintln(out, formatHeader(sel.Model, root, contextWindow))
+	fmt.Fprintln(out, formatHeader(state.sel.Model, root, state.contextWindow))
 	if startupNotice != "" {
 		fmt.Fprintln(out, startupNotice)
 	}
@@ -180,22 +120,14 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 		if line == "" {
 			if err == io.EOF {
 				fmt.Fprintln(out)
-				return exitChat(out, rt, sel, autosave)
+				return exitChat(out, state.rt, state.sel, state.autosave)
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "/") {
-			exit, newRT, newSel, newStreaming, newAutosave, newTools, cmdErr := handleChatCommand(deps, cfg, sel, rt, reader, out, line, streaming, autosave, tools)
+			exit, cmdErr := runChatCommand(deps, state, reader, out, line)
 			if cmdErr != nil {
 				fmt.Fprintf(out, "error: %v\n", cmdErr)
-			} else {
-				rt = newRT
-				sel = newSel
-				streaming = newStreaming
-				autosave = newAutosave
-				tools = newTools
-				contextWindow = lookupContextWindow(rt.Provider, sel.Model)
-				configureChatRuntime(rt, out, tools)
 			}
 			if exit {
 				return nil
@@ -205,47 +137,22 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 			}
 			continue
 		}
-
-		ctx := context.Background()
-		if streaming {
-			formatter := &outputFormatter{}
-			_, runErr := rt.RunOnceStream(ctx, line, func(delta string) {
-				fmt.Fprint(out, formatter.Push(delta))
-			})
-			fmt.Fprint(out, formatter.Flush())
-			fmt.Fprintln(out)
-			if runErr != nil {
-				fmt.Fprintf(out, "error: %v\n", runErr)
-			} else {
-				if ctx := formatContextUsage(contextWindow, rt.LastUsage); ctx != "" {
-					fmt.Fprintln(out, ctx)
-				}
-				fmt.Fprintln(out)
-				if autosave {
-					if _, saveErr := saveSession(rt, sel); saveErr != nil {
-						fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)
-					}
-				}
-			}
+		if state.streaming {
+			runStreamingTurnLine(out, state, line)
 		} else {
-			resp, runErr := rt.RunOnce(context.Background(), line)
-			if runErr != nil {
-				fmt.Fprintf(out, "error: %v\n", runErr)
-			} else {
-				fmt.Fprintln(out, cleanDisplayText(resp))
-				if ctx := formatContextUsage(contextWindow, rt.LastUsage); ctx != "" {
-					fmt.Fprintln(out, ctx)
-				}
-				fmt.Fprintln(out)
-				if autosave {
-					if _, saveErr := saveSession(rt, sel); saveErr != nil {
-						fmt.Fprintf(out, "warning: autosave failed: %v\n", saveErr)
-					}
-				}
-			}
+			runNonStreamingTurnLine(out, state, line)
 		}
 		if err == io.EOF {
-			return exitChat(out, rt, sel, autosave)
+			return exitChat(out, state.rt, state.sel, state.autosave)
 		}
 	}
+}
+
+func runChatCommand(deps Dependencies, state *chatState, reader *bufio.Reader, out io.Writer, line string) (bool, error) {
+	exit, newRT, newSel, newStreaming, newAutosave, newTools, err := handleChatCommand(deps, state.cfg, state.sel, state.rt, reader, out, line, state.streaming, state.autosave, state.tools)
+	if err != nil {
+		return false, err
+	}
+	state.applyCommandResult(newRT, newSel, newStreaming, newAutosave, newTools, out)
+	return exit, nil
 }

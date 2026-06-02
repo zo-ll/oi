@@ -151,22 +151,7 @@ func TestOpenAIProviderChatStreamReportsUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	usage := Usage{}
-	for ev := range stream {
-		if ev.Err != nil {
-			t.Fatal(ev.Err)
-		}
-		if ev.Usage.InputTokens > 0 || ev.Usage.OutputTokens > 0 {
-			usage = ev.Usage
-		}
-	}
-	if usage.InputTokens != 12 || usage.OutputTokens != 3 {
-		t.Fatalf("usage = %+v", usage)
-	}
+	requireStreamSnapshot(t, p, Request{Messages: []Message{{Role: "user", Content: "hi"}}}, "hello", 0, Usage{InputTokens: 12, OutputTokens: 3})
 }
 
 func TestOpenAIProviderChatStreamWithToolCall(t *testing.T) {

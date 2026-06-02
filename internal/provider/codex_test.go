@@ -166,6 +166,21 @@ func TestOpenAICodexProviderListModels(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexProviderChatStreamReportsUsage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":21,\"output_tokens\":7}}}\n\n")
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAICodex("openai-codex", ts.URL, "tok", "acct", "gpt-5.3-codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStreamSnapshot(t, p, Request{Messages: []Message{{Role: "user", Content: "hi"}}}, "done", 0, Usage{InputTokens: 21, OutputTokens: 7})
+}
+
 func TestOpenAICodexProviderChat(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
