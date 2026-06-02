@@ -100,7 +100,7 @@ func TestChatRunLineModeModelSwitchEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, want := range []string{"model set to beta-model [beta]", "hello from beta"} {
+	for _, want := range []string{"model set to beta-model", "hello from beta"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in output:\n%s", want, text)
 		}

@@ -48,7 +48,7 @@ func switchChatModelToChoice(cfg *config.Config, sel config.Selection, rt *agent
 	}
 	*cfg = *cfg2
 	nextRT := buildRuntime(cfg, nextSel, p, root, reader, out, rt.Logger)
-	fmt.Fprintf(out, "model set to %s [%s]\n", choice.Model.ID, choice.Provider)
+	fmt.Fprintf(out, "model set to %s\n", choice.Model.ID)
 	return nextRT, nextSel, nil
 }
 

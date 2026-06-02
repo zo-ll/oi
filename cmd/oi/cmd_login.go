@@ -73,7 +73,7 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 
 	key := normalizeAPIKey(opts.apiKey)
 	if key == "" {
-		fmt.Fprintf(w, "Paste API key for %s (input will be visible): ", providerName)
+		fmt.Fprintf(w, "Provider: %s\nPaste API key (input will be visible): ", providerName)
 		line, err := promptLine(in)
 		if err != nil {
 			return err
