@@ -12,6 +12,7 @@ import (
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/provider"
+	"github.com/zo-ll/oi/internal/retrieval"
 	"github.com/zo-ll/oi/internal/tool"
 )
 
@@ -26,6 +27,12 @@ const (
 func configureChatRuntime(rt *agent.Runtime, out io.Writer, tools toolVerbosity) {
 	if rt == nil {
 		return
+	}
+	rt.OnRetrieve = func(notice retrieval.Notice) {
+		if notice.SnippetCount <= 0 {
+			return
+		}
+		fmt.Fprintln(out, styleText(out, "dim", formatRetrievalNotice(notice)))
 	}
 	rt.OnToolStart = nil
 	rt.OnToolResult = nil
@@ -140,6 +147,17 @@ func lookupContextWindow(p provider.Provider, model string) int {
 		}
 	}
 	return 0
+}
+
+func formatRetrievalNotice(notice retrieval.Notice) string {
+	if notice.SnippetCount <= 0 {
+		return ""
+	}
+	files := "files"
+	if notice.FileCount == 1 {
+		files = "file"
+	}
+	return fmt.Sprintf("retrieved %d snippets from %d %s", notice.SnippetCount, notice.FileCount, files)
 }
 
 func formatContextUsage(window int, usage provider.Usage) string {

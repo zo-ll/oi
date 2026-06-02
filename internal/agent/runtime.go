@@ -10,6 +10,7 @@ import (
 
 	ilog "github.com/zo-ll/oi/internal/log"
 	"github.com/zo-ll/oi/internal/provider"
+	"github.com/zo-ll/oi/internal/retrieval"
 	"github.com/zo-ll/oi/internal/session"
 	"github.com/zo-ll/oi/internal/tool"
 	"github.com/zo-ll/oi/internal/workspace"
@@ -29,6 +30,7 @@ type Runtime struct {
 	ContextWindow  int
 	LastUsage      provider.Usage
 	SystemPrompt   string
+	OnRetrieve     func(retrieval.Notice)
 	OnToolStart    func(tool.Call)
 	OnToolResult   func(tool.Call, tool.Result)
 	Logger         *ilog.Logger
@@ -67,8 +69,9 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 		r.Session = session.New(r.Provider.Name(), r.Provider.Model(), r.Policy.Root)
 	}
 
+	retrievalContext, notice := r.buildRetrievalContext(input)
 	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: input, Kind: "talk"})
-	r.logEvent("user_input", map[string]any{"input": input})
+	r.logEvent("user_input", map[string]any{"input": input, "retrieved_snippets": notice.SnippetCount, "retrieved_files": notice.FileCount})
 
 	lastToolPlan := ""
 	repeatedToolPlan := 0
@@ -76,7 +79,7 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 	repeatedToolErr := 0
 
 	for step := 0; step < r.MaxSteps; step++ {
-		history := r.providerHistory()
+		history := r.providerHistory(retrievalContext)
 		r.logEvent("provider_request", map[string]any{"step": step + 1, "streaming": streaming, "message_count": len(history)})
 		resp, err := r.callProvider(ctx, history, onDelta, streaming)
 		if err != nil {
@@ -241,12 +244,34 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 	return resp, nil
 }
 
-func (r *Runtime) providerHistory() []provider.Message {
+func (r *Runtime) providerHistory(retrievalContext string) []provider.Message {
 	history := r.historyToProviderMessages()
-	out := make([]provider.Message, 0, len(history)+1)
+	out := make([]provider.Message, 0, len(history)+2)
 	out = append(out, provider.Message{Role: "system", Content: r.systemPrompt()})
+	if stringsTrim(retrievalContext) != "" {
+		out = append(out, provider.Message{Role: "system", Content: retrievalContext})
+	}
 	out = append(out, history...)
 	return out
+}
+
+func (r *Runtime) buildRetrievalContext(input string) (string, retrieval.Notice) {
+	notice := retrieval.Notice{Query: input, Skipped: true}
+	if r == nil || r.Policy.Root == "" {
+		return "", notice
+	}
+	contextText, note, err := retrieval.BuildContext(r.Policy.Root, input)
+	if err != nil {
+		r.logEvent("retrieval_error", map[string]any{"error": err.Error()})
+		return "", notice
+	}
+	if note.SnippetCount > 0 && r.OnRetrieve != nil {
+		r.OnRetrieve(note)
+	}
+	if note.SnippetCount > 0 {
+		r.logEvent("retrieval", map[string]any{"snippets": note.SnippetCount, "files": note.FileCount, "bytes": note.Bytes})
+	}
+	return contextText, note
 }
 
 func (r *Runtime) ForceCompactSession() (bool, int) {

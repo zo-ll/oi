@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zo-ll/oi/internal/provider"
+	"github.com/zo-ll/oi/internal/retrieval"
 	"github.com/zo-ll/oi/internal/session"
 	"github.com/zo-ll/oi/internal/tool"
 	"github.com/zo-ll/oi/internal/workspace"
@@ -99,6 +102,31 @@ func TestRunOnceFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestRunOnceInjectsRetrievalContextForCodeQuestions(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "runtime.go"), []byte("package demo\n\nfunc RunOnce() string { return \"ok\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "done"}}}
+	var notice retrieval.Notice
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: root}, MaxSteps: 2, OnRetrieve: func(n retrieval.Notice) { notice = n }}
+	if _, err := r.RunOnce(context.Background(), "where is RunOnce implemented in runtime.go"); err != nil {
+		t.Fatal(err)
+	}
+	if notice.SnippetCount == 0 {
+		t.Fatalf("notice = %+v", notice)
+	}
+	if len(p.requests) != 1 || len(p.requests[0].Messages) < 3 {
+		t.Fatalf("requests = %+v", p.requests)
+	}
+	if p.requests[0].Messages[1].Role != "system" || !strings.Contains(p.requests[0].Messages[1].Content, "Retrieved workspace context:") {
+		t.Fatalf("messages = %+v", p.requests[0].Messages)
+	}
+	if !strings.Contains(p.requests[0].Messages[1].Content, "runtime.go") {
+		t.Fatalf("retrieval context = %q", p.requests[0].Messages[1].Content)
+	}
+}
+
 func TestRunOncePrependsSystemPromptEveryTurn(t *testing.T) {
 	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "one"}, {Content: "two"}}}
 	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, MaxSteps: 2}
@@ -148,6 +176,26 @@ func TestForceCompactSessionCompactsSingleMessage(t *testing.T) {
 	}
 	if len(r.Session.Messages) != 1 || r.Session.Messages[0].Kind != "summary" {
 		t.Fatalf("session messages = %+v", r.Session.Messages)
+	}
+}
+
+func TestRunOnceSkipsRetrievalForChitChat(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "runtime.go"), []byte("package demo\n\nfunc RunOnce() string { return \"ok\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "done"}}}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: root}, MaxSteps: 2}
+	if _, err := r.RunOnce(context.Background(), "hello there"); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 1 || len(p.requests[0].Messages) < 2 {
+		t.Fatalf("requests = %+v", p.requests)
+	}
+	for _, msg := range p.requests[0].Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, "Retrieved workspace context:") {
+			t.Fatalf("unexpected retrieval context: %+v", p.requests[0].Messages)
+		}
 	}
 }
 
