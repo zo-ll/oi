@@ -20,20 +20,21 @@ const defaultAgentStepLimit = 96
 
 // Runtime is the core agent runtime boundary.
 type Runtime struct {
-	Provider       provider.Provider
-	Tools          *tool.Registry
-	Policy         workspace.Policy
-	Session        *session.Session
-	MaxSteps       int
-	ToolTimeout    time.Duration
-	RequestTimeout time.Duration
-	ContextWindow  int
-	LastUsage      provider.Usage
-	SystemPrompt   string
-	OnRetrieve     func(retrieval.Notice)
-	OnToolStart    func(tool.Call)
-	OnToolResult   func(tool.Call, tool.Result)
-	Logger         *ilog.Logger
+	Provider             provider.Provider
+	Tools                *tool.Registry
+	Policy               workspace.Policy
+	Session              *session.Session
+	MaxSteps             int
+	ToolTimeout          time.Duration
+	RequestTimeout       time.Duration
+	ContextWindow        int
+	LastUsage            provider.Usage
+	RecentRetrievedPaths []string
+	SystemPrompt         string
+	OnRetrieve           func(retrieval.Notice)
+	OnToolStart          func(tool.Call)
+	OnToolResult         func(tool.Call, tool.Result)
+	Logger               *ilog.Logger
 }
 
 // RunOnce executes one user request through the bounded agent loop.
@@ -155,6 +156,9 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 			}
 
 			payload, err := json.Marshal(res)
+			if res.OK {
+				r.rememberToolPaths(res)
+			}
 			if err != nil {
 				payload = []byte(fmt.Sprintf(`{"tool":%q,"ok":false,"error":%q}`, tc.Name, err.Error()))
 			}
@@ -260,10 +264,13 @@ func (r *Runtime) buildRetrievalContext(input string) (string, retrieval.Notice)
 	if r == nil || r.Policy.Root == "" {
 		return "", notice
 	}
-	contextText, note, err := retrieval.BuildContext(r.Policy.Root, input)
+	contextText, note, err := retrieval.BuildContext(r.Policy.Root, input, r.recentPaths())
 	if err != nil {
 		r.logEvent("retrieval_error", map[string]any{"error": err.Error()})
 		return "", notice
+	}
+	if len(note.Paths) > 0 {
+		r.rememberRetrievedPaths(note.Paths)
 	}
 	if note.SnippetCount > 0 && r.OnRetrieve != nil {
 		r.OnRetrieve(note)
@@ -272,6 +279,83 @@ func (r *Runtime) buildRetrievalContext(input string) (string, retrieval.Notice)
 		r.logEvent("retrieval", map[string]any{"snippets": note.SnippetCount, "files": note.FileCount, "bytes": note.Bytes})
 	}
 	return contextText, note
+}
+
+func (r *Runtime) rememberRetrievedPaths(paths []string) {
+	for _, path := range paths {
+		path = stringsTrim(path)
+		if path == "" {
+			continue
+		}
+		r.RecentRetrievedPaths = append([]string{path}, filterOut(r.RecentRetrievedPaths, path)...)
+		if len(r.RecentRetrievedPaths) > 8 {
+			r.RecentRetrievedPaths = r.RecentRetrievedPaths[:8]
+		}
+	}
+}
+
+func (r *Runtime) rememberToolPaths(res tool.Result) {
+	if r == nil || len(res.Meta) == 0 {
+		return
+	}
+	for _, key := range []string{"path", "cwd"} {
+		if path := stringsTrim(res.Meta[key]); path != "" {
+			r.rememberRetrievedPaths([]string{path})
+		}
+	}
+}
+
+func (r *Runtime) recentPaths() []string {
+	if r == nil {
+		return nil
+	}
+	paths := append([]string(nil), r.RecentRetrievedPaths...)
+	if r.Session == nil {
+		return paths
+	}
+	for i := len(r.Session.Messages) - 1; i >= 0 && len(paths) < 12; i-- {
+		m := r.Session.Messages[i]
+		if m.Kind != "tool_result" || stringsTrim(m.Content) == "" {
+			continue
+		}
+		var res tool.Result
+		if json.Unmarshal([]byte(m.Content), &res) != nil {
+			continue
+		}
+		for _, key := range []string{"path", "cwd"} {
+			if path := stringsTrim(res.Meta[key]); path != "" {
+				paths = append(paths, path)
+			}
+		}
+	}
+	return uniqueStrings(paths, 12)
+}
+
+func filterOut(items []string, target string) []string {
+	var out []string
+	for _, item := range items {
+		if item != target {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func uniqueStrings(items []string, limit int) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, item := range items {
+		item = stringsTrim(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 func (r *Runtime) ForceCompactSession() (bool, int) {
