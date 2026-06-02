@@ -81,7 +81,9 @@ Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
 - `Ctrl+V` to paste from the system clipboard when available
 - `Ctrl+Y` to copy the last assistant reply
 - `Ctrl+K` to insert a newline
-- dim one-line header and quieter tool/status output
+- dim one-line header with model context window when known
+- per-turn context usage display when the provider reports token usage
+- quieter tool/status output
 - line-mode fallback when not attached to a terminal
 
 ## Interactive slash commands
@@ -96,10 +98,11 @@ Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
 - `/sessions [filter]`
 - `/save [name]`
 - `/load [name|path|index]`
+- `/compact`
 - `/clear`
 - `/exit`
 
-Interactive mode autosaves the rolling session by default after successful turns and saves on exit. Use `/save [name]` when you want a named snapshot.
+Interactive mode autosaves the rolling session by default after successful turns and saves on exit. Use `/save [name]` when you want a named snapshot. Use `/compact` when you want to manually collapse the current session into a summary.
 
 ### Session examples
 
@@ -122,6 +125,8 @@ In interactive mode, `/login` is a two-step flow:
 2. Choose a provider. For `sub`, the only provider is `openai` and it uses ChatGPT browser login.
 
 `/login` only saves authentication. Use `/model` to make the actual selection. `/model` persists both `selected_model` and the inferred `selected_provider`.
+
+There is no `/provider` command in interactive mode. Provider switching is implicit through `/model`.
 
 Save credentials from the CLI:
 

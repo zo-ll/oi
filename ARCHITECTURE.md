@@ -104,7 +104,8 @@ internal/log/
 - load config JSON
 - load auth JSON
 - resolve XDG paths
-- resolve provider/model defaults
+- resolve provider/model selection
+- migrate legacy default keys on load only
 
 #### `internal/provider`
 - provider interface
@@ -235,7 +236,7 @@ Resolution order:
 1. CLI flags
 2. env vars
 3. auth.json
-4. config defaults
+4. config selection (`selected_provider` / `selected_model`)
 
 ---
 
@@ -403,7 +404,7 @@ The loop should be simple and explicit.
 
 ### Limits
 
-- max steps
+- internal agent step cap
 - max tool output bytes
 - per-tool timeout
 - per-provider-request timeout
@@ -489,9 +490,12 @@ Events:
 - minimal stdlib-only terminal UI when attached to a TTY
 - wrapped input/output with plain-text cleanup for display
 - streaming by default
-- commands limited to essentials: `/login`, `/model`, `/stream`, `/tools`, `/new`, `/save`, `/load`, `/clear`, `/help`, `/exit`
+- header shows model context window when known
+- per-turn context usage is shown when provider usage data is available
+- commands limited to essentials: `/login`, `/model`, `/stream`, `/tools`, `/new`, `/sessions`, `/save`, `/load`, `/compact`, `/clear`, `/help`, `/exit`
 - provider switching is implicit via model selection
 - `/login` only stores auth; `/model` performs selection
+- `/compact` manually collapses the current session into a summary
 
 ### `oi run`
 - one-shot request
@@ -502,7 +506,7 @@ Events:
 - long-lived process for Telegram bridge
 
 ### `oi models`
-- list models for selected provider
+- list models for the currently selected provider
 
 ### `oi doctor`
 - show config path
@@ -510,6 +514,7 @@ Events:
 - verify API key exists
 - verify provider connectivity
 - verify workspace root
+- show selected provider/model when set
 
 ---
 

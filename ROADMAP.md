@@ -2,7 +2,7 @@
 
 This file tracks the current Go rebuild. The original compile-only rebuild plan has mostly been completed; the project is now in stabilization/hardening with a larger feature backlog migrated from `oi-old` issues.
 
-## Current status — 2026-05-29
+## Current status — 2026-06-02
 
 Implemented and working in the new Go codebase:
 
@@ -21,7 +21,8 @@ Implemented and working in the new Go codebase:
   - XDG config/state paths
   - `config.json` and private `auth.json`
   - provider profiles and env/auth precedence
-  - `oi doctor`, `oi providers`, `oi login`, `oi logout`
+  - `oi doctor`, `oi login`, `oi logout`
+  - selected provider/model semantics (`selected_provider`, `selected_model`)
 - Providers:
   - OpenAI-compatible `/v1/chat/completions`
   - streaming SSE parser
@@ -44,6 +45,8 @@ Implemented and working in the new Go codebase:
   - `replace_in_file`
 - Agent loop:
   - bounded tool loop
+  - internal-only step cap
+  - anti-stall detection for repeated tool plans/errors
   - session history
   - request/tool timeout handling
   - streaming and non-streaming paths
@@ -53,10 +56,13 @@ Implemented and working in the new Go codebase:
   - events for streaming, tools, errors, done
 - Chat:
   - default `oi` mode
+  - stdlib TUI with wrapped input/output, clipboard paste/copy, and line-mode fallback
   - streaming output
-  - `/help`, `/login`, `/provider`, `/model`, `/stream`, `/autosave`, `/new`, `/sessions`, `/save`, `/load`, `/exit`
+  - context-window header and per-turn context-usage display when available
+  - `/help`, `/login`, `/model`, `/stream`, `/tools`, `/autosave`, `/new`, `/sessions`, `/save`, `/load`, `/compact`, `/clear`, `/exit`
   - `/login` flow: choose `sub` or `api`, then provider
   - `/model` interactive numbered picker
+  - provider switching implicit through `/model`
 - Sessions/logs:
   - rolling autosave
   - named snapshots
@@ -72,20 +78,13 @@ Current active phase: **Phase 10 — hardening, cleanup, and real-world smoke te
 1. **Commit current working changes** once the current behavior is accepted.
 2. **Real-world smoke test ChatGPT subscription flow**:
    - `/login` → `sub` → `openai`
-   - `/provider`
    - `/model`
    - one normal prompt
    - one prompt requiring tools
+   - `/compact`
    - reload session and continue
 3. **Fix only issues discovered by the smoke test**.
-4. **Reduce oversized files**, especially `cmd/oi/chat.go`.
-5. **Improve integration tests** for:
-   - chat login flow
-   - provider switching
-   - model switching
-   - session save/load fidelity
-   - Codex/ChatGPT OAuth refresh
-6. **Improve `oi doctor`** for browser/subscription login:
+4. **Improve `oi doctor`** for browser/subscription login:
    - show OAuth token presence/expiry
    - show ChatGPT account id presence
    - distinguish `openai` API key from `openai-codex` subscription login
@@ -115,7 +114,7 @@ Current active phase: **Phase 10 — hardening, cleanup, and real-world smoke te
 ### Done when
 
 - v1 behavior is understandable from README/RPC docs/roadmap.
-- Common login/provider/model/session flows are tested.
+- Common login/model/session flows are tested.
 - No core file is doing too many unrelated jobs.
 - Browser-login OpenAI subscription path is clearly separate from OpenAI Platform API keys.
 
@@ -150,7 +149,7 @@ The following plans came from open `oi-old` issues and should be considered post
 
 ### Problem
 
-The current numbered lists are barely usable for large model/provider/session/file lists. We need a built-in fzf-like selector for `oi`; this is not about removing an existing dependency in the new codebase.
+The current numbered lists are barely usable for large model/session/file lists. We need a built-in fzf-like selector for `oi`; this is not about removing an existing dependency in the new codebase.
 
 ### Plan
 
@@ -169,7 +168,6 @@ Create `internal/picker/` with a built-in fuzzy selector:
 - Works before the full TUI exists.
 - Can be reused by:
   - `/model`
-  - `/provider`
   - `/sessions` / `/load`
   - command picker
   - skill picker if skills return
@@ -318,7 +316,7 @@ This requires provider interface changes, session format changes, and model capa
 ### Planned features
 
 - Paste from system clipboard into input.
-- Copy output via `/copy` command.
+- Copy output via keybinding instead of a slash command.
 - Cross-platform tool detection:
   - `wl-paste` / `wl-copy`
   - `xclip` / `xsel`
