@@ -133,10 +133,10 @@ Use `/model` any time to switch models. `/model` only shows models from ready pr
 Save credentials from the CLI:
 
 ```bash
-oi login openai-codex --model gpt-5.3-codex  # ChatGPT browser login
-oi login chatgpt --model gpt-5.3-codex       # alias for openai-codex
-oi login openai --model gpt-4.1              # OpenAI Platform API key
-oi login opencode-go --model deepseek-v4-pro
+oi login openai-codex  # ChatGPT browser login
+oi login chatgpt       # alias for openai-codex
+oi login openai        # OpenAI Platform API key
+oi login opencode-go
 ```
 
 - `oi login openai-codex` uses ChatGPT Plus/Pro browser OAuth against the Codex backend (`https://chatgpt.com/backend-api`). This is the ChatGPT subscription path, like browser-based login in coding tools.

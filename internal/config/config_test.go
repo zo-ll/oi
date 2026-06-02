@@ -23,8 +23,8 @@ func TestConfigAndStateDirUseXDG(t *testing.T) {
 
 func TestResolveSelectionPrefersCLIThenEnvThenAuth(t *testing.T) {
 	cfg := &Config{
-		DefaultProvider: "demo",
-		DefaultModel:    "default-model",
+		SelectedProvider: "demo",
+		SelectedModel:    "selected-model",
 		Providers: map[string]ProviderConfig{
 			"demo": {BaseURL: "https://example.invalid/v1", APIKeyEnv: "DEMO_KEY"},
 		},
@@ -40,7 +40,7 @@ func TestResolveSelectionPrefersCLIThenEnvThenAuth(t *testing.T) {
 	if sel.APIKey != "env-key" {
 		t.Fatalf("APIKey = %q, want env-key", sel.APIKey)
 	}
-	if sel.Model != "default-model" {
+	if sel.Model != "selected-model" {
 		t.Fatalf("Model = %q", sel.Model)
 	}
 
@@ -78,9 +78,9 @@ func TestLoadAuthReturnsEmptyWhenMissing(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsUnknownDefaultProvider(t *testing.T) {
+func TestValidateRejectsUnknownSelectedProvider(t *testing.T) {
 	cfg := Default()
-	cfg.DefaultProvider = "missing"
+	cfg.SelectedProvider = "missing"
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -101,8 +101,8 @@ func TestLoadParsesConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DefaultProvider != "demo" {
-		t.Fatalf("DefaultProvider = %q", cfg.DefaultProvider)
+	if cfg.SelectedProvider != "demo" {
+		t.Fatalf("SelectedProvider = %q", cfg.SelectedProvider)
 	}
 }
 
@@ -122,8 +122,8 @@ func TestSaveAuthWritesPrivateFile(t *testing.T) {
 
 func TestResolveSelectionUsesStoredOAuth(t *testing.T) {
 	cfg := &Config{
-		DefaultProvider: "openai-codex",
-		DefaultModel:    "gpt-5.3-codex",
+		SelectedProvider: "openai-codex",
+		SelectedModel:    "gpt-5.4",
 		Providers: map[string]ProviderConfig{
 			"openai-codex": {BaseURL: "https://chatgpt.com/backend-api"},
 		},

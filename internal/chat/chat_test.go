@@ -53,22 +53,22 @@ func TestSaveSessionNamedDoesNotMutateRollingSessionID(t *testing.T) {
 	}
 }
 
-func TestLoginArgsSelection(t *testing.T) {
-	provider, model := loginArgsSelection([]string{"--provider", "openai", "--model=gpt-test"})
-	if provider != "openai" || model != "gpt-test" {
-		t.Fatalf("provider=%q model=%q", provider, model)
+func TestLoginArgsProvider(t *testing.T) {
+	provider := loginArgsProvider([]string{"--provider", "openai"})
+	if provider != "openai" {
+		t.Fatalf("provider=%q", provider)
 	}
-	provider, model = loginArgsSelection([]string{"openai-codex", "--model", "gpt-5.3-codex"})
-	if provider != "openai-codex" || model != "gpt-5.3-codex" {
-		t.Fatalf("provider=%q model=%q", provider, model)
+	provider = loginArgsProvider([]string{"openai-codex"})
+	if provider != "openai-codex" {
+		t.Fatalf("provider=%q", provider)
 	}
-	provider, model = loginArgsSelection([]string{"--api-key", "secret", "--base-url=https://example.invalid", "--model", "m"})
-	if provider != "" || model != "m" {
-		t.Fatalf("provider=%q model=%q", provider, model)
+	provider = loginArgsProvider([]string{"--api-key", "secret", "--base-url=https://example.invalid"})
+	if provider != "" {
+		t.Fatalf("provider=%q", provider)
 	}
-	provider, model = loginArgsSelection([]string{"chatgpt"})
-	if provider != "openai-codex" || model != "" {
-		t.Fatalf("provider=%q model=%q", provider, model)
+	provider = loginArgsProvider([]string{"chatgpt"})
+	if provider != "openai-codex" {
+		t.Fatalf("provider=%q", provider)
 	}
 }
 
@@ -103,13 +103,9 @@ func TestChatLoginFlowHelpers(t *testing.T) {
 	if got := loginProviderNames(&config.Config{}, "sub"); len(got) != 1 || got[0] != "openai" {
 		t.Fatalf("sub providers = %#v", got)
 	}
-	got := withLoginProviderArg([]string{"--model", "m"}, "openai-codex")
+	got := withLoginProviderArg([]string{"--api-key", "k"}, "openai-codex")
 	if len(got) != 3 || got[2] != "openai-codex" {
 		t.Fatalf("args = %#v", got)
-	}
-	got = ensureLoginDefaultArg(got)
-	if got[len(got)-1] != "--default" {
-		t.Fatalf("default args = %#v", got)
 	}
 }
 

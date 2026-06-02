@@ -29,10 +29,13 @@ type AgentConfig struct {
 
 // Config is the top-level user configuration document.
 type Config struct {
-	DefaultProvider string                    `json:"default_provider,omitempty"`
-	DefaultModel    string                    `json:"default_model,omitempty"`
-	Providers       map[string]ProviderConfig `json:"providers,omitempty"`
-	Agent           AgentConfig               `json:"agent,omitempty"`
+	SelectedProvider string                    `json:"selected_provider,omitempty"`
+	SelectedModel    string                    `json:"selected_model,omitempty"`
+	Providers        map[string]ProviderConfig `json:"providers,omitempty"`
+	Agent            AgentConfig               `json:"agent,omitempty"`
+
+	LegacyDefaultProvider string `json:"default_provider,omitempty"`
+	LegacyDefaultModel    string `json:"default_model,omitempty"`
 }
 
 // Auth stores provider API keys and refreshable OAuth credentials.
@@ -108,6 +111,14 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parse %s: %w", ConfigPath(), err)
 	}
 	cfg.applyDefaults()
+	if cfg.SelectedProvider == "" {
+		cfg.SelectedProvider = cfg.LegacyDefaultProvider
+	}
+	if cfg.SelectedModel == "" {
+		cfg.SelectedModel = cfg.LegacyDefaultModel
+	}
+	cfg.LegacyDefaultProvider = ""
+	cfg.LegacyDefaultModel = ""
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]ProviderConfig)
 	}
@@ -144,6 +155,8 @@ func Save(c *Config) error {
 	if c.Providers == nil {
 		c.Providers = make(map[string]ProviderConfig)
 	}
+	c.LegacyDefaultProvider = ""
+	c.LegacyDefaultModel = ""
 	c.applyDefaults()
 	if err := c.Validate(); err != nil {
 		return err
@@ -206,9 +219,9 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("provider %q: base_url is required", name)
 		}
 	}
-	if c.DefaultProvider != "" {
-		if _, ok := c.Providers[c.DefaultProvider]; !ok {
-			return fmt.Errorf("default_provider %q is not defined in providers", c.DefaultProvider)
+	if c.SelectedProvider != "" {
+		if _, ok := c.Providers[c.SelectedProvider]; !ok {
+			return fmt.Errorf("selected_provider %q is not defined in providers", c.SelectedProvider)
 		}
 	}
 	return nil
@@ -236,8 +249,8 @@ func ResolveSelection(c *Config, auth *Auth, cliProvider, cliModel, cliKey strin
 		auth = &Auth{Keys: make(map[string]string), OAuth: make(map[string]oauth.OpenAICodexCredentials)}
 	}
 	sel := Selection{
-		Provider: firstNonEmpty(cliProvider, c.DefaultProvider),
-		Model:    firstNonEmpty(cliModel, c.DefaultModel),
+		Provider: firstNonEmpty(cliProvider, c.SelectedProvider),
+		Model:    firstNonEmpty(cliModel, c.SelectedModel),
 	}
 	if sel.Provider == "" {
 		return sel, nil

@@ -199,7 +199,7 @@ func runProviders(w io.Writer) error {
 	for _, name := range names {
 		pc := cfg.Providers[name]
 		marker := " "
-		if name == cfg.DefaultProvider {
+		if name == cfg.SelectedProvider {
 			marker = "*"
 		}
 		fmt.Fprintf(w, "%s %s\n", marker, name)
@@ -216,17 +216,13 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var opts struct {
-		provider    string
-		apiKey      string
-		baseURL     string
-		model       string
-		makeDefault bool
+		provider string
+		apiKey   string
+		baseURL  string
 	}
 	fs.StringVar(&opts.provider, "provider", "", "provider name")
 	fs.StringVar(&opts.apiKey, "api-key", "", "API key to save")
 	fs.StringVar(&opts.baseURL, "base-url", "", "provider base URL")
-	fs.StringVar(&opts.model, "model", "", "default model")
-	fs.BoolVar(&opts.makeDefault, "default", false, "set as default provider")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -247,10 +243,10 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 	}
 	providerName := canonicalProviderName(opts.provider)
 	if providerName == "" {
-		providerName = cfg.DefaultProvider
+		providerName = cfg.SelectedProvider
 	}
 	if providerName == "" {
-		return fmt.Errorf("usage: oi login <provider> [--api-key KEY] [--base-url URL] [--model MODEL]")
+		return fmt.Errorf("usage: oi login <provider> [--api-key KEY] [--base-url URL]")
 	}
 
 	pc, ok := cfg.Providers[providerName]
@@ -266,12 +262,6 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 		return fmt.Errorf("provider %q is not configured; pass --base-url or add it to config.json", providerName)
 	}
 	cfg.Providers[providerName] = pc
-	if cfg.DefaultProvider == "" || opts.makeDefault {
-		cfg.DefaultProvider = providerName
-	}
-	if opts.model != "" && (cfg.DefaultModel == "" || opts.makeDefault || cfg.DefaultProvider == providerName) {
-		cfg.DefaultModel = opts.model
-	}
 
 	if providerName == "openai-codex" {
 		return runLoginOpenAICodex(in, w, cfg, auth, providerName, pc, opts)
@@ -307,7 +297,7 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 	if providerName == "openai" {
 		fmt.Fprintln(w, "note: OpenAI requires an API key from platform.openai.com. A ChatGPT web subscription does not provide API access.")
 	}
-	sel, err := config.ResolveSelection(cfg, auth, providerName, firstNonEmpty(opts.model, cfg.DefaultModel), "")
+	sel, err := config.ResolveSelection(cfg, auth, providerName, "", "")
 	if err == nil {
 		fmt.Fprintf(w, "connectivity: %s\n", doctorConnectivity(sel))
 	}
@@ -315,11 +305,9 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 }
 
 func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *config.Auth, providerName string, pc config.ProviderConfig, opts struct {
-	provider    string
-	apiKey      string
-	baseURL     string
-	model       string
-	makeDefault bool
+	provider string
+	apiKey   string
+	baseURL  string
 }) error {
 	if auth.OAuth == nil {
 		auth.OAuth = make(map[string]oauth.OpenAICodexCredentials)
@@ -342,12 +330,6 @@ func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *co
 		return err
 	}
 	cfg.Providers[providerName] = pc
-	if cfg.DefaultProvider == "" || opts.makeDefault {
-		cfg.DefaultProvider = providerName
-	}
-	if cfg.DefaultModel == "" || opts.makeDefault || cfg.DefaultProvider == providerName {
-		cfg.DefaultModel = firstNonEmpty(opts.model, "gpt-5.3-codex")
-	}
 	delete(auth.Keys, providerName)
 	auth.OAuth[providerName] = cred
 	if err := config.Save(cfg); err != nil {
@@ -359,7 +341,7 @@ func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *co
 	fmt.Fprintf(w, "saved provider: %s\n", providerName)
 	fmt.Fprintf(w, "config: %s\n", config.ConfigPath())
 	fmt.Fprintf(w, "auth: %s\n", config.AuthPath())
-	sel, err := config.ResolveSelection(cfg, auth, providerName, firstNonEmpty(opts.model, cfg.DefaultModel), "")
+	sel, err := config.ResolveSelection(cfg, auth, providerName, "", "")
 	if err == nil {
 		fmt.Fprintf(w, "connectivity: %s\n", doctorConnectivity(sel))
 	}
@@ -382,7 +364,7 @@ func runLogout(args []string, w io.Writer) error {
 		return err
 	}
 	if providerName == "" {
-		providerName = cfg.DefaultProvider
+		providerName = cfg.SelectedProvider
 	}
 	if providerName == "" {
 		return fmt.Errorf("usage: oi logout <provider>")

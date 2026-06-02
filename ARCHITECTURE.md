@@ -197,8 +197,8 @@ Fallbacks:
 
 ```json
 {
-  "default_provider": "openrouter",
-  "default_model": "openai/gpt-4.1-mini",
+  "selected_provider": "openrouter",
+  "selected_model": "openai/gpt-4.1-mini",
   "providers": {
     "openrouter": {
       "base_url": "https://openrouter.ai/api/v1",

@@ -24,7 +24,7 @@ func mustLoadAuth() *config.Auth {
 
 func loginAndSwitchChatProvider(deps Dependencies, cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, args []string) (*agent.Runtime, config.Selection, error) {
 	kind, loginArgs := stripLoginKindArg(args)
-	providerName, modelName := loginArgsSelection(loginArgs)
+	providerName := loginArgsProvider(loginArgs)
 	if kind == "" && providerName == "" {
 		var err error
 		kind, err = promptLoginKind(reader, out)
@@ -57,36 +57,14 @@ func loginAndSwitchChatProvider(deps Dependencies, cfg *config.Config, sel confi
 	} else if providerName == "" {
 		return nil, sel, fmt.Errorf("provider is required")
 	}
-	loginArgs = ensureLoginDefaultArg(loginArgs)
 	if deps.Login == nil {
 		return nil, sel, fmt.Errorf("login is unavailable")
 	}
 	if err := deps.Login(loginArgs, chatLoginReader(providerName, reader), out); err != nil {
 		return nil, sel, err
 	}
-	cfg2, nextSel, err := reloadSelectionForChat(providerName, modelName)
-	if err != nil {
-		return nil, sel, err
-	}
-	p, err := requireProvider(nextSel)
-	if err != nil {
-		return nil, sel, err
-	}
-	if modelName == "" {
-		cfg2, nextSel, p, err = ensureReadyModelAfterLogin(reader, out, cfg2, nextSel)
-		if err != nil {
-			return nil, sel, err
-		}
-	}
-	root, err := workspace.DetectRoot(rt.Policy.Root)
-	if err != nil {
-		return nil, sel, err
-	}
-	*cfg = *cfg2
-	nextRT := buildRuntime(cfg, nextSel, p, root, reader, out, rt.Logger)
-	fmt.Fprintf(out, "provider set to %s\n", nextSel.Provider)
-	fmt.Fprintf(out, "model: %s\n", valueOr(nextSel.Model, "(none)"))
-	return nextRT, nextSel, nil
+	fmt.Fprintln(out, "login saved; use /model")
+	return rt, sel, nil
 }
 
 func switchChatProvider(deps Dependencies, cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, arg string) (*agent.Runtime, config.Selection, error) {
@@ -145,9 +123,18 @@ func switchChatModel(cfg *config.Config, sel config.Selection, rt *agent.Runtime
 	if err != nil {
 		return nil, sel, err
 	}
+	return switchChatModelToChoice(cfg, sel, rt, reader, out, choice)
+}
+
+func switchChatModelToChoice(cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, choice readyModelChoice) (*agent.Runtime, config.Selection, error) {
 	nextSel := config.Selection{Provider: choice.Provider, Model: choice.Model.ID}
 	cfg2, nextSel, err := loadSelection(commonOptions{provider: nextSel.Provider, model: nextSel.Model})
 	if err != nil {
+		return nil, sel, err
+	}
+	cfg2.SelectedProvider = choice.Provider
+	cfg2.SelectedModel = choice.Model.ID
+	if err := config.Save(cfg2); err != nil {
 		return nil, sel, err
 	}
 	p, err := requireProvider(nextSel)
@@ -592,15 +579,6 @@ func loginProviderDisplayName(kind, name string) string {
 	return providerDisplayName(name)
 }
 
-func ensureLoginDefaultArg(args []string) []string {
-	for _, arg := range args {
-		if strings.TrimSpace(arg) == "--default" {
-			return args
-		}
-	}
-	return append(append([]string(nil), args...), "--default")
-}
-
 func withLoginProviderArg(args []string, providerName string) []string {
 	out := append([]string(nil), args...)
 	for i := 0; i < len(out); i++ {
@@ -628,7 +606,8 @@ func withLoginProviderArg(args []string, providerName string) []string {
 	return append(out, providerName)
 }
 
-func loginArgsSelection(args []string) (providerName, modelName string) {
+func loginArgsProvider(args []string) string {
+	var providerName string
 	for i := 0; i < len(args); i++ {
 		arg := strings.TrimSpace(args[i])
 		switch {
@@ -637,22 +616,17 @@ func loginArgsSelection(args []string) (providerName, modelName string) {
 			i++
 		case strings.HasPrefix(arg, "--provider="):
 			providerName = strings.TrimSpace(strings.TrimPrefix(arg, "--provider="))
-		case arg == "--model" && i+1 < len(args):
-			modelName = strings.TrimSpace(args[i+1])
-			i++
-		case strings.HasPrefix(arg, "--model="):
-			modelName = strings.TrimSpace(strings.TrimPrefix(arg, "--model="))
 		case arg == "--api-key" || arg == "--base-url":
 			if i+1 < len(args) {
 				i++
 			}
-		case strings.HasPrefix(arg, "--api-key=") || strings.HasPrefix(arg, "--base-url=") || arg == "--default":
+		case strings.HasPrefix(arg, "--api-key=") || strings.HasPrefix(arg, "--base-url="):
 			// Not selection fields for the active chat after login.
 		case !strings.HasPrefix(arg, "-") && providerName == "":
 			providerName = arg
 		}
 	}
-	return canonicalProviderName(providerName), modelName
+	return canonicalProviderName(providerName)
 }
 
 func chatLoginReader(providerName string, reader *bufio.Reader) io.Reader {
