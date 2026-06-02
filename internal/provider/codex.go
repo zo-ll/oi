@@ -11,34 +11,10 @@ import (
 	"strings"
 )
 
-const defaultCodexBaseURL = "https://chatgpt.com/backend-api"
-
-var codexModels = []Model{
-	// The ChatGPT Codex backend does not expose the normal OpenAI
-	// Platform /v1/models endpoint, so keep a broad built-in picker list.
-	// Some accounts may not have access to every model here.
-	{ID: "gpt-5-codex", Name: "GPT-5 Codex"},
-	{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex"},
-	{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex"},
-	{ID: "gpt-5.3-codex-spark", Name: "GPT-5.3 Codex Spark"},
-	{ID: "gpt-5", Name: "GPT-5"},
-	{ID: "gpt-5-mini", Name: "GPT-5 mini"},
-	{ID: "gpt-5-nano", Name: "GPT-5 nano"},
-	{ID: "gpt-5.1", Name: "GPT-5.1"},
-	{ID: "gpt-5.1-mini", Name: "GPT-5.1 mini"},
-	{ID: "gpt-5.2", Name: "GPT-5.2"},
-	{ID: "gpt-5.4", Name: "GPT-5.4"},
-	{ID: "gpt-5.4-mini", Name: "GPT-5.4 mini"},
-	{ID: "gpt-5.5", Name: "GPT-5.5"},
-	{ID: "gpt-4.1", Name: "GPT-4.1"},
-	{ID: "gpt-4.1-mini", Name: "GPT-4.1 mini"},
-	{ID: "gpt-4.1-nano", Name: "GPT-4.1 nano"},
-	{ID: "gpt-4o", Name: "GPT-4o"},
-	{ID: "gpt-4o-mini", Name: "GPT-4o mini"},
-	{ID: "o3", Name: "o3"},
-	{ID: "o3-mini", Name: "o3 mini"},
-	{ID: "o4-mini", Name: "o4 mini"},
-}
+const (
+	defaultCodexBaseURL    = "https://chatgpt.com/backend-api"
+	defaultCodexClientVers = "1.0.0"
+)
 
 // OpenAICodexProvider implements ChatGPT Codex Responses API access.
 type OpenAICodexProvider struct {
@@ -135,8 +111,46 @@ func (p *OpenAICodexProvider) ChatStream(ctx context.Context, req Request) (<-ch
 	return ch, nil
 }
 
-func (p *OpenAICodexProvider) ListModels(context.Context) ([]Model, error) {
-	return append([]Model(nil), codexModels...), nil
+func (p *OpenAICodexProvider) ListModels(ctx context.Context) ([]Model, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, resolveCodexModelsURL(p.baseURL), nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range p.headers() {
+		httpReq.Header.Set(k, v)
+	}
+	httpReq.Header.Set("Accept", "application/json")
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(resp.Body)
+		return nil, parseAPIError(resp.StatusCode, data)
+	}
+	var payload struct {
+		Models []struct {
+			Slug        string `json:"slug"`
+			DisplayName string `json:"display_name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("parse codex models response: %w", err)
+	}
+	models := make([]Model, 0, len(payload.Models))
+	for _, m := range payload.Models {
+		id := strings.TrimSpace(m.Slug)
+		if id == "" {
+			continue
+		}
+		name := strings.TrimSpace(m.DisplayName)
+		if name == "" {
+			name = id
+		}
+		models = append(models, Model{ID: id, Name: name})
+	}
+	return models, nil
 }
 
 func (p *OpenAICodexProvider) buildRequest(req Request) (map[string]any, error) {
@@ -266,6 +280,19 @@ func resolveCodexURL(baseURL string) string {
 		return baseURL + "/responses"
 	}
 	return baseURL + "/codex/responses"
+}
+
+func resolveCodexModelsURL(baseURL string) string {
+	baseURL = strings.TrimSpace(strings.TrimRight(baseURL, "/"))
+	if baseURL == "" {
+		baseURL = defaultCodexBaseURL
+	}
+	if strings.HasSuffix(baseURL, "/codex/responses") {
+		baseURL = strings.TrimSuffix(baseURL, "/codex/responses")
+	} else if strings.HasSuffix(baseURL, "/codex") {
+		baseURL = strings.TrimSuffix(baseURL, "/codex")
+	}
+	return baseURL + "/codex/models?client_version=" + defaultCodexClientVers
 }
 
 func sanitizeCodexID(id string) string {
