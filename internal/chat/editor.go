@@ -191,6 +191,13 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				buf = []rune(next)
 				ui.pickerActive = false
 				ui.pickerMatches = nil
+				if strings.HasPrefix(next, "/") {
+					text := strings.TrimRight(next, "\n")
+					ui.addHistoryEntry(text)
+					ui.setPromptHint("")
+					ui.clearPrompt()
+					return text, nil
+				}
 				refreshHint(string(buf))
 				ui.renderPrompt(string(buf))
 				continue

@@ -87,9 +87,10 @@ func (ui *terminalUI) completeAtPath(current string) (next string, status string
 		return current, "", nil, false, err
 	}
 	if len(matches) == 0 {
+		ui.completion = completionState{}
 		return current, "", nil, false, nil
 	}
-	if exact := exactFileMatch(current, matches); exact != "" {
+	if exact := exactMatch(current, matches); exact != "" {
 		ui.completion = completionState{candidates: []string{exact}, index: 0}
 		return replaceTrailingToken(current, exact), exact, matches, true, nil
 	}
@@ -105,28 +106,59 @@ func (ui *terminalUI) completionMatchesForText(current string) ([]string, error)
 	if ui == nil {
 		return nil, nil
 	}
-	_, _, token, ok := trailingToken(current)
-	if !ok || !strings.HasPrefix(token, "@") {
+	start, _, token, ok := trailingToken(current)
+	if !ok {
 		return nil, nil
 	}
-	query := strings.TrimSpace(strings.TrimPrefix(token, "@"))
-	files, err := ui.workspaceFiles()
-	if err != nil {
-		return nil, err
-	}
-	if query == "" {
-		if len(files) > maxCompletionMatchesShown*3 {
-			files = files[:maxCompletionMatchesShown*3]
+	if strings.HasPrefix(token, "@") {
+		query := strings.TrimSpace(strings.TrimPrefix(token, "@"))
+		files, err := ui.workspaceFiles()
+		if err != nil {
+			return nil, err
 		}
-		if len(files) == 0 {
-			return nil, nil
+		if query == "" {
+			if len(files) > maxCompletionMatchesShown*3 {
+				files = files[:maxCompletionMatchesShown*3]
+			}
+			if len(files) == 0 {
+				return nil, nil
+			}
+			return files, nil
 		}
-		return files, nil
+		return fuzzyFileMatches(query, files, maxCompletionMatchesShown+1), nil
 	}
-	return fuzzyFileMatches(query, files, maxCompletionMatchesShown+1), nil
+	if start == 0 && strings.HasPrefix(token, "/") {
+		query := strings.TrimSpace(strings.TrimPrefix(token, "/"))
+		cmds := chatCommands()
+		if query == "" {
+			return cmds, nil
+		}
+		return filterByPrefix(cmds, query), nil
+	}
+	return nil, nil
 }
 
-func exactFileMatch(current string, matches []string) string {
+var chatCommandList = []string{
+	"/help", "/login", "/model", "/stream", "/tools", "/autosave",
+	"/new", "/sessions", "/save", "/load", "/compact", "/clear", "/exit",
+}
+
+func chatCommands() []string {
+	return append([]string(nil), chatCommandList...)
+}
+
+func filterByPrefix(items []string, prefix string) []string {
+	prefix = strings.ToLower(prefix)
+	var out []string
+	for _, item := range items {
+		if strings.HasPrefix(strings.ToLower(item), "/") && strings.HasPrefix(strings.ToLower(strings.TrimPrefix(item, "/")), prefix) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func exactMatch(current string, matches []string) string {
 	if len(matches) == 0 {
 		return ""
 	}
@@ -134,30 +166,35 @@ func exactFileMatch(current string, matches []string) string {
 	if !ok {
 		return ""
 	}
-	query := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(token, "@")))
+	query := strings.TrimSpace(strings.TrimPrefix(token, strings.ToLower(string(token[:1]))))
+	query = strings.ToLower(query)
 	if query == "" {
 		return ""
 	}
-	var exactPath string
-	pathCount := 0
-	var exactBase string
-	baseCount := 0
+	var exact string
+	count := 0
 	for _, match := range matches {
-		lower := strings.ToLower(filepath.ToSlash(match))
-		if lower == query {
-			exactPath = match
-			pathCount++
-		}
-		if strings.ToLower(filepath.Base(lower)) == query {
-			exactBase = match
-			baseCount++
+		lower := strings.ToLower(match)
+		if !strings.HasPrefix(token, "@") {
+			if lower == strings.ToLower(token) {
+				exact = match
+				count++
+			}
+		} else {
+			slashed := strings.ToLower(filepath.ToSlash(match))
+			if slashed == query {
+				exact = match
+				count++
+			}
+			if strings.ToLower(filepath.Base(slashed)) == query {
+				if exact == "" {
+					exact = match
+				}
+			}
 		}
 	}
-	if pathCount == 1 {
-		return exactPath
-	}
-	if baseCount == 1 {
-		return exactBase
+	if count == 1 && exact != "" {
+		return exact
 	}
 	return ""
 }
@@ -229,12 +266,22 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 		return "", false
 	}
 	idx := 0
-	renderOverlay := func() {
+	overlayLines := 0
+	draw := func(first bool) {
 		ui.mu.Lock()
 		defer ui.mu.Unlock()
 		ui.refreshSize()
 		ui.clearStatusLocked()
-		ui.clearPromptLocked()
+		if !first {
+			if overlayLines > 0 {
+				_, _ = io.WriteString(ui.out, "\r")
+				for i := 0; i < overlayLines-1; i++ {
+					_, _ = io.WriteString(ui.out, "\x1b[1A")
+				}
+			}
+		} else {
+			ui.clearPromptLocked()
+		}
 		start := idx - idx%maxCompletionMatchesShown
 		if start+maxCompletionMatchesShown > len(items) {
 			start = len(items) - maxCompletionMatchesShown
@@ -243,54 +290,58 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 			start = 0
 		}
 		shown := items[start : start+maxCompletionMatchesShown]
-		var b strings.Builder
-		fmt.Fprintf(&b, "%s  \u2191\u2193 nav  enter pick  esc cancel", title)
-		lines := wrapLine(b.String(), ui.width)
-		for _, line := range lines {
-			_, _ = io.WriteString(ui.out, ui.Styled("dim", line))
+		count := 0
+		writeLine := func(text string) {
+			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
+			_, _ = io.WriteString(ui.out, ui.Styled("dim", text))
 			_, _ = io.WriteString(ui.out, "\r\n")
-			ui.promptHintLines++
+			count++
 		}
-		for i, item := range shown {
+		header := fmt.Sprintf("%s  \u2191\u2193 nav  enter pick  esc cancel", title)
+		for _, line := range wrapLine(header, ui.width) {
+			writeLine(line)
+		}
+		for _, item := range shown {
 			marker := "  "
 			if idx >= start && items[idx] == item {
 				marker = "\u25b6 "
 			}
-			display := fmt.Sprintf("%s%s", marker, item)
-			for _, line := range wrapLine(display, ui.width) {
-				_, _ = io.WriteString(ui.out, ui.Styled("dim", line))
-				_, _ = io.WriteString(ui.out, "\r\n")
-				ui.promptHintLines++
+			for _, line := range wrapLine(marker+item, ui.width) {
+				writeLine(line)
 			}
-			_ = i
 		}
+		overlayLines = count
 	}
-	clearOverlay := func() {
+	draw(true)
+	rawWasActive := ui.raw
+	if !rawWasActive {
+		_ = ui.enableRawMode()
+	}
+	defer func() {
+		if !rawWasActive {
+			_ = ui.disableRawMode()
+		}
 		ui.mu.Lock()
 		defer ui.mu.Unlock()
-		total := ui.promptHintLines
-		ui.promptHintLines = 0
-		if total <= 0 {
+		if overlayLines <= 0 {
 			return
 		}
 		_, _ = io.WriteString(ui.out, "\r")
-		for i := 0; i < total-1; i++ {
+		for i := 0; i < overlayLines-1; i++ {
 			_, _ = io.WriteString(ui.out, "\x1b[1A")
 		}
-		for i := 0; i < total; i++ {
+		for i := 0; i < overlayLines; i++ {
 			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
-			if i < total-1 {
+			if i < overlayLines-1 {
 				_, _ = io.WriteString(ui.out, "\x1b[1B")
 			}
 		}
-		for i := 0; i < total-1; i++ {
+		for i := 0; i < overlayLines-1; i++ {
 			_, _ = io.WriteString(ui.out, "\x1b[1A")
 		}
 		_, _ = io.WriteString(ui.out, "\r")
 		ui.outputColumn = 0
-	}
-	renderOverlay()
-	defer clearOverlay()
+	}()
 	for {
 		b, err := readByte(ui.in)
 		if err != nil {
@@ -310,13 +361,13 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 				if idx < 0 {
 					idx = len(items) - 1
 				}
-				renderOverlay()
+				draw(false)
 			case "down":
 				idx++
 				if idx >= len(items) {
 					idx = 0
 				}
-				renderOverlay()
+				draw(false)
 			default:
 				return "", false
 			}
@@ -328,7 +379,7 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 			pos := start + digit
 			if pos >= 0 && pos < len(items) {
 				idx = pos
-				renderOverlay()
+				draw(false)
 			} else {
 				ui.bell()
 			}

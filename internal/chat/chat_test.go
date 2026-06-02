@@ -423,6 +423,29 @@ func TestLiveHint(t *testing.T) {
 	}
 }
 
+func TestChatCommands(t *testing.T) {
+	cmds := chatCommands()
+	for _, want := range []string{"/help", "/model", "/login", "/exit"} {
+		found := false
+		for _, got := range cmds {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing %q", want)
+		}
+	}
+}
+
+func TestFilterByPrefix(t *testing.T) {
+	got := filterByPrefix([]string{"/model", "/help", "/login"}, "mo")
+	if len(got) != 1 || got[0] != "/model" {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
 func TestPromptHistoryNavigation(t *testing.T) {
 	ui := &terminalUI{historyIndex: -1}
 	ui.addHistoryEntry("first")
