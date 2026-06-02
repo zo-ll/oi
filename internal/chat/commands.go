@@ -32,7 +32,7 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		printHelpLine(out, "/sessions", "list saved sessions")
 		printHelpLine(out, "/save [name]", "save current session")
 		printHelpLine(out, "/load <name|path>", "load a saved session")
-		printHelpLine(out, "/compact", "compact older session history")
+		printHelpLine(out, "/compact", "compact session history now")
 		printHelpLine(out, "/clear", "clear the screen")
 		printHelpLine(out, "/exit", "exit interactive mode")
 		printHelpLine(out, "Ctrl+V", "paste system clipboard")
@@ -47,7 +47,7 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		if rt == nil || rt.Session == nil {
 			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("no session to compact")
 		}
-		changed, _ := rt.CompactSession()
+		changed, _ := rt.ForceCompactSession()
 		if changed {
 			fmt.Fprintln(out, "session compacted")
 			if autosave {
@@ -56,7 +56,7 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 				}
 			}
 		} else {
-			fmt.Fprintln(out, "session already fits")
+			fmt.Fprintln(out, "session already compact")
 		}
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/clear":

@@ -29,6 +29,20 @@ func EstimateTokens(messages []Message) int {
 	return total
 }
 
+func ForceCompactMessages(messages []Message) ([]Message, bool) {
+	if len(messages) == 0 {
+		return messages, false
+	}
+	if len(messages) == 1 && messages[0].Kind == "summary" {
+		return messages, false
+	}
+	summary := SummarizeMessages(messages)
+	if summary == "" {
+		return messages, false
+	}
+	return []Message{{Role: "system", Kind: "summary", Content: summary}}, true
+}
+
 func CompactMessages(messages []Message, budgetTokens int) ([]Message, bool) {
 	if len(messages) <= minCompactTailMessages {
 		return messages, false

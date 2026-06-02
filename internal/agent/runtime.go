@@ -249,6 +249,20 @@ func (r *Runtime) providerHistory() []provider.Message {
 	return out
 }
 
+func (r *Runtime) ForceCompactSession() (bool, int) {
+	if r == nil || r.Session == nil {
+		return false, 0
+	}
+	budget := r.compactionBudget()
+	compacted, changed := session.ForceCompactMessages(r.Session.Messages)
+	if !changed {
+		return false, budget
+	}
+	r.Session.Messages = compacted
+	r.logEvent("session_compacted", map[string]any{"message_count": len(compacted), "budget_tokens": budget, "forced": true})
+	return true, budget
+}
+
 func (r *Runtime) CompactSession() (bool, int) {
 	if r == nil || r.Session == nil {
 		return false, 0

@@ -44,3 +44,17 @@ func TestCompactMessagesNoopWhenWithinBudget(t *testing.T) {
 		t.Fatalf("len = %d", len(compacted))
 	}
 }
+
+func TestForceCompactMessagesCompactsSingleMessage(t *testing.T) {
+	messages := []Message{{Role: "user", Kind: "talk", Content: "hello there"}}
+	compacted, changed := ForceCompactMessages(messages)
+	if !changed {
+		t.Fatal("expected compaction")
+	}
+	if len(compacted) != 1 || compacted[0].Kind != "summary" {
+		t.Fatalf("compacted = %+v", compacted)
+	}
+	if !strings.Contains(compacted[0].Content, "user: hello there") {
+		t.Fatalf("summary = %q", compacted[0].Content)
+	}
+}

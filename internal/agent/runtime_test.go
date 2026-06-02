@@ -128,11 +128,25 @@ func TestCompactSessionCompactsLargeSession(t *testing.T) {
 			session.Message{Role: "assistant", Kind: "talk", Content: strings.Repeat("old assistant text ", 20)},
 		)
 	}
-	changed, _ := r.CompactSession()
+	changed, _ := r.ForceCompactSession()
 	if !changed {
 		t.Fatal("expected compaction")
 	}
 	if len(r.Session.Messages) == 0 || r.Session.Messages[0].Kind != "summary" {
+		t.Fatalf("session messages = %+v", r.Session.Messages)
+	}
+}
+
+func TestForceCompactSessionCompactsSingleMessage(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m"}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, ContextWindow: 100}
+	r.Session = session.New("fake", "m", ".")
+	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Kind: "talk", Content: "hello there"})
+	changed, _ := r.ForceCompactSession()
+	if !changed {
+		t.Fatal("expected compaction")
+	}
+	if len(r.Session.Messages) != 1 || r.Session.Messages[0].Kind != "summary" {
 		t.Fatalf("session messages = %+v", r.Session.Messages)
 	}
 }

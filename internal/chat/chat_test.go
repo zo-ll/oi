@@ -269,17 +269,12 @@ func TestHandleChatCommandClear(t *testing.T) {
 func TestHandleChatCommandCompact(t *testing.T) {
 	var out strings.Builder
 	rt := &agent.Runtime{Provider: &fakeChatProvider{}, Policy: workspace.Policy{Root: t.TempDir()}, Session: session.New("fake", "m", "."), ContextWindow: 100}
-	for i := 0; i < 10; i++ {
-		rt.Session.Messages = append(rt.Session.Messages,
-			session.Message{Role: "user", Kind: "talk", Content: strings.Repeat("old user text ", 20)},
-			session.Message{Role: "assistant", Kind: "talk", Content: strings.Repeat("old assistant text ", 20)},
-		)
-	}
+	rt.Session.Messages = append(rt.Session.Messages, session.Message{Role: "user", Kind: "talk", Content: "hello there"})
 	_, nextRT, _, _, _, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, rt, bufio.NewReader(strings.NewReader("")), &out, "/compact", true, false, toolVerbosityErrors)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if nextRT.Session.Messages[0].Kind != "summary" {
+	if len(nextRT.Session.Messages) != 1 || nextRT.Session.Messages[0].Kind != "summary" {
 		t.Fatalf("session messages = %+v", nextRT.Session.Messages)
 	}
 	if !strings.Contains(out.String(), "session compacted") {
