@@ -22,6 +22,7 @@ type terminalUI struct {
 	resizeCh        chan os.Signal
 	clipboard       clipboard
 	clipboardStatus string
+	statusVisible   bool
 	mu              sync.Mutex
 }
 
@@ -106,6 +107,7 @@ func (ui *terminalUI) renderPrompt(text string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
 	ui.refreshSize()
+	ui.clearStatusLocked()
 	ui.clearPromptLocked()
 	lines := wrapPromptLines(ui.prompt, text, ui.width)
 	for i, line := range lines {
@@ -160,6 +162,32 @@ func (ui *terminalUI) notify(message string) {
 	}
 }
 
+func (ui *terminalUI) ShowStatus(text string) {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.refreshSize()
+	ui.clearPromptLocked()
+	text = strings.ReplaceAll(strings.TrimSpace(text), "\n", " ")
+	if text == "" {
+		ui.clearStatusLocked()
+		return
+	}
+	runes := []rune(text)
+	if ui.width > 4 && len(runes) >= ui.width {
+		text = string(runes[:ui.width-4]) + "..."
+	}
+	_, _ = io.WriteString(ui.out, "\r\x1b[2K")
+	_, _ = io.WriteString(ui.out, ui.Styled("dim", text))
+	ui.statusVisible = true
+	ui.outputColumn = 0
+}
+
+func (ui *terminalUI) ClearStatus() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.clearStatusLocked()
+}
+
 func (ui *terminalUI) Styled(kind, text string) string {
 	if text == "" {
 		return ""
@@ -194,9 +222,19 @@ func (ui *terminalUI) blankLine() {
 	ui.writeWrapped("\n")
 }
 
+func (ui *terminalUI) clearStatusLocked() {
+	if !ui.statusVisible {
+		return
+	}
+	_, _ = io.WriteString(ui.out, "\r\x1b[2K")
+	ui.statusVisible = false
+	ui.outputColumn = 0
+}
+
 func (ui *terminalUI) ClearScreen() {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
+	ui.clearStatusLocked()
 	ui.clearPromptLocked()
 	_, _ = io.WriteString(ui.out, "\x1b[2J\x1b[H")
 	ui.outputColumn = 0
@@ -207,6 +245,7 @@ func (ui *terminalUI) ClearScreen() {
 func (ui *terminalUI) commitInput(text string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
+	ui.clearStatusLocked()
 	if ui.editing {
 		ui.clearPromptLocked()
 	}
@@ -234,6 +273,7 @@ func (ui *terminalUI) Write(p []byte) (int, error) {
 func (ui *terminalUI) writeWrapped(s string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
+	ui.clearStatusLocked()
 	if ui.editing {
 		ui.clearPromptLocked()
 	}

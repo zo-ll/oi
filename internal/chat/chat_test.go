@@ -12,6 +12,7 @@ import (
 	"github.com/zo-ll/oi/internal/config"
 	"github.com/zo-ll/oi/internal/provider"
 	"github.com/zo-ll/oi/internal/session"
+	"github.com/zo-ll/oi/internal/tool"
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
@@ -306,5 +307,27 @@ func TestNormalizePastedText(t *testing.T) {
 	got := normalizePastedText("a\r\nb\rc")
 	if got != "a\nb\nc" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFormatToolStartLine(t *testing.T) {
+	call := tool.Call{Name: "read_file", Args: []byte(`{"path":"internal/chat/ui.go"}`)}
+	if got := formatToolStartLine(call); got != "  |> read internal/chat/ui.go" {
+		t.Fatalf("got %q", got)
+	}
+	if got := toolActivityLabel(call); got != "reading internal/chat/ui.go" {
+		t.Fatalf("activity = %q", got)
+	}
+}
+
+func TestFormatToolResultLine(t *testing.T) {
+	call := tool.Call{Name: "grep", Args: []byte(`{"pattern":"RunOnce","path":"internal/agent"}`)}
+	ok := tool.Result{Tool: "grep", OK: true}
+	if got := formatToolResultLine(call, ok); got != "  |  grep ok \"RunOnce\" in internal/agent" {
+		t.Fatalf("ok = %q", got)
+	}
+	bad := tool.Result{Tool: "grep", OK: false, Error: "permission denied"}
+	if got := formatToolResultLine(call, bad); got != "  !  grep failed \"RunOnce\" in internal/agent: permission denied" {
+		t.Fatalf("bad = %q", got)
 	}
 }

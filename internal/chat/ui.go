@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zo-ll/oi/internal/agent"
@@ -28,42 +29,37 @@ func configureChatRuntime(rt *agent.Runtime, out io.Writer, tools toolVerbosity)
 	if rt == nil {
 		return
 	}
+	indicator := newActivityIndicator(out)
 	rt.OnRetrieve = func(notice retrieval.Notice) {
 		if notice.SnippetCount <= 0 {
 			return
 		}
 		fmt.Fprintln(out, styleText(out, "dim", formatRetrievalNotice(notice)))
 	}
+	rt.OnModelStart = indicator.StartThinking
+	rt.OnModelStop = indicator.Clear
 	rt.OnToolStart = nil
 	rt.OnToolResult = nil
 	if tools == toolVerbosityOff {
 		return
 	}
-	if tools == toolVerbosityOn {
-		rt.OnToolStart = func(call tool.Call) {
-			line := fmt.Sprintf("  tool:start %s %s", call.Name, summarizeToolArgs(call.Args))
-			fmt.Fprintln(out, styleText(out, "dim", line))
-		}
-	}
-	rt.OnToolResult = func(call tool.Call, result tool.Result) {
-		if tools == toolVerbosityErrors && result.OK {
+	rt.OnToolStart = func(call tool.Call) {
+		indicator.Show(toolActivityLabel(call))
+		if tools != toolVerbosityOn {
 			return
 		}
-		status := "ok"
-		if !result.OK {
-			status = "error"
-		}
-		line := fmt.Sprintf("  tool:%s %s", status, call.Name)
-		if result.Error != "" {
-			line += ": " + result.Error
-		} else if text := summarizeToolOutput(result.Output); text != "" {
-			line += ": " + text
+		fmt.Fprintln(out, styleText(out, "dim", formatToolStartLine(call)))
+	}
+	rt.OnToolResult = func(call tool.Call, result tool.Result) {
+		indicator.Clear()
+		if tools == toolVerbosityErrors && result.OK {
+			return
 		}
 		kind := "dim"
 		if !result.OK {
 			kind = "warn"
 		}
-		fmt.Fprintln(out, styleText(out, kind, line))
+		fmt.Fprintln(out, styleText(out, kind, formatToolResultLine(call, result)))
 	}
 }
 
@@ -95,12 +91,156 @@ func summarizeToolOutput(s string) string {
 	return s
 }
 
+func toolArgString(raw []byte, key string) string {
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return ""
+	}
+	v, _ := args[key].(string)
+	return strings.TrimSpace(v)
+}
+
+func toolArgPath(raw []byte) string {
+	if path := toolArgString(raw, "path"); path != "" {
+		return path
+	}
+	return toolArgString(raw, "file")
+}
+
+func quoteShort(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) > 48 {
+		s = s[:45] + "..."
+	}
+	return fmt.Sprintf("%q", s)
+}
+
+func toolTarget(call tool.Call, result *tool.Result) string {
+	switch call.Name {
+	case "read_file", "write_file", "replace_in_file", "list_dir":
+		if result != nil && result.Meta["path"] != "" {
+			return result.Meta["path"]
+		}
+		return toolArgPath(call.Args)
+	case "find_files", "grep":
+		pattern := quoteShort(toolArgString(call.Args, "pattern"))
+		path := toolArgPath(call.Args)
+		if path == "" {
+			path = "."
+		}
+		if pattern == "" {
+			return path
+		}
+		if path == "." {
+			return pattern
+		}
+		return pattern + " in " + path
+	case "run_command":
+		return strings.TrimSpace(toolArgString(call.Args, "command"))
+	default:
+		return summarizeToolArgs(call.Args)
+	}
+}
+
+func toolVerb(call tool.Call) string {
+	switch call.Name {
+	case "read_file":
+		return "read"
+	case "list_dir":
+		return "list"
+	case "find_files":
+		return "find"
+	case "grep":
+		return "grep"
+	case "run_command":
+		return "run"
+	case "write_file":
+		return "write"
+	case "replace_in_file":
+		return "edit"
+	default:
+		return call.Name
+	}
+}
+
+func toolProgressiveVerb(call tool.Call) string {
+	switch call.Name {
+	case "read_file":
+		return "reading"
+	case "list_dir":
+		return "listing"
+	case "find_files":
+		return "finding"
+	case "grep":
+		return "grepping"
+	case "run_command":
+		return "running"
+	case "write_file":
+		return "writing"
+	case "replace_in_file":
+		return "editing"
+	default:
+		return "running"
+	}
+}
+
+func toolActivityLabel(call tool.Call) string {
+	line := toolProgressiveVerb(call)
+	if target := toolTarget(call, nil); target != "" {
+		line += " " + target
+	}
+	return line
+}
+
+func formatToolStartLine(call tool.Call) string {
+	line := "  |> " + toolVerb(call)
+	if target := toolTarget(call, nil); target != "" {
+		line += " " + target
+	}
+	return line
+}
+
+func formatToolResultLine(call tool.Call, result tool.Result) string {
+	verb := toolVerb(call)
+	target := toolTarget(call, &result)
+	if !result.OK {
+		line := "  !  " + verb + " failed"
+		if target != "" {
+			line += " " + target
+		}
+		if result.Error != "" {
+			line += ": " + result.Error
+		}
+		return line
+	}
+	line := "  |  " + verb + " ok"
+	if target != "" {
+		line += " " + target
+	}
+	if result.Meta["truncated"] == "true" {
+		line += " (truncated)"
+	} else if verb == call.Name {
+		if text := summarizeToolOutput(result.Output); text != "" {
+			line += ": " + text
+		}
+	}
+	return line
+}
+
 type styledWriter interface {
 	Styled(kind, text string) string
 }
 
 type clearer interface {
 	ClearScreen()
+}
+
+type statusWriter interface {
+	ShowStatus(text string)
+	ClearStatus()
 }
 
 func styleText(out io.Writer, kind, text string) string {
@@ -274,32 +414,79 @@ func onOff(v bool) string {
 	return "off"
 }
 
-func startThinkingIndicator(out io.Writer) func() {
+type activityIndicator struct {
+	sink statusWriter
+	mu   sync.Mutex
+	stop chan struct{}
+	done chan struct{}
+}
+
+func newActivityIndicator(out io.Writer) *activityIndicator {
+	sink, _ := out.(statusWriter)
+	return &activityIndicator{sink: sink}
+}
+
+func (a *activityIndicator) StartThinking() {
+	a.startSpinner("thinking")
+}
+
+func (a *activityIndicator) Show(text string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sink == nil {
+		return
+	}
+	a.stopLocked(false)
+	a.sink.ShowStatus(text)
+}
+
+func (a *activityIndicator) Clear() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.stopLocked(true)
+}
+
+func (a *activityIndicator) startSpinner(label string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sink == nil {
+		return
+	}
+	a.stopLocked(false)
 	stop := make(chan struct{})
 	done := make(chan struct{})
+	a.stop = stop
+	a.done = done
 	go func() {
 		defer close(done)
-		frames := []string{"thinking   ", "thinking.  ", "thinking.. ", "thinking..."}
+		frames := []string{"|", "/", "-", "\\"}
 		i := 0
 		ticker := time.NewTicker(120 * time.Millisecond)
 		defer ticker.Stop()
 		for {
+			a.sink.ShowStatus(fmt.Sprintf("%s %s", label, frames[i%len(frames)]))
+			i++
 			select {
 			case <-stop:
-				fmt.Fprint(out, "\r            \r")
 				return
 			case <-ticker.C:
-				fmt.Fprintf(out, "\r%s", frames[i%len(frames)])
-				i++
 			}
 		}
 	}()
-	return func() {
-		select {
-		case <-stop:
-		default:
-			close(stop)
-		}
+}
+
+func (a *activityIndicator) stopLocked(clear bool) {
+	stop := a.stop
+	done := a.done
+	a.stop = nil
+	a.done = nil
+	if stop != nil {
+		close(stop)
+		a.mu.Unlock()
 		<-done
+		a.mu.Lock()
+	}
+	if clear && a.sink != nil {
+		a.sink.ClearStatus()
 	}
 }
