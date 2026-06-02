@@ -131,8 +131,9 @@ func (p *OpenAICodexProvider) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	var payload struct {
 		Models []struct {
-			Slug        string `json:"slug"`
-			DisplayName string `json:"display_name"`
+			Slug          string `json:"slug"`
+			DisplayName   string `json:"display_name"`
+			ContextWindow int    `json:"context_window"`
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -148,7 +149,7 @@ func (p *OpenAICodexProvider) ListModels(ctx context.Context) ([]Model, error) {
 		if name == "" {
 			name = id
 		}
-		models = append(models, Model{ID: id, Name: name})
+		models = append(models, Model{ID: id, Name: name, ContextWindow: m.ContextWindow})
 	}
 	return models, nil
 }
@@ -500,7 +501,11 @@ func emitCodexBlock(ch chan<- Event, lines []string, state *codexStreamState) (b
 		}
 	case "response.done", "response.completed", "response.incomplete":
 		emitPendingCodexCalls(ch, state)
-		ch <- Event{Type: EventDone, Done: true}
+		usage := Usage{}
+		if ev.Response != nil && ev.Response.Usage != nil {
+			usage = Usage{InputTokens: ev.Response.Usage.InputTokens, OutputTokens: ev.Response.Usage.OutputTokens}
+		}
+		ch <- Event{Type: EventDone, Usage: usage, Done: true}
 		return true, nil
 	}
 	return false, nil

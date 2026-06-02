@@ -186,6 +186,13 @@ func TestCleanDisplayText(t *testing.T) {
 	}
 }
 
+func TestFormatContextUsage(t *testing.T) {
+	got := formatContextUsage(272000, provider.Usage{InputTokens: 136000})
+	if got != "ctx 136.0k / 272.0k (50%)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestResolveSessionArgByIndexAndFilter(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()

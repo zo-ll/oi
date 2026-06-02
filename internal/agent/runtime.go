@@ -25,6 +25,7 @@ type Runtime struct {
 	MaxSteps       int
 	ToolTimeout    time.Duration
 	RequestTimeout time.Duration
+	LastUsage      provider.Usage
 	SystemPrompt   string
 	OnToolStart    func(tool.Call)
 	OnToolResult   func(tool.Call, tool.Result)
@@ -80,6 +81,9 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 			return "", err
 		}
 
+		if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 {
+			r.LastUsage = resp.Usage
+		}
 		if len(resp.ToolCalls) == 0 {
 			if resp.Content == "" {
 				err := fmt.Errorf("provider returned neither content nor tool calls")
@@ -176,6 +180,9 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 		}
 		if ev.Reasoning != "" {
 			resp.Reasoning += ev.Reasoning
+		}
+		if ev.Usage.InputTokens > 0 || ev.Usage.OutputTokens > 0 {
+			resp.Usage = ev.Usage
 		}
 		if ev.Delta != "" {
 			resp.Content += ev.Delta

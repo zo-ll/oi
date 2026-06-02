@@ -146,7 +146,7 @@ func TestOpenAICodexProviderListModels(t *testing.T) {
 			t.Fatalf("account = %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5"},{"slug":"gpt-5.4-mini","display_name":"GPT-5.4-Mini"}]}`)
+		fmt.Fprint(w, `{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5","context_window":272000},{"slug":"gpt-5.4-mini","display_name":"GPT-5.4-Mini","context_window":128000}]}`)
 	}))
 	defer ts.Close()
 
@@ -159,6 +159,9 @@ func TestOpenAICodexProviderListModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(models) != 2 || models[0].ID != "gpt-5.5" || models[1].ID != "gpt-5.4-mini" {
+		t.Fatalf("models = %+v", models)
+	}
+	if models[0].ContextWindow != 272000 || models[1].ContextWindow != 128000 {
 		t.Fatalf("models = %+v", models)
 	}
 }

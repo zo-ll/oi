@@ -50,7 +50,8 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	promptInput := &promptInput{ui: ui, reader: reader}
 	rt := buildRuntime(cfg, sel, p, root, promptInput, ui, logger)
 	configureChatRuntime(rt, ui, tools)
-	ui.notify(styleText(ui, "dim", formatHeader(sel.Model, root)))
+	contextWindow := lookupContextWindow(p, sel.Model)
+	ui.notify(styleText(ui, "dim", formatHeader(sel.Model, root, contextWindow)))
 	if startupNotice != "" {
 		ui.notify(startupNotice)
 	}
@@ -82,6 +83,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 				streaming = newStreaming
 				autosave = newAutosave
 				tools = newTools
+				contextWindow = lookupContextWindow(rt.Provider, sel.Model)
 				configureChatRuntime(rt, ui, tools)
 			}
 			if exit {
@@ -102,6 +104,9 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 				ui.notify("error: " + runErr.Error())
 			} else {
 				lastAssistant = cleanDisplayText(resp)
+				if ctx := formatContextUsage(contextWindow, rt.LastUsage); ctx != "" {
+					ui.notify(styleText(ui, "dim", ctx))
+				}
 				ui.blankLine()
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {
@@ -117,6 +122,9 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 				resp = cleanDisplayText(resp)
 				lastAssistant = resp
 				ui.notify(resp)
+				if ctx := formatContextUsage(contextWindow, rt.LastUsage); ctx != "" {
+					ui.notify(styleText(ui, "dim", ctx))
+				}
 				ui.blankLine()
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {
@@ -155,8 +163,9 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 	}
 	rt := buildRuntime(cfg, sel, p, root, reader, out, logger)
 	configureChatRuntime(rt, out, tools)
+	contextWindow := lookupContextWindow(p, sel.Model)
 
-	fmt.Fprintln(out, formatHeader(sel.Model, root))
+	fmt.Fprintln(out, formatHeader(sel.Model, root, contextWindow))
 	if startupNotice != "" {
 		fmt.Fprintln(out, startupNotice)
 	}
@@ -185,6 +194,7 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 				streaming = newStreaming
 				autosave = newAutosave
 				tools = newTools
+				contextWindow = lookupContextWindow(rt.Provider, sel.Model)
 				configureChatRuntime(rt, out, tools)
 			}
 			if exit {
@@ -207,6 +217,9 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 			if runErr != nil {
 				fmt.Fprintf(out, "error: %v\n", runErr)
 			} else {
+				if ctx := formatContextUsage(contextWindow, rt.LastUsage); ctx != "" {
+					fmt.Fprintln(out, ctx)
+				}
 				fmt.Fprintln(out)
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {
@@ -220,6 +233,9 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 				fmt.Fprintf(out, "error: %v\n", runErr)
 			} else {
 				fmt.Fprintln(out, cleanDisplayText(resp))
+				if ctx := formatContextUsage(contextWindow, rt.LastUsage); ctx != "" {
+					fmt.Fprintln(out, ctx)
+				}
 				fmt.Fprintln(out)
 				if autosave {
 					if _, saveErr := saveSession(rt, sel); saveErr != nil {

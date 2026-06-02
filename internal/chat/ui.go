@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zo-ll/oi/internal/agent"
+	"github.com/zo-ll/oi/internal/provider"
 	"github.com/zo-ll/oi/internal/tool"
 )
 
@@ -113,8 +115,50 @@ func clearScreen(out io.Writer) {
 	fmt.Fprint(out, "\x1b[2J\x1b[H")
 }
 
-func formatHeader(model, root string) string {
-	return fmt.Sprintf("oi · %s · %s", valueOr(model, "(none)"), shortenPath(root))
+func formatHeader(model, root string, contextWindow int) string {
+	header := fmt.Sprintf("oi · %s", valueOr(model, "(none)"))
+	if contextWindow > 0 {
+		header += " · ctx " + formatCount(contextWindow)
+	}
+	header += " · " + shortenPath(root)
+	return header
+}
+
+func lookupContextWindow(p provider.Provider, model string) int {
+	if p == nil || strings.TrimSpace(model) == "" {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	models, err := p.ListModels(ctx)
+	if err != nil {
+		return 0
+	}
+	for _, item := range models {
+		if item.ID == model {
+			return item.ContextWindow
+		}
+	}
+	return 0
+}
+
+func formatContextUsage(window int, usage provider.Usage) string {
+	if window <= 0 || usage.InputTokens <= 0 {
+		return ""
+	}
+	pct := usage.InputTokens * 100 / window
+	return fmt.Sprintf("ctx %s / %s (%d%%)", formatCount(usage.InputTokens), formatCount(window), pct)
+}
+
+func formatCount(n int) string {
+	switch {
+	case n >= 1000000:
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 func shortenPath(path string) string {

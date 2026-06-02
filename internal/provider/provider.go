@@ -52,8 +52,9 @@ type Response struct {
 
 // Model describes a provider model.
 type Model struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	ContextWindow int    `json:"context_window,omitempty"`
 }
 
 // EventType classifies streaming events.
@@ -71,6 +72,7 @@ type Event struct {
 	Delta     string    `json:"delta,omitempty"`
 	Reasoning string    `json:"reasoning_content,omitempty"`
 	ToolCall  *ToolCall `json:"tool_call,omitempty"`
+	Usage     Usage     `json:"usage,omitempty"`
 	Done      bool      `json:"done,omitempty"`
 	Err       error     `json:"-"`
 }
