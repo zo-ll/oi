@@ -49,8 +49,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runDoctor(args[1:], stdout)
 	case "models":
 		return runModels(args[1:], stdout)
-	case "providers":
-		return fmt.Errorf("`oi providers` was removed; use `oi doctor`")
 	case "login":
 		return runLogin(args[1:], stdin, stdout)
 	case "logout":
@@ -174,39 +172,6 @@ func runModels(args []string, w io.Writer) error {
 			marker = "*"
 		}
 		fmt.Fprintf(w, "%s %s\n", marker, m.ID)
-	}
-	return nil
-}
-
-func runProviders(w io.Writer) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	auth, err := config.LoadAuth()
-	if err != nil {
-		return err
-	}
-	names := config.ProviderNames(cfg)
-	if len(names) == 0 {
-		fmt.Fprintln(w, "no providers configured")
-		return nil
-	}
-	for _, name := range names {
-		pc := cfg.Providers[name]
-		marker := " "
-		if name == cfg.SelectedProvider {
-			marker = "*"
-		}
-		fmt.Fprintf(w, "%s %s\n", marker, name)
-		fmt.Fprintf(w, "  base_url: %s\n", pc.BaseURL)
-		if pc.APIKeyEnv != "" {
-			fmt.Fprintf(w, "  api_key_env: %s\n", pc.APIKeyEnv)
-		}
-		fmt.Fprintf(w, "  key_source: %s\n", authSource(name, pc, auth))
 	}
 	return nil
 }
