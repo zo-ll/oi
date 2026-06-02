@@ -36,3 +36,10 @@ func TestNormalizeAPIKey(t *testing.T) {
 		t.Fatalf("key = %q", got)
 	}
 }
+
+func TestProvidersCommandRemoved(t *testing.T) {
+	err := run([]string{"providers"}, nil, nil, nil)
+	if err == nil || err.Error() != "`oi providers` was removed; use `oi doctor`" {
+		t.Fatalf("err = %v", err)
+	}
+}

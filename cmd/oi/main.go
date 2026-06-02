@@ -50,7 +50,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	case "models":
 		return runModels(args[1:], stdout)
 	case "providers":
-		return runProviders(stdout)
+		return fmt.Errorf("`oi providers` was removed; use `oi doctor`")
 	case "login":
 		return runLogin(args[1:], stdin, stdout)
 	case "logout":
@@ -74,14 +74,13 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  oi help")
 	fmt.Fprintln(w, "  oi doctor")
 	fmt.Fprintln(w, "  oi models")
-	fmt.Fprintln(w, "  oi providers")
 	fmt.Fprintln(w, "  oi login [provider]")
 	fmt.Fprintln(w, "  oi logout [provider]")
 	fmt.Fprintln(w, "  oi version")
 	fmt.Fprintln(w, "  oi run \"task\"")
 	fmt.Fprintln(w, "  oi rpc")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Current status: interactive mode is the default; doctor, models, providers, login, logout, version, run, and rpc are available.")
+	fmt.Fprintln(w, "Current status: interactive mode is the default; doctor, models, login, logout, version, run, and rpc are available.")
 }
 
 func printVersion(w io.Writer) {

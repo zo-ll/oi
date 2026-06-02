@@ -48,7 +48,6 @@ oi
 oi --debug
 oi doctor
 oi models
-oi providers
 oi login openai-codex  # ChatGPT browser login, uses your subscription
 oi login openai        # OpenAI Platform API key, separate from ChatGPT
 oi logout openai-codex
@@ -67,7 +66,6 @@ oi
 
 oi doctor
 oi models
-oi providers
 oi login openai-codex
 oi login openai
 oi logout openai-codex
@@ -116,11 +114,7 @@ Interactive mode autosaves the rolling session by default after successful turns
 
 ## Provider login
 
-List configured providers:
-
-```bash
-oi providers
-```
+Use `oi doctor` to inspect configured providers and auth state.
 
 In interactive mode, `/login` is a two-step flow:
 
