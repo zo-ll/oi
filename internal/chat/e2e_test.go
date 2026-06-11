@@ -204,6 +204,47 @@ func TestChatRunLineModeLoginThenSwitchAcrossOpenCodeBackends(t *testing.T) {
 	}
 }
 
+func TestChatRunLineModeLoginRefreshesActiveProvider(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	ts := newChatOpenCodeTestServer(t)
+	defer ts.Close()
+
+	cfg := config.Default()
+	cfg.SelectedProvider = "opencode-go"
+	cfg.SelectedModel = "minimax-m3"
+	cfg.Providers["opencode-go"] = config.ProviderConfig{BaseURL: ts.URL + "/v1"}
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := Dependencies{Login: func(args []string, in io.Reader, out io.Writer) error {
+		reader := bufio.NewReader(in)
+		key, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return err
+		}
+		key = strings.TrimSpace(key)
+		return config.SaveAuth(&config.Auth{Keys: map[string]string{"opencode-go": key}})
+	}}
+
+	input := strings.NewReader("/login\napi\nopencode-go\nsecret\n/stream\n2\nhi\n/exit\n")
+	var out strings.Builder
+	if err := Run(nil, input, &out, deps); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		"Provider opencode-go is not ready:",
+		"login saved; active provider reloaded",
+		"hello from minimax",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in output:\n%s", want, text)
+		}
+	}
+}
+
 func TestChatRunLineModeRejectsUnadvertisedOpenCodeModel(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

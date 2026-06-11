@@ -8,6 +8,7 @@ import (
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
+	"github.com/zo-ll/oi/internal/workspace"
 )
 
 func mustLoadAuth() *config.Auth {
@@ -62,8 +63,50 @@ func loginAndSwitchChatProvider(deps Dependencies, cfg *config.Config, sel confi
 	if err := deps.Login(loginArgs, chatLoginReader(providerName, reader), out); err != nil {
 		return nil, sel, err
 	}
+	refreshedRT, refreshedSel, refreshed, err := refreshChatRuntimeAfterLogin(cfg, sel, rt, providerName)
+	if err != nil {
+		return nil, sel, err
+	}
+	if refreshed {
+		fmt.Fprintln(out, "login saved; active provider reloaded")
+		return refreshedRT, refreshedSel, nil
+	}
 	fmt.Fprintln(out, "login saved; use /model")
 	return rt, sel, nil
+}
+
+func refreshChatRuntimeAfterLogin(cfg *config.Config, sel config.Selection, rt *agent.Runtime, providerName string) (*agent.Runtime, config.Selection, bool, error) {
+	providerName = canonicalProviderName(providerName)
+	if rt == nil || strings.TrimSpace(sel.Provider) == "" || providerName == "" || canonicalProviderName(sel.Provider) != providerName {
+		return rt, sel, false, nil
+	}
+	root := rt.Policy.Root
+	if strings.TrimSpace(root) != "" {
+		if detected, err := workspace.DetectRoot(root); err == nil {
+			root = detected
+		}
+	}
+	cfg2, nextSel, err := loadSelection(commonOptions{provider: sel.Provider, model: sel.Model})
+	if err != nil {
+		return nil, sel, false, err
+	}
+	p, err := requireProvider(nextSel)
+	if err != nil {
+		return nil, sel, false, err
+	}
+	*cfg = *cfg2
+	nextRT := *rt
+	nextRT.Provider = p
+	nextRT.Policy = workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalMode(cfg.Agent.ApprovalMode)}
+	nextRT.Tools = rt.Tools
+	if rt.Session != nil {
+		nextRT.Session = rt.Session
+		nextRT.Session.Provider = nextSel.Provider
+		if strings.TrimSpace(nextSel.Model) != "" {
+			nextRT.Session.Model = nextSel.Model
+		}
+	}
+	return &nextRT, nextSel, true, nil
 }
 
 func promptLoginKind(reader *bufio.Reader, out io.Writer) (string, error) {
