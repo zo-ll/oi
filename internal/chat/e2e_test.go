@@ -53,7 +53,7 @@ func TestChatRunLineModeEndToEndSaveLoadCompact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input := strings.NewReader("/stream off\nhi\n/compact\n/save snap\n/load snap\n/exit\n")
+	input := strings.NewReader("/stream\n2\nhi\n/compact\n/save\nsnap\n/session\n1\n/exit\n")
 	var out strings.Builder
 	if err := Run(nil, input, &out, Dependencies{}); err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestChatRunLineModeModelSwitchEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input := strings.NewReader("/model beta-model\n/stream off\nhi\n/exit\n")
+	input := strings.NewReader("/model\n2\n/stream\n2\nhi\n/exit\n")
 	var out strings.Builder
 	if err := Run(nil, input, &out, Dependencies{}); err != nil {
 		t.Fatal(err)

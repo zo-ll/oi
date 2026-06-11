@@ -22,16 +22,18 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 
 	switch cmd {
 	case "/help":
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /help")
+		}
 		printHelpLine(out, "/help", "show commands")
-		printHelpLine(out, "/login [provider]", "set up provider authentication")
-		printHelpLine(out, "/model [name]", "show ready models and set model")
-		printHelpLine(out, "/stream [on|off]", "show or set streaming mode")
-		printHelpLine(out, "/tools [off|errors|on]", "show tool events level")
-		printHelpLine(out, "/autosave [on|off]", "show or set autosave mode")
+		printHelpLine(out, "/login", "set up provider authentication")
+		printHelpLine(out, "/model", "choose and set model")
+		printHelpLine(out, "/stream", "choose streaming mode")
+		printHelpLine(out, "/tools", "choose tool events level")
+		printHelpLine(out, "/autosave", "choose autosave mode")
 		printHelpLine(out, "/new", "start a new session")
-		printHelpLine(out, "/sessions", "list saved sessions")
-		printHelpLine(out, "/save [name]", "save current session")
-		printHelpLine(out, "/load <name|path>", "load a saved session")
+		printHelpLine(out, "/save", "save current session")
+		printHelpLine(out, "/session", "browse and load sessions")
 		printHelpLine(out, "/compact", "compact session history now")
 		printHelpLine(out, "/clear", "clear the screen")
 		printHelpLine(out, "/exit", "exit interactive mode")
@@ -60,14 +62,23 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		}
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/clear":
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /clear")
+		}
 		clearScreen(out)
 		return false, rt, sel, streaming, autosave, tools, nil
-	case "/exit", "/quit":
+	case "/exit":
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /exit")
+		}
 		if err := exitChat(out, rt, sel, autosave); err != nil {
 			return false, rt, sel, streaming, autosave, tools, err
 		}
 		return true, rt, sel, streaming, autosave, tools, nil
 	case "/new":
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /new")
+		}
 		root, err := workspace.DetectRoot(rt.Policy.Root)
 		if err != nil {
 			return false, rt, sel, streaming, autosave, tools, err
@@ -81,7 +92,10 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		}
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/login":
-		nextRT, nextSel, err := loginAndSwitchChatProvider(deps, cfg, sel, rt, reader, out, fields[1:])
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /login")
+		}
+		nextRT, nextSel, err := loginAndSwitchChatProvider(deps, cfg, sel, rt, reader, out, nil)
 		if err != nil {
 			return false, rt, sel, streaming, autosave, tools, err
 		}
@@ -91,9 +105,10 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 			}
 		}
 		return false, nextRT, nextSel, streaming, autosave, tools, nil
-	case "/provider":
-		return false, rt, sel, streaming, autosave, tools, fmt.Errorf("/provider was removed; use /model")
 	case "/model":
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /model")
+		}
 		if arg == "" {
 			if picker, ok := out.(pickerUI); ok {
 				choice, err := modelPickerPick(picker, sel.Provider)
@@ -126,74 +141,84 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		}
 		return false, nextRT, nextSel, streaming, autosave, tools, nil
 	case "/stream":
-		if arg == "" {
-			fmt.Fprintf(out, "streaming: %s\n", onOff(streaming))
-			return false, rt, sel, streaming, autosave, tools, nil
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /stream")
 		}
-		switch strings.ToLower(arg) {
-		case "on":
-			fmt.Fprintln(out, "streaming: on")
-			return false, rt, sel, true, autosave, tools, nil
-		case "off":
-			fmt.Fprintln(out, "streaming: off")
-			return false, rt, sel, false, autosave, tools, nil
-		default:
-			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /stream [on|off]")
-		}
-	case "/tools":
-		if arg == "" {
-			fmt.Fprintf(out, "tools: %s\n", tools)
-			return false, rt, sel, streaming, autosave, tools, nil
-		}
-		nextTools, err := parseToolVerbosity(arg)
+		nextStreaming, err := chooseStreamMode(reader, out, streaming)
 		if err != nil {
 			return false, rt, sel, streaming, autosave, tools, err
+		}
+		if nextStreaming == nil {
+			return false, rt, sel, streaming, autosave, tools, nil
+		}
+		fmt.Fprintf(out, "streaming: %s\n", onOff(*nextStreaming))
+		return false, rt, sel, *nextStreaming, autosave, tools, nil
+	case "/tools":
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /tools")
+		}
+		nextTools, ok, err := chooseToolVerbosity(reader, out, tools)
+		if err != nil {
+			return false, rt, sel, streaming, autosave, tools, err
+		}
+		if !ok {
+			return false, rt, sel, streaming, autosave, tools, nil
 		}
 		fmt.Fprintf(out, "tools: %s\n", nextTools)
 		return false, rt, sel, streaming, autosave, nextTools, nil
 	case "/autosave":
-		if arg == "" {
-			fmt.Fprintf(out, "autosave: %s\n", onOff(autosave))
-			return false, rt, sel, streaming, autosave, tools, nil
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /autosave")
 		}
-		switch strings.ToLower(arg) {
-		case "on":
-			fmt.Fprintln(out, "autosave: on")
-			if _, err := saveSession(rt, sel); err != nil {
-				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
-			}
-			return false, rt, sel, streaming, true, tools, nil
-		case "off":
-			fmt.Fprintln(out, "autosave: off")
-			return false, rt, sel, streaming, false, tools, nil
-		default:
-			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /autosave [on|off]")
-		}
-	case "/sessions":
-		infos, err := filteredSessions(config.SessionsDir(), arg)
+		nextAutosave, err := chooseAutosaveMode(reader, out, autosave)
 		if err != nil {
 			return false, rt, sel, streaming, autosave, tools, err
 		}
-		if len(infos) == 0 {
-			fmt.Fprintln(out, "no saved sessions")
+		if nextAutosave == nil {
 			return false, rt, sel, streaming, autosave, tools, nil
 		}
-		printSessions(out, infos)
-		return false, rt, sel, streaming, autosave, tools, nil
+		fmt.Fprintf(out, "autosave: %s\n", onOff(*nextAutosave))
+		if *nextAutosave {
+			if _, err := saveSession(rt, sel); err != nil {
+				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
+			}
+		}
+		return false, rt, sel, streaming, *nextAutosave, tools, nil
 	case "/save":
-		path, err := saveSessionNamed(rt, sel, arg)
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /save")
+		}
+		name, err := promptSaveName(reader, out)
+		if err != nil {
+			return false, rt, sel, streaming, autosave, tools, err
+		}
+		path, err := saveSessionNamed(rt, sel, name)
 		if err != nil {
 			return false, rt, sel, streaming, autosave, tools, err
 		}
 		fmt.Fprintf(out, "saved: %s\n", path)
 		return false, rt, sel, streaming, autosave, tools, nil
-	case "/load":
-		path, err := resolveLoadTarget(reader, out, config.SessionsDir(), arg)
-		if err != nil {
-			return false, rt, sel, streaming, autosave, tools, err
+	case "/session":
+		if strings.TrimSpace(arg) != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /session")
+		}
+		path := ""
+		if picker, ok := out.(pickerUI); ok {
+			infos, err := filteredSessions(config.SessionsDir(), "")
+			if err != nil {
+				return false, rt, sel, streaming, autosave, tools, err
+			}
+			if info, picked := pickSessionInfo(picker, infos, "choose session"); picked {
+				path = info.Path
+			}
+		} else {
+			var err error
+			path, err = resolveLoadTarget(reader, out, config.SessionsDir(), "")
+			if err != nil {
+				return false, rt, sel, streaming, autosave, tools, err
+			}
 		}
 		if path == "" {
-			fmt.Fprintln(out, "load cancelled")
 			return false, rt, sel, streaming, autosave, tools, nil
 		}
 		loaded, err := session.Load(path)
@@ -228,8 +253,95 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		loaded.CWD = root
 		nextRT.Session = loaded
 		fmt.Fprintf(out, "loaded: %s\n", path)
+		if len(loaded.Messages) > 0 {
+			fmt.Fprintln(out)
+			printSessionTranscript(out, loaded.Messages)
+		}
 		return false, nextRT, nextSel2, streaming, autosave, tools, nil
 	default:
 		return false, rt, sel, streaming, autosave, tools, fmt.Errorf("unknown command: %s", cmd)
 	}
+}
+
+func chooseStreamMode(reader *bufio.Reader, out io.Writer, current bool) (*bool, error) {
+	selected, ok, err := pickSimpleChoice(reader, out, "choose streaming mode", []string{"on", "off"})
+	if err != nil || !ok {
+		return nil, err
+	}
+	next := strings.EqualFold(selected, "on")
+	_ = current
+	return &next, nil
+}
+
+func chooseToolVerbosity(reader *bufio.Reader, out io.Writer, current toolVerbosity) (toolVerbosity, bool, error) {
+	selected, ok, err := pickSimpleChoice(reader, out, "choose tool visibility", []string{string(toolVerbosityOff), string(toolVerbosityErrors), string(toolVerbosityOn)})
+	if err != nil || !ok {
+		return current, false, err
+	}
+	next, err := parseToolVerbosity(selected)
+	if err != nil {
+		return current, false, err
+	}
+	return next, true, nil
+}
+
+func chooseAutosaveMode(reader *bufio.Reader, out io.Writer, current bool) (*bool, error) {
+	selected, ok, err := pickSimpleChoice(reader, out, "choose autosave mode", []string{"on", "off"})
+	if err != nil || !ok {
+		return nil, err
+	}
+	next := strings.EqualFold(selected, "on")
+	_ = current
+	return &next, nil
+}
+
+func promptSaveName(reader *bufio.Reader, out io.Writer) (string, error) {
+	if ui, ok := out.(inputUI); ok {
+		text, saved := ui.overlayInput("save session", "name: ", "")
+		if !saved {
+			return "", nil
+		}
+		return strings.TrimSpace(text), nil
+	}
+	fmt.Fprint(out, "Save as? [blank=current] ")
+	text, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimSpace(text), nil
+}
+
+func pickSimpleChoice(reader *bufio.Reader, out io.Writer, title string, items []string) (string, bool, error) {
+	if picker, ok := out.(pickerUI); ok {
+		selected, picked := picker.overlayPicker(title, items)
+		if !picked || strings.TrimSpace(selected) == "" {
+			return "", false, nil
+		}
+		return selected, true, nil
+	}
+	fmt.Fprintln(out, title)
+	for i, item := range items {
+		fmt.Fprintf(out, "%2d. %s\n", i+1, item)
+	}
+	fmt.Fprint(out, "Choose? [number/name, blank=cancel] ")
+	text, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", false, err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", false, nil
+	}
+	if idx, ok := parseSessionIndex(text); ok {
+		if idx < 1 || idx > len(items) {
+			return "", false, fmt.Errorf("choice index out of range: %d", idx)
+		}
+		return items[idx-1], true, nil
+	}
+	for _, item := range items {
+		if strings.EqualFold(item, text) {
+			return item, true, nil
+		}
+	}
+	return "", false, fmt.Errorf("invalid choice: %s", text)
 }

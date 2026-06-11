@@ -54,24 +54,33 @@ func resolveLoadTarget(reader *bufio.Reader, out io.Writer, dir, arg string) (st
 	return resolveSessionArg(dir, infos, arg)
 }
 
-func resolveSessionArg(dir string, infos []session.Info, arg string) (string, error) {
-	if filepath.IsAbs(arg) || strings.ContainsRune(arg, os.PathSeparator) {
-		return arg, nil
+func pickSessionInfo(picker pickerUI, infos []session.Info, title string) (session.Info, bool) {
+	if picker == nil || len(infos) == 0 {
+		return session.Info{}, false
 	}
-	if idx, ok := parseSessionIndex(arg); ok {
-		if idx < 1 || idx > len(infos) {
-			return "", fmt.Errorf("session index out of range: %d", idx)
-		}
-		return infos[idx-1].Path, nil
-	}
+	labels := make([]string, 0, len(infos))
+	labelToInfo := make(map[string]session.Info, len(infos))
 	for _, info := range infos {
-		if info.ID == arg {
-			return info.Path, nil
-		}
+		label := sessionPickerLabel(info)
+		labels = append(labels, label)
+		labelToInfo[label] = info
 	}
-	path := resolveSessionPath(dir, arg)
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
+	selected, ok := picker.overlayPicker(title, labels)
+	if !ok || strings.TrimSpace(selected) == "" {
+		return session.Info{}, false
+	}
+	info, ok := labelToInfo[selected]
+	return info, ok
+}
+
+func sessionPickerLabel(info session.Info) string {
+	started := info.CreatedAt.Local().Format("2006-01-02 15:04")
+	return fmt.Sprintf("%s  %s", valueOr(info.Preview, info.ID), started)
+}
+
+func resolveSessionArg(dir string, infos []session.Info, arg string) (string, error) {
+	if path, ok, err := resolveSessionExactArg(dir, infos, arg); ok || err != nil {
+		return path, err
 	}
 	matches, err := filteredSessions(dir, arg)
 	if err != nil {
@@ -81,9 +90,31 @@ func resolveSessionArg(dir string, infos []session.Info, arg string) (string, er
 		return matches[0].Path, nil
 	}
 	if len(matches) > 1 {
-		return "", fmt.Errorf("multiple sessions match %q; use /sessions %s and load by index", arg, arg)
+		return "", fmt.Errorf("multiple sessions match %q; use /session %s to list matches, then load by index", arg, arg)
 	}
 	return "", fmt.Errorf("session not found: %s", arg)
+}
+
+func resolveSessionExactArg(dir string, infos []session.Info, arg string) (string, bool, error) {
+	if filepath.IsAbs(arg) || strings.ContainsRune(arg, os.PathSeparator) {
+		return arg, true, nil
+	}
+	if idx, ok := parseSessionIndex(arg); ok {
+		if idx < 1 || idx > len(infos) {
+			return "", true, fmt.Errorf("session index out of range: %d", idx)
+		}
+		return infos[idx-1].Path, true, nil
+	}
+	for _, info := range infos {
+		if info.ID == arg {
+			return info.Path, true, nil
+		}
+	}
+	path := resolveSessionPath(dir, arg)
+	if _, err := os.Stat(path); err == nil {
+		return path, true, nil
+	}
+	return "", false, nil
 }
 
 func parseSessionIndex(arg string) (int, bool) {
@@ -105,7 +136,7 @@ func filteredSessions(dir, filter string) ([]session.Info, error) {
 	}
 	out := make([]session.Info, 0, len(infos))
 	for _, info := range infos {
-		hay := strings.ToLower(info.ID + " " + info.Provider + " " + info.Model + " " + filepath.Base(info.Path))
+		hay := strings.ToLower(info.ID + " " + info.Provider + " " + info.Model + " " + info.Preview + " " + filepath.Base(info.Path))
 		if strings.Contains(hay, filter) {
 			out = append(out, info)
 		}
@@ -115,7 +146,27 @@ func filteredSessions(dir, filter string) ([]session.Info, error) {
 
 func printSessions(out io.Writer, infos []session.Info) {
 	for i, info := range infos {
-		fmt.Fprintf(out, "%2d. %s  %s  %s  %s\n", i+1, info.ID, info.UpdatedAt.Format("2006-01-02 15:04:05"), valueOr(info.Provider, "-"), valueOr(info.Model, "-"))
+		fmt.Fprintf(out, "%2d. %s  %s\n", i+1, valueOr(info.Preview, info.ID), info.CreatedAt.Format("2006-01-02 15:04:05"))
+	}
+}
+
+func printSessionTranscript(out io.Writer, messages []session.Message) {
+	for _, msg := range messages {
+		text := cleanDisplayText(strings.TrimSpace(msg.Content))
+		if text == "" {
+			continue
+		}
+		switch msg.Role {
+		case "user":
+			fmt.Fprintf(out, "> %s\n", text)
+		case "assistant":
+			fmt.Fprintln(out, text)
+		case "system":
+			if msg.Kind == "summary" {
+				fmt.Fprintf(out, "[summary] %s\n", text)
+			}
+		}
+		fmt.Fprintln(out)
 	}
 }
 

@@ -90,29 +90,25 @@ Interactive mode uses a minimal stdlib-only terminal UI when attached to a TTY:
 
 - `/help`
 - `/login` (choose `sub` or `api`, then provider)
-- `/model [name]`
-- `/stream [on|off]`
-- `/tools [off|errors|on]`
-- `/autosave [on|off]`
+- `/model`
+- `/stream`
+- `/tools`
+- `/autosave`
 - `/new`
-- `/sessions [filter]`
-- `/save [name]`
-- `/load [name|path|index]`
+- `/save`
+- `/session`
 - `/compact`
 - `/clear`
 - `/exit`
 
-Interactive mode autosaves the rolling session by default after successful turns and saves on exit. Use `/save [name]` when you want a named snapshot. Use `/compact` when you want to manually collapse the current session into a summary.
+Interactive mode autosaves the rolling session by default after successful turns and saves on exit. `/save` asks for an optional name. Use `/compact` when you want to manually collapse the current session into a summary.
 
 ### Session examples
 
 ```text
-/sessions
-/sessions deepseek
-/load
-/load 1
-/save refactor-snapshot
-/autosave off
+/session
+/save
+/autosave
 ```
 
 ## Provider login

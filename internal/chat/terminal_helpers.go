@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type clipboard struct {
@@ -186,10 +187,32 @@ func ansiEscapeFinal(r rune) bool {
 	return r >= '@' && r <= '~' && r != '['
 }
 
+func readByteWithTimeout(f *os.File, d time.Duration) (byte, bool, error) {
+	type deadlineSetter interface{ SetReadDeadline(time.Time) error }
+	ds, ok := any(f).(deadlineSetter)
+	if !ok {
+		b, err := readByte(f)
+		return b, true, err
+	}
+	_ = ds.SetReadDeadline(time.Now().Add(d))
+	b, err := readByte(f)
+	_ = ds.SetReadDeadline(time.Time{})
+	if err != nil {
+		if os.IsTimeout(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return b, true, nil
+}
+
 func (ui *terminalUI) readEscapeSequence() (kind, text string, handled bool, err error) {
-	first, err := readByte(ui.in)
+	first, ok, err := readByteWithTimeout(ui.in, 120*time.Millisecond)
 	if err != nil {
 		return "", "", false, err
+	}
+	if !ok {
+		return "esc", "", true, nil
 	}
 	if first != '[' {
 		return "", "", false, nil

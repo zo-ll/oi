@@ -21,25 +21,28 @@ func mustLoadAuth() *config.Auth {
 func loginAndSwitchChatProvider(deps Dependencies, cfg *config.Config, sel config.Selection, rt *agent.Runtime, reader *bufio.Reader, out io.Writer, args []string) (*agent.Runtime, config.Selection, error) {
 	kind, loginArgs := stripLoginKindArg(args)
 	providerName := loginArgsProvider(loginArgs)
+	picker, hasPicker := out.(pickerUI)
 	if kind == "" && providerName == "" {
 		var err error
-		kind, err = promptLoginKind(reader, out)
+		if hasPicker {
+			kind, err = pickerLoginKind(picker)
+		} else {
+			kind, err = promptLoginKind(reader, out)
+		}
 		if err != nil {
 			return nil, sel, err
 		}
 		if kind == "" {
-			fmt.Fprintln(out, "login cancelled")
 			return rt, sel, nil
 		}
 	}
 	if kind != "" {
 		if providerName == "" {
-			choice, err := promptLoginProviderChoice(reader, out, cfg, kind, sel.Provider)
+			choice, err := pickLoginProviderChoice(reader, out, cfg, kind, sel.Provider)
 			if err != nil {
 				return nil, sel, err
 			}
 			if choice == "" {
-				fmt.Fprintln(out, "login cancelled")
 				return rt, sel, nil
 			}
 			providerName = choice
@@ -79,6 +82,13 @@ func promptLoginKind(reader *bufio.Reader, out io.Writer) (string, error) {
 	return normalizeLoginKind(choice)
 }
 
+func pickLoginProviderChoice(reader *bufio.Reader, out io.Writer, cfg *config.Config, kind, current string) (string, error) {
+	if picker, ok := out.(pickerUI); ok {
+		return pickerLoginProviderChoice(picker, cfg, kind)
+	}
+	return promptLoginProviderChoice(reader, out, cfg, kind, current)
+}
+
 func promptLoginProviderChoice(reader *bufio.Reader, out io.Writer, cfg *config.Config, kind, current string) (string, error) {
 	names := loginProviderNames(cfg, kind)
 	if len(names) == 0 {
@@ -92,13 +102,7 @@ func promptLoginProviderChoice(reader *bufio.Reader, out io.Writer, cfg *config.
 		if providerForDisplaySelection(kind, name) == current {
 			marker = "*"
 		}
-		label := canonicalProviderName(name)
-		providerName := providerForDisplaySelection(kind, name)
-		if strings.TrimSpace(auth.Keys[providerName]) != "" {
-			label += " [configured]"
-		} else if _, ok := auth.OAuth[providerName]; ok {
-			label += " [configured]"
-		}
+		label := loginProviderLabel(auth, kind, name)
 		fmt.Fprintf(out, "%2d. %s %s\n", i+1, marker, label)
 	}
 	fmt.Fprint(out, "Provider? [number/name, blank=cancel] ")
@@ -111,6 +115,56 @@ func promptLoginProviderChoice(reader *bufio.Reader, out io.Writer, cfg *config.
 		return "", nil
 	}
 	return resolveProviderChoiceFromNames(names, choice)
+}
+
+func pickerLoginKind(picker pickerUI) (string, error) {
+	selected, ok := picker.overlayPicker("choose login type", []string{
+		"sub  ChatGPT subscription / browser login",
+		"api  Provider API key",
+	})
+	if !ok || strings.TrimSpace(selected) == "" {
+		return "", nil
+	}
+	fields := strings.Fields(selected)
+	if len(fields) == 0 {
+		return "", nil
+	}
+	return normalizeLoginKind(fields[0])
+}
+
+func pickerLoginProviderChoice(picker pickerUI, cfg *config.Config, kind string) (string, error) {
+	names := loginProviderNames(cfg, kind)
+	if len(names) == 0 {
+		return "", nil
+	}
+	auth := mustLoadAuth()
+	labels := make([]string, 0, len(names))
+	labelToName := make(map[string]string, len(names))
+	for _, name := range names {
+		label := loginProviderLabel(auth, kind, name)
+		labels = append(labels, label)
+		labelToName[label] = name
+	}
+	selected, ok := picker.overlayPicker("choose provider", labels)
+	if !ok || strings.TrimSpace(selected) == "" {
+		return "", nil
+	}
+	if name := labelToName[selected]; name != "" {
+		return name, nil
+	}
+	return canonicalProviderName(selected), nil
+}
+
+func loginProviderLabel(auth *config.Auth, kind, name string) string {
+	label := canonicalProviderName(name)
+	providerName := providerForDisplaySelection(kind, name)
+	if strings.TrimSpace(auth.Keys[providerName]) != "" {
+		return label + " [configured]"
+	}
+	if _, ok := auth.OAuth[providerName]; ok {
+		return label + " [configured]"
+	}
+	return label
 }
 
 func normalizeLoginKind(choice string) (string, error) {

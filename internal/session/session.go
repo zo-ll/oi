@@ -95,7 +95,9 @@ type Info struct {
 	ID        string    `json:"id"`
 	Provider  string    `json:"provider,omitempty"`
 	Model     string    `json:"model,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Preview   string    `json:"preview,omitempty"`
 	Path      string    `json:"path"`
 }
 
@@ -122,7 +124,9 @@ func List(dir string) ([]Info, error) {
 			ID:        s.ID,
 			Provider:  s.Provider,
 			Model:     s.Model,
+			CreatedAt: s.CreatedAt,
 			UpdatedAt: s.UpdatedAt,
+			Preview:   sessionPreview(s),
 			Path:      path,
 		})
 	}
@@ -130,4 +134,29 @@ func List(dir string) ([]Info, error) {
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
 	return items, nil
+}
+
+func sessionPreview(s *Session) string {
+	if s == nil {
+		return ""
+	}
+	for _, msg := range s.Messages {
+		if msg.Role != "user" {
+			continue
+		}
+		text := strings.TrimSpace(msg.Content)
+		if text == "" {
+			continue
+		}
+		text = strings.ReplaceAll(text, "\n", " ")
+		text = strings.Join(strings.Fields(text), " ")
+		if len(text) > 48 {
+			text = text[:45] + "..."
+		}
+		return text
+	}
+	if s.ID != "" {
+		return s.ID
+	}
+	return "(empty)"
 }

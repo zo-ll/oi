@@ -19,6 +19,10 @@ type pickerUI interface {
 	overlayPicker(title string, items []string) (string, bool)
 }
 
+type inputUI interface {
+	overlayInput(title, prompt, initial string) (string, bool)
+}
+
 const maxCompletionMatchesShown = 7
 
 func (ui *terminalUI) setWorkspaceRoot(root string) {
@@ -140,7 +144,7 @@ func (ui *terminalUI) completionMatchesForText(current string) ([]string, error)
 
 var chatCommandList = []string{
 	"/help", "/login", "/model", "/stream", "/tools", "/autosave",
-	"/new", "/sessions", "/save", "/load", "/compact", "/clear", "/exit",
+	"/new", "/save", "/session", "/compact", "/clear", "/exit",
 }
 
 func chatCommands() []string {
@@ -384,6 +388,104 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 			}
 		default:
 			ui.bell()
+		}
+	}
+}
+
+func (ui *terminalUI) overlayInput(title, prompt, initial string) (string, bool) {
+	if ui == nil {
+		return "", false
+	}
+	buf := []rune(initial)
+	overlayLines := 0
+	draw := func(first bool) {
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		ui.refreshSize()
+		ui.clearStatusLocked()
+		if !first {
+			if overlayLines > 0 {
+				for i := 0; i < overlayLines; i++ {
+					_, _ = io.WriteString(ui.out, "\x1b[1A")
+				}
+			}
+		} else {
+			ui.clearPromptLocked()
+		}
+		count := 0
+		writeLine := func(text string) {
+			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
+			_, _ = io.WriteString(ui.out, ui.Styled("dim", text))
+			_, _ = io.WriteString(ui.out, "\r\n")
+			count++
+		}
+		header := fmt.Sprintf("%s  enter save  esc cancel", title)
+		for _, line := range wrapLine(header, ui.width) {
+			writeLine(line)
+		}
+		for _, line := range wrapLine(prompt+string(buf), ui.width) {
+			writeLine(line)
+		}
+		overlayLines = count
+	}
+	draw(true)
+	rawWasActive := ui.raw
+	if !rawWasActive {
+		_ = ui.enableRawMode()
+	}
+	defer func() {
+		if !rawWasActive {
+			_ = ui.disableRawMode()
+		}
+		ui.mu.Lock()
+		defer ui.mu.Unlock()
+		if overlayLines <= 0 {
+			return
+		}
+		_, _ = io.WriteString(ui.out, "\r")
+		for i := 0; i < overlayLines-1; i++ {
+			_, _ = io.WriteString(ui.out, "\x1b[1A")
+		}
+		for i := 0; i < overlayLines; i++ {
+			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
+			if i < overlayLines-1 {
+				_, _ = io.WriteString(ui.out, "\x1b[1B")
+			}
+		}
+		for i := 0; i < overlayLines-1; i++ {
+			_, _ = io.WriteString(ui.out, "\x1b[1A")
+		}
+		_, _ = io.WriteString(ui.out, "\r")
+		ui.outputColumn = 0
+	}()
+	for {
+		b, err := readByte(ui.in)
+		if err != nil {
+			return "", false
+		}
+		switch b {
+		case 3:
+			return "", false
+		case 27:
+			kind, _, handled, _ := ui.readEscapeSequence()
+			if !handled || kind == "esc" {
+				return "", false
+			}
+			ui.bell()
+		case '\r', '\n':
+			return strings.TrimSpace(string(buf)), true
+		case 8, 127:
+			if len(buf) > 0 {
+				buf = buf[:len(buf)-1]
+				draw(false)
+			} else {
+				ui.bell()
+			}
+		default:
+			if b >= 32 {
+				buf = append(buf, rune(b))
+				draw(false)
+			}
 		}
 	}
 }
