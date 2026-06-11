@@ -37,6 +37,8 @@ var openCodeMessagesModels = map[string]Model{
 	"qwen3.6-plus": {ID: "qwen3.6-plus", Name: "Qwen 3.6 Plus"},
 }
 
+const openCodeMessagesDefaultMaxTokens = 8192
+
 type OpenCodeProvider struct {
 	openai   *OpenAIProvider
 	messages *OpenCodeMessagesProvider
@@ -80,7 +82,6 @@ func (p *OpenCodeProvider) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	supported := supportedOpenCodeModels()
 	var out []Model
-	seen := make(map[string]bool)
 	for _, model := range models {
 		meta, ok := supported[canonicalOpenCodeModelID(model.ID)]
 		if !ok {
@@ -91,13 +92,6 @@ func (p *OpenCodeProvider) ListModels(ctx context.Context) ([]Model, error) {
 		}
 		if model.ContextWindow > 0 {
 			meta.ContextWindow = model.ContextWindow
-		}
-		out = append(out, meta)
-		seen[meta.ID] = true
-	}
-	for id, meta := range supported {
-		if seen[id] {
-			continue
 		}
 		out = append(out, meta)
 	}
@@ -248,9 +242,10 @@ func (p *OpenCodeMessagesProvider) buildRequest(req Request, stream bool) (map[s
 		return nil, err
 	}
 	body := map[string]any{
-		"model":    model,
-		"messages": messages,
-		"stream":   stream,
+		"model":      model,
+		"messages":   messages,
+		"stream":     stream,
+		"max_tokens": openCodeMessagesDefaultMaxTokens,
 	}
 	if system != "" {
 		body["system"] = system
@@ -409,6 +404,7 @@ func (p *OpenCodeMessagesProvider) newRequest(ctx context.Context, method, path 
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if p.apiKey != "" {
+		req.Header.Set("x-api-key", p.apiKey)
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 	return req, nil

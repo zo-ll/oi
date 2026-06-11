@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -204,7 +205,7 @@ func TestOpenAIProviderChatStreamWithToolCall(t *testing.T) {
 	}
 }
 
-func TestOpenCodeProviderListModelsIncludesSupportedFamilies(t *testing.T) {
+func TestOpenCodeProviderListModelsOnlyIncludesAdvertisedSupportedModels(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("path = %s", r.URL.Path)
@@ -233,6 +234,9 @@ func TestOpenCodeProviderListModelsIncludesSupportedFamilies(t *testing.T) {
 			t.Fatalf("missing %q in %+v", want, models)
 		}
 	}
+	if seen["deepseek-v4-flash"] {
+		t.Fatalf("unexpected fallback-only model in %+v", models)
+	}
 }
 
 func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
@@ -241,7 +245,31 @@ func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/messages":
 			messagesHits++
-			fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from messages"}]}`)
+			if got := r.Header.Get("x-api-key"); got != "key" {
+				t.Fatalf("x-api-key = %q", got)
+			}
+			var req struct {
+				Model     string `json:"model"`
+				MaxTokens int    `json:"max_tokens"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode messages request: %v", err)
+			}
+			if req.MaxTokens != openCodeMessagesDefaultMaxTokens {
+				t.Fatalf("max_tokens = %d", req.MaxTokens)
+			}
+			switch req.Model {
+			case "minimax-m3":
+				fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from minimax"}]}`)
+			case "qwen3.6-plus":
+				fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from qwen 3.6"}]}`)
+			case "qwen3.7-plus":
+				fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from qwen plus"}]}`)
+			case "qwen3.7-max":
+				fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from qwen max"}]}`)
+			default:
+				t.Fatalf("messages model = %q", req.Model)
+			}
 		case "/v1/chat/completions":
 			chatHits++
 			fmt.Fprint(w, `{"choices":[{"message":{"content":"hello from chat"}}]}`)
@@ -259,10 +287,31 @@ func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Content != "hello from messages" {
+	if resp.Content != "hello from minimax" {
 		t.Fatalf("content = %q", resp.Content)
 	}
 	if messagesHits != 1 || chatHits != 0 {
+		t.Fatalf("messagesHits=%d chatHits=%d", messagesHits, chatHits)
+	}
+
+	for _, tc := range []struct {
+		model string
+		want  string
+	}{
+		{model: "qwen3.6-plus", want: "hello from qwen 3.6"},
+		{model: "qwen3.7-plus", want: "hello from qwen plus"},
+		{model: "qwen3.7-max", want: "hello from qwen max"},
+	} {
+		p.SetModel(tc.model)
+		resp, err = p.Chat(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Content != tc.want {
+			t.Fatalf("model %s content = %q", tc.model, resp.Content)
+		}
+	}
+	if messagesHits != 4 || chatHits != 0 {
 		t.Fatalf("messagesHits=%d chatHits=%d", messagesHits, chatHits)
 	}
 
@@ -274,7 +323,7 @@ func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
 	if resp.Content != "hello from chat" {
 		t.Fatalf("content = %q", resp.Content)
 	}
-	if messagesHits != 1 || chatHits != 1 {
+	if messagesHits != 4 || chatHits != 1 {
 		t.Fatalf("messagesHits=%d chatHits=%d", messagesHits, chatHits)
 	}
 }
@@ -283,6 +332,9 @@ func TestOpenCodeMessagesProviderChatParsesToolCallsAndReasoning(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
 			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("x-api-key"); got != "key" {
+			t.Fatalf("x-api-key = %q", got)
 		}
 		fmt.Fprint(w, `{
 			"content": [

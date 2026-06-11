@@ -1,7 +1,9 @@
 package chat
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,6 +32,36 @@ func newChatOpenAITestServer(t *testing.T, models []string, reply string) *httpt
 		case "/v1/chat/completions":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"choices":[{"message":{"content":%q}}],"usage":{"prompt_tokens":10,"completion_tokens":3}}`, reply)
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+}
+
+func newChatOpenCodeTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+				t.Fatalf("models authorization = %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"data":[{"id":"deepseek-v4-flash"},{"id":"minimax-m3"}]}`)
+		case "/v1/chat/completions":
+			if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+				t.Fatalf("chat authorization = %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"hello from deepseek"}}],"usage":{"prompt_tokens":10,"completion_tokens":3}}`)
+		case "/v1/messages":
+			if got := r.Header.Get("x-api-key"); got != "secret" {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprint(w, `{"type":"error","error":{"type":"AuthError","message":"Missing API key."}}`)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from minimax"}],"usage":{"input_tokens":11,"output_tokens":4}}`)
 		default:
 			t.Fatalf("path = %s", r.URL.Path)
 		}
@@ -110,6 +142,114 @@ func TestChatRunLineModeModelSwitchEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg2.SelectedProvider != "beta" || cfg2.SelectedModel != "beta-model" {
+		t.Fatalf("cfg = %+v", cfg2)
+	}
+}
+
+func TestChatRunLineModeLoginThenSwitchAcrossOpenCodeBackends(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	ts := newChatOpenCodeTestServer(t)
+	defer ts.Close()
+
+	cfg := config.Default()
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := Dependencies{Login: func(args []string, in io.Reader, out io.Writer) error {
+		reader := bufio.NewReader(in)
+		key, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return err
+		}
+		key = strings.TrimSpace(key)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		if cfg.Providers == nil {
+			cfg.Providers = make(map[string]config.ProviderConfig)
+		}
+		cfg.Providers["opencode-go"] = config.ProviderConfig{BaseURL: ts.URL + "/v1"}
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+		return config.SaveAuth(&config.Auth{Keys: map[string]string{"opencode-go": key}})
+	}}
+
+	input := strings.NewReader("/login\napi\nopencode-go\nsecret\n/stream\n2\n/model\ndeepseek-v4-flash\nhi\n/model\nminimax-m3\nhi again\n/exit\n")
+	var out strings.Builder
+	if err := Run(nil, input, &out, deps); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		"login saved; use /model",
+		"model set to deepseek-v4-flash",
+		"hello from deepseek",
+		"model set to minimax-m3",
+		"hello from minimax",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in output:\n%s", want, text)
+		}
+	}
+	cfg2, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.SelectedProvider != "opencode-go" || cfg2.SelectedModel != "minimax-m3" {
+		t.Fatalf("cfg = %+v", cfg2)
+	}
+}
+
+func TestChatRunLineModeRejectsUnadvertisedOpenCodeModel(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	ts := newChatOpenCodeTestServer(t)
+	defer ts.Close()
+
+	cfg := config.Default()
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := Dependencies{Login: func(args []string, in io.Reader, out io.Writer) error {
+		reader := bufio.NewReader(in)
+		key, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return err
+		}
+		key = strings.TrimSpace(key)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		if cfg.Providers == nil {
+			cfg.Providers = make(map[string]config.ProviderConfig)
+		}
+		cfg.Providers["opencode-go"] = config.ProviderConfig{BaseURL: ts.URL + "/v1"}
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+		return config.SaveAuth(&config.Auth{Keys: map[string]string{"opencode-go": key}})
+	}}
+
+	input := strings.NewReader("/login\napi\nopencode-go\nsecret\n/model\ngrok-build-0.1\n/exit\n")
+	var out strings.Builder
+	if err := Run(nil, input, &out, deps); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "error: ready model not found: grok-build-0.1") {
+		t.Fatalf("missing unavailable-model error in output:\n%s", text)
+	}
+	cfg2, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.SelectedModel == "grok-build-0.1" {
 		t.Fatalf("cfg = %+v", cfg2)
 	}
 }
