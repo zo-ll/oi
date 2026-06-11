@@ -136,6 +136,7 @@ oi login opencode-go
 - `oi login openai-codex` uses ChatGPT Plus/Pro browser OAuth against the Codex backend (`https://chatgpt.com/backend-api`). This is the ChatGPT subscription path, like browser-based login in coding tools.
 - `oi` does not keep a default model. The current selection is stored as `selected_model`, and the provider is inferred from that model choice.
 - `oi login openai` uses the standard OpenAI API endpoint (`https://api.openai.com/v1`) and requires a separate API key from `platform.openai.com`.
+- `oi login opencode-go` uses OpenCode Go (`https://opencode.ai/zen/go/v1`). oi supports the current Go model families exposed through both `/chat/completions` and `/messages`.
 
 If you have a ChatGPT Plus/Pro subscription and want browser login, use `openai-codex` / `chatgpt`, not `openai`.
 

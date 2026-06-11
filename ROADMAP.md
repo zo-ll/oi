@@ -28,6 +28,7 @@ Implemented and working in the new Go codebase:
   - streaming SSE parser
   - tool-call normalization
   - model listing for API providers
+  - OpenCode Go wired through `opencode-go` with current `/zen/go/v1` profile and model-family dispatch for both `/chat/completions` and `/messages`
   - ChatGPT subscription/browser OAuth provider via `openai-codex`
 - Workspace/policy:
   - root detection
@@ -59,7 +60,7 @@ Implemented and working in the new Go codebase:
   - stdlib TUI with wrapped input/output, clipboard paste/copy, and line-mode fallback
   - streaming output
   - context-window header and per-turn context-usage display when available
-  - `/help`, `/login`, `/model`, `/stream`, `/tools`, `/autosave`, `/new`, `/sessions`, `/save`, `/load`, `/compact`, `/clear`, `/exit`
+  - `/help`, `/login`, `/model`, `/stream`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/exit`
   - `/login` flow: choose `sub` or `api`, then provider
   - `/model` interactive numbered picker
   - provider switching implicit through `/model`
