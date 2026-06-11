@@ -253,6 +253,32 @@ func TestFormatContextUsage(t *testing.T) {
 	}
 }
 
+func TestOverlayPickerHandlesShortItemLists(t *testing.T) {
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inR.Close()
+	defer inW.Close()
+	out, err := os.CreateTemp(t.TempDir(), "picker-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: inR, out: out, width: 80}
+	go func() {
+		_, _ = inW.Write([]byte{27})
+		_ = inW.Close()
+	}()
+	selected, ok := ui.overlayPicker("choose login type", []string{
+		"sub  ChatGPT subscription / browser login",
+		"api  Provider API key",
+	})
+	if ok || selected != "" {
+		t.Fatalf("selected=%q ok=%v", selected, ok)
+	}
+}
+
 func TestSelectedModelStartupNotice(t *testing.T) {
 	p := &fakeChatProvider{models: []provider.Model{{ID: "m1"}}}
 	if got := selectedModelStartupNotice(p, "m1"); got != "" {

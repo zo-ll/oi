@@ -247,7 +247,7 @@ func pickerHint(matches []string, index int) string {
 	}
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%d matches", len(matches)))
-	b.WriteString("  \u2191\u2193 nav  enter pick\n")
+	b.WriteString("  up/down nav  enter pick\n")
 	for _, match := range shown {
 		marker := "  "
 		if strings.EqualFold(match, matches[index]) {
@@ -292,7 +292,11 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 		if start < 0 {
 			start = 0
 		}
-		shown := items[start : start+maxCompletionMatchesShown]
+		end := start + maxCompletionMatchesShown
+		if end > len(items) {
+			end = len(items)
+		}
+		shown := items[start:end]
 		count := 0
 		writeLine := func(text string) {
 			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
@@ -300,7 +304,7 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 			_, _ = io.WriteString(ui.out, "\r\n")
 			count++
 		}
-		header := fmt.Sprintf("%s  \u2191\u2193 nav  enter pick  esc cancel", title)
+		header := fmt.Sprintf("%s  up/down nav  enter pick  esc cancel", title)
 		for _, line := range wrapLine(header, ui.width) {
 			writeLine(line)
 		}

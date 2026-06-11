@@ -31,6 +31,14 @@ func TestKnownProviderProfile(t *testing.T) {
 	if got != want {
 		t.Fatalf("profile = %+v want %+v", got, want)
 	}
+	got, ok = knownProviderProfile("opencode-go")
+	if !ok {
+		t.Fatal("expected opencode-go profile")
+	}
+	want = config.ProviderConfig{BaseURL: "https://opencode.ai/zen/go/v1", APIKeyEnv: "OPENCODE_API_KEY"}
+	if got != want {
+		t.Fatalf("profile = %+v want %+v", got, want)
+	}
 }
 
 func TestCanonicalProviderName(t *testing.T) {

@@ -40,7 +40,13 @@ func loadChatRuntime(args []string, root string, in io.Reader, out io.Writer) (*
 	return state, startupNotice, nil
 }
 
-func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps Dependencies) error {
+func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps Dependencies) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			_ = ui.disableRawMode()
+			err = fmt.Errorf("tui panic: %v", r)
+		}
+	}()
 	root, err := workspace.DetectRoot("")
 	if err != nil {
 		return err

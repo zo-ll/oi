@@ -203,3 +203,183 @@ func TestOpenAIProviderChatStreamWithToolCall(t *testing.T) {
 		t.Fatalf("call = %+v", calls[0])
 	}
 }
+
+func TestOpenCodeProviderListModelsIncludesSupportedFamilies(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"qwen3.7-max"},{"id":"minimax-m2.7"},{"id":"grok-build-0.1"},{"id":"unknown-model"}]}`)
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenCode("opencode-go", ts.URL, "key", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, model := range models {
+		seen[model.ID] = true
+		if model.ID == "unknown-model" {
+			t.Fatalf("unexpected unsupported model in list: %+v", model)
+		}
+	}
+	for _, want := range []string{"qwen3.7-max", "minimax-m2.7", "grok-build-0.1"} {
+		if !seen[want] {
+			t.Fatalf("missing %q in %+v", want, models)
+		}
+	}
+}
+
+func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
+	var chatHits, messagesHits int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/messages":
+			messagesHits++
+			fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from messages"}]}`)
+		case "/v1/chat/completions":
+			chatHits++
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"hello from chat"}}]}`)
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenCode("opencode-go", ts.URL, "key", "minimax-m3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := p.Chat(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "hello from messages" {
+		t.Fatalf("content = %q", resp.Content)
+	}
+	if messagesHits != 1 || chatHits != 0 {
+		t.Fatalf("messagesHits=%d chatHits=%d", messagesHits, chatHits)
+	}
+
+	p.SetModel("glm-5")
+	resp, err = p.Chat(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "hello from chat" {
+		t.Fatalf("content = %q", resp.Content)
+	}
+	if messagesHits != 1 || chatHits != 1 {
+		t.Fatalf("messagesHits=%d chatHits=%d", messagesHits, chatHits)
+	}
+}
+
+func TestOpenCodeMessagesProviderChatParsesToolCallsAndReasoning(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{
+			"content": [
+				{"type":"thinking","thinking":"need file"},
+				{"type":"tool_use","id":"call_1","name":"read_file","input":{"path":"README.md"}}
+			],
+			"usage": {"input_tokens": 9, "output_tokens": 4}
+		}`)
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenCodeMessages("opencode-go", ts.URL, "key", "minimax-m3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := p.Chat(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Reasoning != "need file" {
+		t.Fatalf("reasoning = %q", resp.Reasoning)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].Name != "read_file" || string(resp.ToolCalls[0].Args) != `{"path":"README.md"}` {
+		t.Fatalf("tool call = %+v", resp.ToolCalls[0])
+	}
+	if resp.Usage.InputTokens != 9 || resp.Usage.OutputTokens != 4 {
+		t.Fatalf("usage = %+v", resp.Usage)
+	}
+}
+
+func TestOpenCodeMessagesProviderChatStream(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_start\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_start\",\"usage\":{\"input_tokens\":12}}\n\n")
+		fmt.Fprint(w, "event: content_block_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"plan\"}}\n\n")
+		fmt.Fprint(w, "event: content_block_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello \"}}\n\n")
+		fmt.Fprint(w, "event: content_block_start\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"read_file\"}}\n\n")
+		fmt.Fprint(w, "event: content_block_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}\n\n")
+		fmt.Fprint(w, "event: content_block_stop\n")
+		fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprint(w, "event: message_delta\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3}}\n\n")
+		fmt.Fprint(w, "event: message_stop\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenCodeMessages("opencode-go", ts.URL, "key", "minimax-m3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := p.ChatStream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []string
+	var reasoning []string
+	var calls []ToolCall
+	var usage Usage
+	for ev := range stream {
+		if ev.Err != nil {
+			t.Fatal(ev.Err)
+		}
+		if ev.Delta != "" {
+			deltas = append(deltas, ev.Delta)
+		}
+		if ev.Reasoning != "" {
+			reasoning = append(reasoning, ev.Reasoning)
+		}
+		if ev.ToolCall != nil {
+			calls = append(calls, *ev.ToolCall)
+		}
+		if ev.Usage.InputTokens > 0 || ev.Usage.OutputTokens > 0 {
+			usage = ev.Usage
+		}
+	}
+	if strings.Join(deltas, "") != "hello " {
+		t.Fatalf("deltas = %q", strings.Join(deltas, ""))
+	}
+	if strings.Join(reasoning, "") != "plan" {
+		t.Fatalf("reasoning = %q", strings.Join(reasoning, ""))
+	}
+	if len(calls) != 1 || calls[0].Name != "read_file" || string(calls[0].Args) != `{"path":"README.md"}` {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if usage.InputTokens != 12 || usage.OutputTokens != 3 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
