@@ -109,6 +109,7 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 			return "", err
 		}
 
+		resp.Content, resp.Reasoning = normalizeTaggedOutput(resp.Content, resp.Reasoning)
 		if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 {
 			r.LastUsage = resp.Usage
 		}
@@ -513,6 +514,67 @@ func contentForToolCallMessage(m session.Message, calls []provider.ToolCall) str
 		return ""
 	}
 	return m.Content
+}
+
+type outputSegment struct {
+	Text      string
+	Reasoning bool
+}
+
+func splitTaggedOutput(text string) []outputSegment {
+	var out []outputSegment
+	for len(text) > 0 {
+		start := strings.Index(text, "<think>")
+		if start < 0 {
+			appendOutputSegment(&out, text, false)
+			break
+		}
+		appendOutputSegment(&out, text[:start], false)
+		text = text[start+len("<think>"):]
+		end := strings.Index(text, "</think>")
+		if end < 0 {
+			appendOutputSegment(&out, text, true)
+			break
+		}
+		appendOutputSegment(&out, text[:end], true)
+		text = text[end+len("</think>"):]
+	}
+	return out
+}
+
+func normalizeTaggedOutput(content, reasoning string) (string, string) {
+	segments := splitTaggedOutput(content)
+	if len(segments) == 0 {
+		return strings.TrimSpace(content), strings.TrimSpace(reasoning)
+	}
+	var visible []string
+	var hidden []string
+	if strings.TrimSpace(reasoning) != "" {
+		hidden = append(hidden, strings.TrimSpace(reasoning))
+	}
+	for _, seg := range segments {
+		text := strings.TrimSpace(seg.Text)
+		if text == "" {
+			continue
+		}
+		if seg.Reasoning {
+			hidden = append(hidden, text)
+		} else {
+			visible = append(visible, text)
+		}
+	}
+	return strings.Join(visible, "\n\n"), strings.Join(hidden, "\n\n")
+}
+
+func appendOutputSegment(out *[]outputSegment, text string, reasoning bool) {
+	if text == "" {
+		return
+	}
+	if n := len(*out); n > 0 && (*out)[n-1].Reasoning == reasoning {
+		(*out)[n-1].Text += text
+		return
+	}
+	*out = append(*out, outputSegment{Text: text, Reasoning: reasoning})
 }
 
 func (r *Runtime) systemPrompt() string {

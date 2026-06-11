@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
+	"github.com/zo-ll/oi/internal/session"
 )
 
 type chatState struct {
@@ -55,11 +57,15 @@ func (s *chatState) autosaveSession(out io.Writer, warn func(string)) {
 }
 
 func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
-	formatter := &outputFormatter{}
+	renderer := &taggedStreamRenderer{}
 	resp, runErr := state.rt.RunOnceStream(context.Background(), line, func(delta string) {
-		fmt.Fprint(ui, formatter.Push(delta))
+		for _, seg := range renderer.Push(delta) {
+			writeResponseSegment(ui, seg)
+		}
 	})
-	fmt.Fprint(ui, formatter.Flush())
+	for _, seg := range renderer.Flush() {
+		writeResponseSegment(ui, seg)
+	}
 	fmt.Fprintln(ui)
 	if runErr != nil {
 		ui.notify("error: " + runErr.Error())
@@ -90,11 +96,15 @@ func runNonStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 }
 
 func runStreamingTurnLine(out io.Writer, state *chatState, line string) {
-	formatter := &outputFormatter{}
+	renderer := &taggedStreamRenderer{}
 	_, runErr := state.rt.RunOnceStream(context.Background(), line, func(delta string) {
-		fmt.Fprint(out, formatter.Push(delta))
+		for _, seg := range renderer.Push(delta) {
+			writeResponseSegment(out, seg)
+		}
 	})
-	fmt.Fprint(out, formatter.Flush())
+	for _, seg := range renderer.Flush() {
+		writeResponseSegment(out, seg)
+	}
 	fmt.Fprintln(out)
 	if runErr != nil {
 		fmt.Fprintf(out, "error: %v\n", runErr)
@@ -119,4 +129,110 @@ func runNonStreamingTurnLine(out io.Writer, state *chatState, line string) {
 	}
 	fmt.Fprintln(out)
 	state.autosaveSession(out, func(msg string) { fmt.Fprintln(out, msg) })
+}
+
+type responseSegment struct {
+	text      string
+	reasoning bool
+}
+
+type taggedStreamRenderer struct {
+	pending string
+	inThink bool
+	normal  outputFormatter
+	thought outputFormatter
+}
+
+func (r *taggedStreamRenderer) Push(delta string) []responseSegment {
+	r.pending += delta
+	var out []responseSegment
+	for {
+		if r.inThink {
+			idx := strings.Index(r.pending, "</think>")
+			if idx < 0 {
+				keep := partialTagSuffix(r.pending, "</think>")
+				appendResponseSegment(&out, r.thought.Push(r.pending[:len(r.pending)-keep]), true)
+				r.pending = r.pending[len(r.pending)-keep:]
+				return out
+			}
+			appendResponseSegment(&out, r.thought.Push(r.pending[:idx]), true)
+			appendResponseSegment(&out, r.thought.Flush(), true)
+			r.pending = r.pending[idx+len("</think>"):]
+			r.inThink = false
+			continue
+		}
+		idx := strings.Index(r.pending, "<think>")
+		if idx < 0 {
+			keep := partialTagSuffix(r.pending, "<think>")
+			appendResponseSegment(&out, r.normal.Push(r.pending[:len(r.pending)-keep]), false)
+			r.pending = r.pending[len(r.pending)-keep:]
+			return out
+		}
+		appendResponseSegment(&out, r.normal.Push(r.pending[:idx]), false)
+		appendResponseSegment(&out, r.normal.Flush(), false)
+		r.pending = r.pending[idx+len("<think>"):]
+		r.inThink = true
+	}
+}
+
+func (r *taggedStreamRenderer) Flush() []responseSegment {
+	var out []responseSegment
+	if r.pending != "" {
+		if r.inThink {
+			appendResponseSegment(&out, r.thought.Push(r.pending), true)
+		} else {
+			appendResponseSegment(&out, r.normal.Push(r.pending), false)
+		}
+		r.pending = ""
+	}
+	appendResponseSegment(&out, r.normal.Flush(), false)
+	appendResponseSegment(&out, r.thought.Flush(), true)
+	return out
+}
+
+func partialTagSuffix(s, tag string) int {
+	max := len(tag) - 1
+	if max > len(s) {
+		max = len(s)
+	}
+	for n := max; n > 0; n-- {
+		if strings.HasSuffix(s, tag[:n]) {
+			return n
+		}
+	}
+	return 0
+}
+
+func appendResponseSegment(out *[]responseSegment, text string, reasoning bool) {
+	if text == "" {
+		return
+	}
+	if n := len(*out); n > 0 && (*out)[n-1].reasoning == reasoning {
+		(*out)[n-1].text += text
+		return
+	}
+	*out = append(*out, responseSegment{text: text, reasoning: reasoning})
+}
+
+func writeResponseSegment(out io.Writer, seg responseSegment) {
+	if seg.text == "" {
+		return
+	}
+	if seg.reasoning {
+		fmt.Fprint(out, styleText(out, "dim", seg.text))
+		return
+	}
+	fmt.Fprint(out, seg.text)
+}
+
+func lastAssistantMessage(rt *agent.Runtime) *session.Message {
+	if rt == nil || rt.Session == nil {
+		return nil
+	}
+	for i := len(rt.Session.Messages) - 1; i >= 0; i-- {
+		if rt.Session.Messages[i].Role == "assistant" {
+			return &rt.Session.Messages[i]
+		}
+	}
+	return nil
 }
