@@ -1,6 +1,6 @@
 # oi roadmap
 
-This file tracks the current Go rebuild. The original compile-only rebuild plan has mostly been completed; the project is now in stabilization/hardening with a larger feature backlog migrated from `oi-old` issues.
+This file tracks the current implementation roadmap. The original compile-only rebuild plan has mostly been completed; the project is now in stabilization/hardening with a larger feature backlog migrated from `oi-old` issues.
 
 ## Current status — 2026-06-02
 

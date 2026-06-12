@@ -2,14 +2,14 @@
 
 ## Goal
 
-`oi` is a tiny Go agent runtime with:
+`oi` is a tiny agent runtime, implemented in Go, with:
 - OpenAI-compatible providers
 - local tool execution
 - stdio RPC for Telegram/bot integration
 - zero external dependencies
 - standard library only
 
-It should be minimal in code size, but strong in architecture, safety, and functionality.
+It should be minimal in code size, but strong in architecture, safety, and functionality. Go is an implementation choice here: the product goal is a small protocol-first agent runtime, not a Go-only ecosystem.
 
 ---
 
