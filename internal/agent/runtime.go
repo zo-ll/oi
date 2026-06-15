@@ -591,7 +591,8 @@ Rules:
 - Never invent file contents or command results.
 - When editing, make the smallest reasonable change.
 - Prefer plain text over markdown unless the user asks for markdown.
-- Return normal UTF-8 text once the task is complete.`
+- Return normal UTF-8 text once the task is complete.
+- End every response with a complete sentence; do not leave dangling punctuation.`
 }
 
 func stringsTrim(s string) string {
