@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -90,30 +91,84 @@ type turnResult struct {
 	err  error
 }
 
-func runAbortableTUI(ui *terminalUI, run func(context.Context) (string, error)) (string, error) {
+func runAbortableTUI(ui *terminalUI, rt *agent.Runtime, run func(context.Context) (string, error)) (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	var mu sync.Mutex
+	active := false
+	aborted := false
+	setActive := func(next bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if active == next {
+			return
+		}
+		active = next
+		_ = setTerminalNonblock(ui.in, next)
+	}
+	isActive := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return active
+	}
+	markAbort := func() {
+		mu.Lock()
+		already := aborted
+		aborted = true
+		mu.Unlock()
+		if !already {
+			cancel()
+			ui.notify("aborting...")
+		}
+	}
+	wasAborted := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return aborted
+	}
+
+	var prevStart, prevStop func()
+	if rt != nil {
+		prevStart = rt.OnModelStart
+		prevStop = rt.OnModelStop
+		rt.OnModelStart = func() {
+			setActive(true)
+			if prevStart != nil {
+				prevStart()
+			}
+		}
+		rt.OnModelStop = func() {
+			setActive(false)
+			if prevStop != nil {
+				prevStop()
+			}
+		}
+		defer func() {
+			rt.OnModelStart = prevStart
+			rt.OnModelStop = prevStop
+		}()
+	}
+	defer setActive(false)
+
 	ch := make(chan turnResult, 1)
 	go func() {
 		resp, err := run(ctx)
 		ch <- turnResult{resp: resp, err: err}
 	}()
-	if err := setTerminalNonblock(ui.in, true); err != nil {
-		res := <-ch
-		return res.resp, res.err
-	}
-	defer func() { _ = setTerminalNonblock(ui.in, false) }()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	aborted := false
 	for {
 		select {
 		case res := <-ch:
-			if aborted {
+			if wasAborted() {
 				return res.resp, fmt.Errorf("aborted")
 			}
 			return res.resp, res.err
 		case <-ticker.C:
+			if !isActive() {
+				continue
+			}
 			b, err := readByte(ui.in)
 			if err != nil {
 				if isWouldBlock(err) {
@@ -122,9 +177,7 @@ func runAbortableTUI(ui *terminalUI, run func(context.Context) (string, error)) 
 				continue
 			}
 			if b == 27 || b == 3 {
-				aborted = true
-				cancel()
-				ui.notify("aborting...")
+				markAbort()
 			}
 		}
 	}
@@ -143,7 +196,7 @@ func isWouldBlock(err error) bool {
 
 func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 	renderer := &taggedStreamRenderer{}
-	resp, runErr := runAbortableTUI(ui, func(ctx context.Context) (string, error) {
+	resp, runErr := runAbortableTUI(ui, state.rt, func(ctx context.Context) (string, error) {
 		return state.rt.RunOnceStream(ctx, line, func(delta string) {
 			for _, seg := range renderer.Push(delta) {
 				writeResponseSegment(ui, seg)
@@ -164,7 +217,7 @@ func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 }
 
 func runNonStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
-	resp, runErr := runAbortableTUI(ui, func(ctx context.Context) (string, error) {
+	resp, runErr := runAbortableTUI(ui, state.rt, func(ctx context.Context) (string, error) {
 		return state.rt.RunOnce(ctx, line)
 	})
 	if runErr != nil {

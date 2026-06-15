@@ -91,18 +91,6 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), s
 		history := r.providerHistory(retrievalContext)
 		r.logEvent("provider_request", map[string]any{"step": step + 1, "streaming": streaming, "message_count": len(history)})
 		deltaForward := onDelta
-		if streaming && onDelta != nil {
-			stopped := false
-			deltaForward = func(delta string) {
-				if !stopped && stringsTrim(delta) != "" {
-					stopped = true
-					if r.OnModelStop != nil {
-						r.OnModelStop()
-					}
-				}
-				onDelta(delta)
-			}
-		}
 		if r.OnModelStart != nil {
 			r.OnModelStart()
 		}
