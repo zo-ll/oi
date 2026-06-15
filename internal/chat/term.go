@@ -365,6 +365,17 @@ func (ui *terminalUI) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (ui *terminalUI) writeResponseSegment(seg responseSegment) {
+	if seg.text == "" {
+		return
+	}
+	if seg.reasoning {
+		ui.writeWrapped(ui.Styled("dim", seg.text))
+		return
+	}
+	ui.writeWrapped(seg.text)
+}
+
 func (ui *terminalUI) writeWrapped(s string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()

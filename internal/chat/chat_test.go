@@ -583,6 +583,86 @@ func TestTerminalWriteWrappedDoesNotSplitLongWords(t *testing.T) {
 	}
 }
 
+func TestTerminalWriteWrappedJoinsSplitStreamingWord(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 80}
+	ui.writeWrapped("feed")
+	ui.writeWrapped("back ")
+	ui.writeWrapped("works\n")
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "feedback works\r\n" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestTerminalWriteWrappedStreamingWordBoundary(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 10}
+	for _, chunk := range []string{"alpha", " beta", " gam", "ma\n"} {
+		ui.writeWrapped(chunk)
+	}
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "alpha beta\r\ngamma\r\n" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestTaggedStreamRendererSplitWord(t *testing.T) {
+	r := &taggedStreamRenderer{}
+	var b strings.Builder
+	for _, chunk := range []string{"feed", "back "} {
+		for _, seg := range r.Push(chunk) {
+			b.WriteString(seg.text)
+		}
+	}
+	for _, seg := range r.Flush() {
+		b.WriteString(seg.text)
+	}
+	if got := b.String(); got != "feedback " {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestTerminalWriteWrappedExactWidthLines(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 5}
+	ui.writeWrapped("alpha beta\n")
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "alpha\r\nbeta\r\n" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestWrapLinePrefersWordBoundaries(t *testing.T) {
 	lines := wrapLine("alpha beta gamma", 7)
 	if len(lines) != 3 {
