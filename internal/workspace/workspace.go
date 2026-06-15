@@ -115,7 +115,7 @@ func IsReadOnlyCommand(cmd string) bool {
 			}
 		}
 		switch name {
-		case "awk", "cat", "cut", "diff", "du", "env", "file", "find", "git", "go", "grep", "head", "ls", "pwd", "rg", "sed", "sort", "stat", "tail", "tree", "uname", "wc", "which":
+		case "awk", "cat", "cut", "diff", "du", "echo", "env", "file", "find", "git", "go", "grep", "head", "ls", "pwd", "rg", "sed", "sort", "stat", "tail", "tree", "uname", "wc", "which":
 		default:
 			return false
 		}

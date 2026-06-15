@@ -22,6 +22,7 @@ func TestIsReadOnlyCommand(t *testing.T) {
 		`find . -name "*.go" | xargs wc -l | tail -1`,
 		`go test ./... 2>&1 | tail -40`,
 		`git status --short`,
+		`cat go.mod && echo "---" && ls cmd/ internal/`,
 	} {
 		if !IsReadOnlyCommand(cmd) {
 			t.Fatalf("expected read-only: %s", cmd)
