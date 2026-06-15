@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -163,6 +164,35 @@ func TestOpenAICodexProviderListModels(t *testing.T) {
 	}
 	if models[0].ContextWindow != 272000 || models[1].ContextWindow != 128000 {
 		t.Fatalf("models = %+v", models)
+	}
+	if !models[0].SupportsThinking || !models[1].SupportsThinking {
+		t.Fatalf("supports thinking = %+v", models)
+	}
+}
+
+func TestOpenAICodexProviderSendsThinkingLevel(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAICodex("openai-codex", ts.URL, "tok", "acct", "gpt-5.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Chat(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingLevel: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, ok := got["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Fatalf("reasoning = %#v body=%#v", got["reasoning"], got)
 	}
 }
 

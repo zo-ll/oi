@@ -149,7 +149,7 @@ func (p *OpenAICodexProvider) ListModels(ctx context.Context) ([]Model, error) {
 		if name == "" {
 			name = id
 		}
-		models = append(models, Model{ID: id, Name: name, ContextWindow: m.ContextWindow})
+		models = append(models, Model{ID: id, Name: name, ContextWindow: m.ContextWindow, SupportsThinking: true})
 	}
 	return models, nil
 }
@@ -224,6 +224,9 @@ func (p *OpenAICodexProvider) buildRequest(req Request) (map[string]any, error) 
 		"text":                map[string]any{"verbosity": "low"},
 		"tool_choice":         "auto",
 		"parallel_tool_calls": true,
+	}
+	if req.ThinkingLevel != "" && req.ThinkingLevel != "off" {
+		body["reasoning"] = map[string]any{"effort": req.ThinkingLevel}
 	}
 	if body["instructions"] == "" {
 		body["instructions"] = "You are oi, a careful coding assistant."
