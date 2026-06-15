@@ -95,6 +95,72 @@ func CheckCommand(cmd string) error {
 	return nil
 }
 
+func IsReadOnlyCommand(cmd string) bool {
+	trimmed := strings.TrimSpace(cmd)
+	trimmed = strings.ReplaceAll(trimmed, "2>&1", "")
+	trimmed = strings.ReplaceAll(trimmed, "1>&2", "")
+	if trimmed == "" || strings.Contains(trimmed, ">") || strings.Contains(trimmed, "<") {
+		return false
+	}
+	for _, segment := range splitShellSegments(trimmed) {
+		fields := strings.Fields(segment)
+		if len(fields) == 0 {
+			continue
+		}
+		name := filepath.Base(fields[0])
+		if name == "xargs" {
+			name = xargsCommandName(fields[1:])
+			if name == "" {
+				return false
+			}
+		}
+		switch name {
+		case "awk", "cat", "cut", "diff", "du", "env", "file", "find", "git", "go", "grep", "head", "ls", "pwd", "rg", "sed", "sort", "stat", "tail", "tree", "uname", "wc", "which":
+		default:
+			return false
+		}
+		if name == "go" && len(fields) > 1 {
+			switch fields[1] {
+			case "build", "env", "list", "test", "version":
+			default:
+				return false
+			}
+		}
+		if name == "git" && len(fields) > 1 {
+			switch fields[1] {
+			case "branch", "diff", "log", "ls-files", "remote", "rev-parse", "show", "status":
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func xargsCommandName(args []string) string {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return filepath.Base(arg)
+	}
+	return ""
+}
+
+func splitShellSegments(cmd string) []string {
+	parts := strings.FieldsFunc(cmd, func(r rune) bool {
+		return r == '|' || r == ';' || r == '&'
+	})
+	out := parts[:0]
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 func within(root, target string) bool {
 	root = filepath.Clean(root)
 	target = filepath.Clean(target)

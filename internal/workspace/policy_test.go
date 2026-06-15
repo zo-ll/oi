@@ -15,3 +15,26 @@ func TestCheckCommandAllowsSimpleReadOnlyCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestIsReadOnlyCommand(t *testing.T) {
+	for _, cmd := range []string{
+		`pwd && ls -la`,
+		`find . -name "*.go" | xargs wc -l | tail -1`,
+		`go test ./... 2>&1 | tail -40`,
+		`git status --short`,
+	} {
+		if !IsReadOnlyCommand(cmd) {
+			t.Fatalf("expected read-only: %s", cmd)
+		}
+	}
+	for _, cmd := range []string{
+		`echo hi > file`,
+		`rm file`,
+		`go mod tidy`,
+		`git checkout main`,
+	} {
+		if IsReadOnlyCommand(cmd) {
+			t.Fatalf("expected mutating: %s", cmd)
+		}
+	}
+}

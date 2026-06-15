@@ -64,7 +64,7 @@ func (o Options) approve(action, target string) error {
 		if o.PromptInput == nil || o.PromptOutput == nil {
 			return fmt.Errorf("approval required for %s", action)
 		}
-		if _, err := fmt.Fprintf(o.PromptOutput, "Approve %s %s? [y/N] ", action, target); err != nil {
+		if _, err := fmt.Fprintf(o.PromptOutput, "\n? approve %s\n  %s\n[y/N] ", action, target); err != nil {
 			return err
 		}
 		var answer string
@@ -437,8 +437,10 @@ func (t runCommandTool) Run(ctx context.Context, call Call) Result {
 	if err != nil {
 		return jsonError(t.Name(), err)
 	}
-	if err := t.opts.approve("run command", args.Command); err != nil {
-		return jsonError(t.Name(), err)
+	if !workspace.IsReadOnlyCommand(args.Command) {
+		if err := t.opts.approve("run command", args.Command); err != nil {
+			return jsonError(t.Name(), err)
+		}
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-lc", args.Command)
 	cmd.Dir = root

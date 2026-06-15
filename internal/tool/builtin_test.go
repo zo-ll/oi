@@ -96,6 +96,21 @@ func TestRunCommandToolApprovalAndExecution(t *testing.T) {
 	}
 }
 
+func TestRunCommandToolSkipsApprovalForReadOnlyCommands(t *testing.T) {
+	root := t.TempDir()
+	tool := runCommandTool{opts: Options{Policy: workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalNever}}}
+	args, _ := json.Marshal(runCommandArgs{Command: "pwd && ls"})
+	res := tool.Run(context.Background(), Call{Name: tool.Name(), Args: args})
+	if !res.OK {
+		t.Fatalf("result = %+v", res)
+	}
+	args, _ = json.Marshal(runCommandArgs{Command: "echo hi > x"})
+	res = tool.Run(context.Background(), Call{Name: tool.Name(), Args: args})
+	if res.OK || !strings.Contains(res.Error, "forbids") {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
 func TestWriteAndReplaceTools(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{Policy: workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalAuto}}
