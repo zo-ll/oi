@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
@@ -56,12 +59,70 @@ func (s *chatState) autosaveSession(out io.Writer, warn func(string)) {
 	}
 }
 
+type turnResult struct {
+	resp string
+	err  error
+}
+
+func runAbortableTUI(ui *terminalUI, run func(context.Context) (string, error)) (string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := make(chan turnResult, 1)
+	go func() {
+		resp, err := run(ctx)
+		ch <- turnResult{resp: resp, err: err}
+	}()
+	if err := setTerminalNonblock(ui.in, true); err != nil {
+		res := <-ch
+		return res.resp, res.err
+	}
+	defer func() { _ = setTerminalNonblock(ui.in, false) }()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	aborted := false
+	for {
+		select {
+		case res := <-ch:
+			if aborted {
+				return res.resp, fmt.Errorf("aborted")
+			}
+			return res.resp, res.err
+		case <-ticker.C:
+			b, err := readByte(ui.in)
+			if err != nil {
+				if isWouldBlock(err) {
+					continue
+				}
+				continue
+			}
+			if b == 27 || b == 3 {
+				aborted = true
+				cancel()
+				ui.notify("aborting...")
+			}
+		}
+	}
+}
+
+func setTerminalNonblock(f *os.File, enabled bool) error {
+	return syscall.SetNonblock(int(f.Fd()), enabled)
+}
+
+func isWouldBlock(err error) bool {
+	if pathErr, ok := err.(*os.PathError); ok {
+		err = pathErr.Err
+	}
+	return err == syscall.EAGAIN || err == syscall.EWOULDBLOCK
+}
+
 func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 	renderer := &taggedStreamRenderer{}
-	resp, runErr := state.rt.RunOnceStream(context.Background(), line, func(delta string) {
-		for _, seg := range renderer.Push(delta) {
-			writeResponseSegment(ui, seg)
-		}
+	resp, runErr := runAbortableTUI(ui, func(ctx context.Context) (string, error) {
+		return state.rt.RunOnceStream(ctx, line, func(delta string) {
+			for _, seg := range renderer.Push(delta) {
+				writeResponseSegment(ui, seg)
+			}
+		})
 	})
 	for _, seg := range renderer.Flush() {
 		writeResponseSegment(ui, seg)
@@ -80,7 +141,9 @@ func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 }
 
 func runNonStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
-	resp, runErr := state.rt.RunOnce(context.Background(), line)
+	resp, runErr := runAbortableTUI(ui, func(ctx context.Context) (string, error) {
+		return state.rt.RunOnce(ctx, line)
+	})
 	if runErr != nil {
 		ui.notify("error: " + runErr.Error())
 		return

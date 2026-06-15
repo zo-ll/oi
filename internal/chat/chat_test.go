@@ -397,6 +397,63 @@ func TestWrapPromptLines(t *testing.T) {
 	}
 }
 
+func TestPromptCursorPositionWraps(t *testing.T) {
+	row, col := promptCursorPosition("oi> ", "abcdefghi", 8, 6)
+	if row != 1 || col != 6 {
+		t.Fatalf("row=%d col=%d", row, col)
+	}
+}
+
+func TestReadMessageEditsAtCursor(t *testing.T) {
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inR.Close()
+	defer inW.Close()
+	out, err := os.CreateTemp(t.TempDir(), "prompt-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: inR, out: out, width: 80, prompt: "> ", historyIndex: -1}
+	go func() {
+		_, _ = inW.Write([]byte{'a', 'b', 'c', 27, '[', 'D', 27, '[', 'D', 'X', '\n'})
+	}()
+	got, err := ui.readMessage("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "aXbc" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestReadMessageHomeEndDelete(t *testing.T) {
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inR.Close()
+	defer inW.Close()
+	out, err := os.CreateTemp(t.TempDir(), "prompt-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: inR, out: out, width: 80, prompt: "> ", historyIndex: -1}
+	go func() {
+		_, _ = inW.Write([]byte{'a', 'b', 'c', 27, '[', 'H', 'X', 27, '[', 'F', 'Y', 27, '[', 'H', 27, '[', '3', '~', '\n'})
+	}()
+	got, err := ui.readMessage("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "abcY" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestWrapLinePrefersWordBoundaries(t *testing.T) {
 	lines := wrapLine("alpha beta gamma", 7)
 	if len(lines) != 3 {

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -116,6 +117,10 @@ func (ui *terminalUI) refreshSize() {
 }
 
 func (ui *terminalUI) renderPrompt(text string) {
+	ui.renderPromptAt(text, len([]rune(text)))
+}
+
+func (ui *terminalUI) renderPromptAt(text string, cursor int) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
 	ui.refreshSize()
@@ -137,6 +142,15 @@ func (ui *terminalUI) renderPrompt(text string) {
 	ui.promptLines = len(lines)
 	if ui.promptLines == 0 {
 		ui.promptLines = 1
+	}
+	row, col := promptCursorPosition(ui.prompt, text, ui.width, cursor)
+	bottom := ui.promptLines - 1
+	if up := bottom - row; up > 0 {
+		_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dA", up))
+	}
+	_, _ = io.WriteString(ui.out, "\r")
+	if col > 0 {
+		_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dC", col))
 	}
 	ui.editing = true
 }

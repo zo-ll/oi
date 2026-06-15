@@ -120,8 +120,30 @@ func minInt(a, b int) int {
 	return b
 }
 
+func promptCursorPosition(prompt, text string, width, cursor int) (int, int) {
+	runes := []rune(text)
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(runes) {
+		cursor = len(runes)
+	}
+	prefix := string(runes[:cursor])
+	lines := wrapPromptLines(prompt, prefix, width)
+	if len(lines) == 0 {
+		return 0, len(prompt)
+	}
+	return len(lines) - 1, len([]rune(lines[len(lines)-1]))
+}
+
 func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 	var buf []rune
+	cursor := 0
+	setBuffer := func(text string) {
+		buf = []rune(text)
+		cursor = len(buf)
+	}
+	render := func() { ui.renderPromptAt(string(buf), cursor) }
 	ui.historyIndex = -1
 	ui.historyDraft = ""
 	ui.completion = completionState{}
@@ -147,13 +169,13 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 	}
 
 	refreshHint("")
-	ui.renderPrompt("")
+	render()
 	defer ui.clearPrompt()
 
 	for {
 		select {
 		case <-ui.resizeCh:
-			ui.renderPrompt(string(buf))
+			render()
 		default:
 		}
 		b, err := readByte(ui.in)
@@ -166,11 +188,11 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 			idx := int(b - '1')
 			if idx >= 0 && idx < len(ui.pickerMatches) {
 				next := ui.pickMatch(string(buf), idx)
-				buf = []rune(next)
+				setBuffer(next)
 				ui.pickerActive = false
 				ui.pickerMatches = nil
 				refreshHint(string(buf))
-				ui.renderPrompt(string(buf))
+				render()
 				continue
 			}
 			ui.bell()
@@ -188,7 +210,7 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 					idx = len(ui.pickerMatches) - 1
 				}
 				next := ui.pickMatch(string(buf), idx)
-				buf = []rune(next)
+				setBuffer(next)
 				ui.pickerActive = false
 				ui.pickerMatches = nil
 				if strings.HasPrefix(next, "/") {
@@ -199,16 +221,17 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 					return text, nil
 				}
 				refreshHint(string(buf))
-				ui.renderPrompt(string(buf))
+				render()
 				continue
 			}
 			text := strings.TrimRight(string(buf), "\n")
 			if strings.TrimSpace(text) == "" {
 				buf = buf[:0]
+				cursor = 0
 				ui.setPromptHint("")
 				ui.pickerActive = false
 				ui.pickerMatches = nil
-				ui.renderPrompt("")
+				render()
 				continue
 			}
 			ui.addHistoryEntry(text)
@@ -235,41 +258,48 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 			ui.completion = completionState{}
 			ui.pickerActive = false
 			ui.pickerMatches = nil
-			if len(buf) > 0 {
-				buf = buf[:len(buf)-1]
+			if cursor > 0 {
+				buf = append(buf[:cursor-1], buf[cursor:]...)
+				cursor--
 				refreshHint(string(buf))
-				ui.renderPrompt(string(buf))
+				render()
 			} else {
 				ui.setPromptHint("")
-				ui.renderPrompt("")
+				render()
 				ui.bell()
 			}
 			continue
 		case 9:
+			if cursor != len(buf) {
+				ui.bell()
+				render()
+				continue
+			}
 			next, _, _, replaced, err := ui.completeAtPath(string(buf))
 			if err != nil {
 				ui.bell()
-				ui.renderPrompt(string(buf))
+				render()
 				continue
 			}
 			if replaced {
-				buf = []rune(next)
+				setBuffer(next)
 				ui.pickerActive = false
 				ui.pickerMatches = nil
 				refreshHint(string(buf))
-				ui.renderPrompt(string(buf))
+				render()
 				continue
 			}
 			ui.bell()
-			ui.renderPrompt(string(buf))
+			render()
 			continue
 		case 11:
 			ui.completion = completionState{}
 			ui.pickerActive = false
 			ui.pickerMatches = nil
-			buf = append(buf, '\n')
+			buf = append(buf[:cursor], append([]rune{'\n'}, buf[cursor:]...)...)
+			cursor++
 			refreshHint(string(buf))
-			ui.renderPrompt(string(buf))
+			render()
 			continue
 		case 22:
 			ui.completion = completionState{}
@@ -283,9 +313,11 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 			}
 			text = normalizePastedText(text)
 			if text != "" {
-				buf = append(buf, []rune(text)...)
+				paste := []rune(text)
+				buf = append(buf[:cursor], append(paste, buf[cursor:]...)...)
+				cursor += len(paste)
 				refreshHint(string(buf))
-				ui.renderPrompt(string(buf))
+				render()
 			}
 			continue
 		case 25:
@@ -300,7 +332,7 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				continue
 			}
 			ui.notify("copied last reply")
-			ui.renderPrompt(string(buf))
+			render()
 			continue
 		case 27:
 			kind, text, handled, err := ui.readEscapeSequence()
@@ -319,7 +351,7 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 						ui.pickerIndex = len(ui.pickerMatches) - 1
 					}
 					ui.setPromptHint(pickerHint(ui.pickerMatches, ui.pickerIndex))
-					ui.renderPrompt(string(buf))
+					render()
 					continue
 				}
 				next, ok := ui.historyPrev(string(buf))
@@ -327,11 +359,11 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 					ui.bell()
 					continue
 				}
-				buf = []rune(next)
+				setBuffer(next)
 				ui.pickerActive = false
 				ui.pickerMatches = nil
 				refreshHint(string(buf))
-				ui.renderPrompt(string(buf))
+				render()
 				continue
 			case "down":
 				if ui.pickerActive && len(ui.pickerMatches) > 0 {
@@ -340,7 +372,7 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 						ui.pickerIndex = 0
 					}
 					ui.setPromptHint(pickerHint(ui.pickerMatches, ui.pickerIndex))
-					ui.renderPrompt(string(buf))
+					render()
 					continue
 				}
 				next, ok := ui.historyNext()
@@ -348,20 +380,58 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 					ui.bell()
 					continue
 				}
-				buf = []rune(next)
+				setBuffer(next)
 				ui.pickerActive = false
 				ui.pickerMatches = nil
 				refreshHint(string(buf))
-				ui.renderPrompt(string(buf))
+				render()
+				continue
+			case "left":
+				if cursor > 0 {
+					cursor--
+					render()
+				} else {
+					ui.bell()
+				}
+				continue
+			case "right":
+				if cursor < len(buf) {
+					cursor++
+					render()
+				} else {
+					ui.bell()
+				}
+				continue
+			case "home":
+				cursor = 0
+				render()
+				continue
+			case "end":
+				cursor = len(buf)
+				render()
+				continue
+			case "delete":
+				ui.completion = completionState{}
+				ui.pickerActive = false
+				ui.pickerMatches = nil
+				if cursor < len(buf) {
+					buf = append(buf[:cursor], buf[cursor+1:]...)
+					refreshHint(string(buf))
+					render()
+				} else {
+					ui.bell()
+				}
 				continue
 			case "paste":
 				ui.completion = completionState{}
 				ui.pickerActive = false
 				ui.pickerMatches = nil
 				if text != "" {
-					buf = append(buf, []rune(normalizePastedText(text))...)
+					paste := []rune(normalizePastedText(text))
+					buf = append(buf[:cursor], append(paste, buf[cursor:]...)...)
+					cursor += len(paste)
 					refreshHint(string(buf))
-					ui.renderPrompt(string(buf))
+					render()
 				}
 				continue
 			default:
@@ -372,9 +442,10 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				ui.completion = completionState{}
 				ui.pickerActive = false
 				ui.pickerMatches = nil
-				buf = append(buf, rune(b))
+				buf = append(buf[:cursor], append([]rune{rune(b)}, buf[cursor:]...)...)
+				cursor++
 				refreshHint(string(buf))
-				ui.renderPrompt(string(buf))
+				render()
 			}
 		}
 	}
