@@ -14,6 +14,8 @@ type terminalUI struct {
 	in              *os.File
 	out             *os.File
 	width           int
+	header          string
+	headerLines     int
 	prompt          string
 	promptLines     int
 	promptCursorRow int
@@ -127,6 +129,12 @@ func (ui *terminalUI) renderPromptAt(text string, cursor int) {
 	ui.refreshSize()
 	ui.clearStatusLocked()
 	ui.clearPromptLocked()
+	headerLines := ui.wrapHeaderLinesLocked()
+	for _, line := range headerLines {
+		_, _ = io.WriteString(ui.out, ui.Styled("dim", line))
+		_, _ = io.WriteString(ui.out, "\r\n")
+		ui.headerLines++
+	}
 	hintLines := ui.wrapHintLinesLocked()
 	for _, line := range hintLines {
 		_, _ = io.WriteString(ui.out, ui.Styled("dim", line))
@@ -175,6 +183,20 @@ func (ui *terminalUI) setPromptHint(text string) {
 	ui.promptHint = strings.TrimRight(text, "\n")
 }
 
+func (ui *terminalUI) setHeader(text string) {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.header = strings.TrimRight(text, "\n")
+}
+
+func (ui *terminalUI) wrapHeaderLinesLocked() []string {
+	text := strings.TrimSpace(ui.header)
+	if text == "" {
+		return nil
+	}
+	return wrapLine(text, ui.width)
+}
+
 func (ui *terminalUI) wrapHintLinesLocked() []string {
 	text := strings.TrimSpace(ui.promptHint)
 	if text == "" {
@@ -193,7 +215,7 @@ func (ui *terminalUI) wrapHintLinesLocked() []string {
 }
 
 func (ui *terminalUI) clearPromptLocked() {
-	total := ui.promptLines + ui.promptHintLines
+	total := ui.headerLines + ui.promptLines + ui.promptHintLines
 	if total <= 0 {
 		return
 	}
@@ -214,6 +236,7 @@ func (ui *terminalUI) clearPromptLocked() {
 		_, _ = io.WriteString(ui.out, "\x1b[1A")
 	}
 	_, _ = io.WriteString(ui.out, "\r")
+	ui.headerLines = 0
 	ui.promptLines = 0
 	ui.promptCursorRow = 0
 	ui.promptHintLines = 0
@@ -307,6 +330,7 @@ func (ui *terminalUI) ClearScreen() {
 	ui.clearPromptLocked()
 	_, _ = io.WriteString(ui.out, "\x1b[2J\x1b[H")
 	ui.outputColumn = 0
+	ui.headerLines = 0
 	ui.promptLines = 0
 	ui.promptCursorRow = 0
 	ui.editing = false

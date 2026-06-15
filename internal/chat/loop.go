@@ -62,7 +62,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 	if err != nil {
 		return err
 	}
-	ui.notify(styleText(ui, "dim", formatHeader(state.sel.Model, root, state.contextWindow)))
+	ui.setHeader(state.header(root))
 	if startupNotice != "" {
 		ui.notify(startupNotice)
 	}
@@ -82,6 +82,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 				return err
 			}
 			exit, cmdErr := runChatCommand(deps, state, reader, ui, line)
+			ui.setHeader(state.header(root))
 			if resumeErr := ui.resumeRaw(); resumeErr != nil {
 				return resumeErr
 			}
@@ -112,7 +113,7 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 		return err
 	}
 
-	fmt.Fprintln(out, formatHeader(state.sel.Model, root, state.contextWindow))
+	fmt.Fprintln(out, state.header(root))
 	if startupNotice != "" {
 		fmt.Fprintln(out, startupNotice)
 	}

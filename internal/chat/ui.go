@@ -257,8 +257,9 @@ func clearScreen(out io.Writer) {
 	fmt.Fprint(out, "\x1b[2J\x1b[H")
 }
 
-func formatHeader(model, root string, contextWindow int) string {
-	header := fmt.Sprintf("oi · %s", valueOr(model, "(none)"))
+func formatHeader(model, root string, contextWindow int, variant string) string {
+	header := fmt.Sprintf("oi · model %s", valueOr(model, "(none)"))
+	header += " · variant " + valueOr(variant, "default")
 	if contextWindow > 0 {
 		header += " · ctx " + formatCount(contextWindow)
 	}

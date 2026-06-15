@@ -41,6 +41,14 @@ func (s *chatState) reconfigureRuntime(out io.Writer) {
 	configureChatRuntime(s.rt, out, s.tools)
 }
 
+func (s *chatState) header(root string) string {
+	variant := ""
+	if s != nil && s.cfg != nil {
+		variant = s.cfg.Agent.ReasoningEffort
+	}
+	return formatHeader(s.sel.Model, root, s.contextWindow, variant)
+}
+
 func (s *chatState) applyCommandResult(newRT *agent.Runtime, newSel config.Selection, newStreaming, newAutosave bool, newTools toolVerbosity, out io.Writer) {
 	s.rt = newRT
 	s.sel = newSel

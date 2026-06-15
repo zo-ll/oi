@@ -24,6 +24,7 @@ type AgentConfig struct {
 	ToolTimeoutSeconds    int    `json:"tool_timeout_seconds,omitempty"`
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds,omitempty"`
 	ApprovalMode          string `json:"approval_mode,omitempty"`
+	ReasoningEffort       string `json:"reasoning_effort,omitempty"`
 }
 
 // Config is the top-level user configuration document.
