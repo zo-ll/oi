@@ -253,9 +253,9 @@ func TestFormatContextUsage(t *testing.T) {
 	}
 }
 
-func TestFormatHeaderShowsContextUsage(t *testing.T) {
+func TestFormatHeaderShowsValuesOnly(t *testing.T) {
 	got := formatHeader("gpt5.5", "/tmp/project", 272000, provider.Usage{InputTokens: 136000}, "high", true)
-	if !strings.Contains(got, "model gpt5.5") || !strings.Contains(got, "think high") || !strings.Contains(got, "ctx 136.0k / 272.0k (50%)") {
+	if got != "oi · gpt5.5 · high · 136.0k / 272.0k (50%) · /tmp/project" {
 		t.Fatalf("got %q", got)
 	}
 }

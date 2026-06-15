@@ -258,19 +258,28 @@ func clearScreen(out io.Writer) {
 }
 
 func formatHeader(model, root string, contextWindow int, usage provider.Usage, think string, thinkSupported bool) string {
-	header := fmt.Sprintf("oi · model %s", valueOr(model, "(none)"))
+	header := fmt.Sprintf("oi · %s", valueOr(model, "(none)"))
 	thinkLabel := valueOr(think, "default")
 	if !thinkSupported {
 		thinkLabel = "n/a"
 	}
-	header += " · think " + thinkLabel
-	if ctx := formatContextUsage(contextWindow, usage); ctx != "" {
+	header += " · " + thinkLabel
+	if ctx := formatHeaderContextUsage(contextWindow, usage); ctx != "" {
 		header += " · " + ctx
-	} else if contextWindow > 0 {
-		header += " · ctx 0 / " + formatCount(contextWindow) + " (0%)"
 	}
 	header += " · " + shortenPath(root)
 	return header
+}
+
+func formatHeaderContextUsage(window int, usage provider.Usage) string {
+	if window <= 0 {
+		return ""
+	}
+	if usage.InputTokens <= 0 {
+		return "0 / " + formatCount(window) + " (0%)"
+	}
+	pct := usage.InputTokens * 100 / window
+	return fmt.Sprintf("%s / %s (%d%%)", formatCount(usage.InputTokens), formatCount(window), pct)
 }
 
 func lookupContextWindow(p provider.Provider, model string) int {
