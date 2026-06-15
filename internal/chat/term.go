@@ -254,17 +254,6 @@ func (ui *terminalUI) notify(message string) {
 	}
 }
 
-func (ui *terminalUI) writeAssistant(message string) {
-	if strings.TrimSpace(message) == "" {
-		return
-	}
-	w := &assistantWriter{out: ui, prefix: "ai> ", cont: "    ", atLineStart: true}
-	_, _ = w.Write([]byte(message))
-	if !strings.HasSuffix(message, "\n") {
-		_, _ = w.Write([]byte("\n"))
-	}
-}
-
 func (ui *terminalUI) ShowStatus(text string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()

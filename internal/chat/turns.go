@@ -196,16 +196,15 @@ func isWouldBlock(err error) bool {
 
 func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 	renderer := &taggedStreamRenderer{}
-	assistantOut := &assistantWriter{out: ui, prefix: "ai> ", cont: "    ", atLineStart: true}
 	resp, runErr := runAbortableTUI(ui, state.rt, func(ctx context.Context) (string, error) {
 		return state.rt.RunOnceStream(ctx, line, func(delta string) {
 			for _, seg := range renderer.Push(delta) {
-				writeResponseSegment(assistantOut, seg)
+				writeResponseSegment(ui, seg)
 			}
 		})
 	})
 	for _, seg := range renderer.Flush() {
-		writeResponseSegment(assistantOut, seg)
+		writeResponseSegment(ui, seg)
 	}
 	fmt.Fprintln(ui)
 	if runErr != nil {
@@ -227,7 +226,7 @@ func runNonStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 	}
 	resp = cleanDisplayText(resp)
 	state.lastAssistant = resp
-	ui.writeAssistant(resp)
+	ui.notify(resp)
 	ui.blankLine()
 	state.autosaveSession(ui, ui.notify)
 }
@@ -266,48 +265,6 @@ func runNonStreamingTurnLine(out io.Writer, state *chatState, line string) {
 	}
 	fmt.Fprintln(out)
 	state.autosaveSession(out, func(msg string) { fmt.Fprintln(out, msg) })
-}
-
-type assistantWriter struct {
-	out         io.Writer
-	prefix      string
-	cont        string
-	atLineStart bool
-}
-
-func (w *assistantWriter) Write(p []byte) (int, error) {
-	text := string(p)
-	for len(text) > 0 {
-		if w.atLineStart {
-			prefix := w.prefix
-			if prefix == "" {
-				prefix = "ai> "
-			}
-			if _, err := io.WriteString(w.out, prefix); err != nil {
-				return 0, err
-			}
-			w.atLineStart = false
-		}
-		idx := strings.IndexByte(text, '\n')
-		if idx < 0 {
-			_, err := io.WriteString(w.out, text)
-			return len(p), err
-		}
-		if idx > 0 {
-			if _, err := io.WriteString(w.out, text[:idx]); err != nil {
-				return 0, err
-			}
-		}
-		if _, err := io.WriteString(w.out, "\n"); err != nil {
-			return 0, err
-		}
-		w.atLineStart = true
-		if w.cont != "" && idx == 0 {
-			// Preserve blank lines without adding continuation text.
-		}
-		text = text[idx+1:]
-	}
-	return len(p), nil
 }
 
 type responseSegment struct {
