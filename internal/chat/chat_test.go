@@ -505,6 +505,7 @@ func TestTerminalWriteWrappedDoesNotSplitWords(t *testing.T) {
 	defer out.Close()
 	ui := &terminalUI{in: out, out: out, width: 9}
 	ui.writeWrapped("alpha beta")
+	ui.writeWrapped("\n")
 	if _, err := out.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +513,29 @@ func TestTerminalWriteWrappedDoesNotSplitWords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "alpha\r\nbeta" {
+	if string(data) != "alpha\r\nbeta\r\n" {
+		t.Fatalf("out = %q", string(data))
+	}
+}
+
+func TestTerminalWriteWrappedKeepsWordsAcrossChunks(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 9}
+	ui.writeWrapped("feed")
+	ui.writeWrapped("back now")
+	ui.writeWrapped("\n")
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "feed\r\nback") || !strings.Contains(string(data), "feedback") {
 		t.Fatalf("out = %q", string(data))
 	}
 }
@@ -525,6 +548,7 @@ func TestTerminalWriteWrappedAfterExactFit(t *testing.T) {
 	defer out.Close()
 	ui := &terminalUI{in: out, out: out, width: 10}
 	ui.writeWrapped("alpha beta gamma")
+	ui.writeWrapped("\n")
 	if _, err := out.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +556,7 @@ func TestTerminalWriteWrappedAfterExactFit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "alpha beta\r\ngamma" {
+	if string(data) != "alpha beta\r\ngamma\r\n" {
 		t.Fatalf("out = %q", string(data))
 	}
 }
@@ -545,6 +569,7 @@ func TestTerminalWriteWrappedDoesNotSplitLongWords(t *testing.T) {
 	defer out.Close()
 	ui := &terminalUI{in: out, out: out, width: 5}
 	ui.writeWrapped("supercalifragilistic")
+	ui.writeWrapped("\n")
 	if _, err := out.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +577,8 @@ func TestTerminalWriteWrappedDoesNotSplitLongWords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "\r\n") {
+	text := strings.TrimSuffix(string(data), "\r\n")
+	if strings.Contains(text, "\r\n") {
 		t.Fatalf("word was split: %q", string(data))
 	}
 }

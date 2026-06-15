@@ -20,6 +20,7 @@ type terminalUI struct {
 	promptLines     int
 	promptCursorRow int
 	outputColumn    int
+	outputTail      string
 	editing         bool
 	raw             bool
 	sttyState       string
@@ -372,6 +373,15 @@ func (ui *terminalUI) writeWrapped(s string) {
 		ui.clearPromptLocked()
 	}
 	ui.refreshSize()
+	s = ui.outputTail + s
+	ui.outputTail = ""
+	if keep, rest := splitTrailingWord(s); keep != "" {
+		ui.outputTail = keep
+		s = rest
+	}
+	if s == "" {
+		return
+	}
 	runes := []rune(s)
 	for i := 0; i < len(runes); {
 		r := runes[i]
@@ -407,6 +417,26 @@ func (ui *terminalUI) writeWrapped(s string) {
 			i = j
 		}
 	}
+}
+
+func splitTrailingWord(s string) (tail, body string) {
+	if s == "" {
+		return "", ""
+	}
+	runes := []rune(s)
+	last := runes[len(runes)-1]
+	if isWrapBoundaryRune(last) {
+		return "", s
+	}
+	for i := len(runes) - 1; i >= 0; i-- {
+		if isWrapBoundaryRune(runes[i]) {
+			if runes[i] == ' ' || runes[i] == '\t' {
+				return string(runes[i:]), string(runes[:i])
+			}
+			return string(runes[i+1:]), string(runes[:i+1])
+		}
+	}
+	return s, ""
 }
 
 func isWrapBoundaryRune(r rune) bool {
