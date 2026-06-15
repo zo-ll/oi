@@ -418,6 +418,8 @@ var displayReplacer = strings.NewReplacer(
 	"ÔÇÖ", "’",
 	"ÔÇ£", "“",
 	"ÔÇ¥", "”",
+	"ÔÇö", "—",
+	"ÔÇô", "–",
 )
 
 type outputFormatter struct {
