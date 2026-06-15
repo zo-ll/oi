@@ -159,9 +159,6 @@ func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 		return
 	}
 	state.lastAssistant = cleanDisplayText(resp)
-	if ctx := formatContextUsage(state.contextWindow, state.rt.LastUsage); ctx != "" {
-		ui.notify(styleText(ui, "dim", ctx))
-	}
 	ui.blankLine()
 	state.autosaveSession(ui, ui.notify)
 }
@@ -177,9 +174,6 @@ func runNonStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 	resp = cleanDisplayText(resp)
 	state.lastAssistant = resp
 	ui.notify(resp)
-	if ctx := formatContextUsage(state.contextWindow, state.rt.LastUsage); ctx != "" {
-		ui.notify(styleText(ui, "dim", ctx))
-	}
 	ui.blankLine()
 	state.autosaveSession(ui, ui.notify)
 }
