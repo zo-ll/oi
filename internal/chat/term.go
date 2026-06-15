@@ -465,18 +465,16 @@ func (ui *terminalUI) writeWordLocked(word string, width int) {
 	if width <= 0 {
 		return
 	}
-	if width > ui.width {
-		for _, r := range word {
-			ui.writeRuneLocked(r)
-		}
-		return
-	}
 	if ui.outputColumn > 0 && ui.outputColumn+width > ui.width {
 		_, _ = io.WriteString(ui.out, "\r\n")
 		ui.outputColumn = 0
 	}
 	_, _ = io.WriteString(ui.out, word)
-	ui.outputColumn += width
+	if ui.width > 0 {
+		ui.outputColumn = (ui.outputColumn + width) % ui.width
+	} else {
+		ui.outputColumn += width
+	}
 }
 
 func (ui *terminalUI) writeRuneLocked(r rune) {
