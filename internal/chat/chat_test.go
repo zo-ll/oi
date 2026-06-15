@@ -663,6 +663,92 @@ func TestTerminalWriteWrappedExactWidthLines(t *testing.T) {
 	}
 }
 
+func TestStreamRendererPreservesTextAcrossChunks(t *testing.T) {
+	text := "Here is my opinion. Let me also peek. Here is my take."
+	var chunks []string
+	runes := []rune(text)
+	for i := 0; i < len(runes); {
+		n := 3
+		if i+n > len(runes) {
+			n = len(runes) - i
+		}
+		chunks = append(chunks, string(runes[i:i+n]))
+		i += n
+	}
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 80}
+	ui.startAssistantResponse()
+	r := &taggedStreamRenderer{}
+	for _, c := range chunks {
+		for _, seg := range r.Push(c) {
+			ui.writeResponseSegment(seg)
+		}
+	}
+	for _, seg := range r.Flush() {
+		ui.writeResponseSegment(seg)
+	}
+	ui.writeWrapped("\n")
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.ReplaceAll(string(data), "\r\n", "\n")
+	want := text + "\n"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestStreamRendererPreservesMultilineMarkdown(t *testing.T) {
+	text := "Brief take:\n\n- It's oi, a small agent.\n- Design is clean.\n\nOverall: solid."
+	var chunks []string
+	runes := []rune(text)
+	for i := 0; i < len(runes); {
+		n := 5
+		if i+n > len(runes) {
+			n = len(runes) - i
+		}
+		chunks = append(chunks, string(runes[i:i+n]))
+		i += n
+	}
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 80}
+	ui.startAssistantResponse()
+	r := &taggedStreamRenderer{}
+	for _, c := range chunks {
+		for _, seg := range r.Push(c) {
+			ui.writeResponseSegment(seg)
+		}
+	}
+	for _, seg := range r.Flush() {
+		ui.writeResponseSegment(seg)
+	}
+	ui.writeWrapped("\n")
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.ReplaceAll(string(data), "\r\n", "\n")
+	want := text + "\n"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestTerminalResponseSegmentsSeparated(t *testing.T) {
 	out, err := os.CreateTemp(t.TempDir(), "term-out")
 	if err != nil {
