@@ -763,7 +763,7 @@ func TestStreamContainerRendersThinkingAndAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := stripANSI(string(data))
+	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
 	want := "plan \n\nanswer\n"
 	if got != want {
@@ -914,6 +914,14 @@ func lastStreamFrame(s string) string {
 		s = s[last:]
 	}
 	s = stripANSI(s)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if r := strings.LastIndex(line, "\r"); r >= 0 {
+			lines[i] = line[r+1:]
+		}
+	}
+	s = strings.Join(lines, "\n")
 	return strings.TrimLeft(s, "\r\n")
 }
 

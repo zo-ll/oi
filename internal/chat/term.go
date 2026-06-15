@@ -39,6 +39,7 @@ type terminalUI struct {
 	streamThinking  string
 	streamAnswer    string
 	streamLines     int
+	streamMaxLines  int
 	pickerMatches   []string
 	pickerActive    bool
 	pickerIndex     int
@@ -374,6 +375,7 @@ func (ui *terminalUI) startAssistantResponse() {
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
 	ui.streamLines = 0
+	ui.streamMaxLines = 0
 	ui.outputTail = ""
 }
 
@@ -398,10 +400,11 @@ func (ui *terminalUI) finishAssistantResponse() {
 	defer ui.mu.Unlock()
 	if ui.streamLines > 0 {
 		_, _ = io.WriteString(ui.out, "\r\n")
-		ui.streamLines = 0
 	}
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
+	ui.streamLines = 0
+	ui.streamMaxLines = 0
 }
 
 func (ui *terminalUI) renderStreamLocked() {
@@ -423,17 +426,23 @@ func (ui *terminalUI) renderStreamLocked() {
 	if len(lines) == 0 {
 		return
 	}
-	if ui.streamLines > 0 {
-		_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dA", ui.streamLines))
+	if ui.streamMaxLines > 0 {
+		_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dA\r", ui.streamMaxLines))
 	}
 	for i, line := range lines {
 		if i > 0 {
 			_, _ = io.WriteString(ui.out, "\r\n")
 		}
+		if ui.streamMaxLines > 0 || i > 0 {
+			_, _ = io.WriteString(ui.out, "\r")
+		}
 		_, _ = io.WriteString(ui.out, "\x1b[2K")
 		_, _ = io.WriteString(ui.out, line)
 	}
 	_, _ = io.WriteString(ui.out, "\x1b[J")
+	if len(lines) > ui.streamMaxLines {
+		ui.streamMaxLines = len(lines)
+	}
 	ui.streamLines = len(lines)
 }
 
