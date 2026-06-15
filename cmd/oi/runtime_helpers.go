@@ -34,6 +34,7 @@ func buildRuntime(cfg *config.Config, sel config.Selection, p provider.Provider,
 		Session:        session.New(sel.Provider, model, root),
 		ToolTimeout:    time.Duration(cfg.Agent.ToolTimeoutSeconds) * time.Second,
 		RequestTimeout: time.Duration(cfg.Agent.RequestTimeoutSeconds) * time.Second,
+		ThinkingLevel:  cfg.Agent.ReasoningEffort,
 		Logger:         logger,
 	}
 }

@@ -139,6 +139,58 @@ func TestOpenAIProviderChat(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderAddsReasoningEffortForGPT5(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"hello"}}]}`)
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAI("demo", ts.URL, "key", "gpt5.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Chat(context.Background(), Request{
+		Messages:      []Message{{Role: "user", Content: "hi"}},
+		ThinkingLevel: "high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort = %#v body=%#v", got["reasoning_effort"], got)
+	}
+}
+
+func TestOpenAIProviderSkipsReasoningEffortForNonReasoningModel(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"hello"}}]}`)
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAI("demo", ts.URL, "key", "gpt-4.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Chat(context.Background(), Request{
+		Messages:      []Message{{Role: "user", Content: "hi"}},
+		ThinkingLevel: "high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["reasoning_effort"]; ok {
+		t.Fatalf("unexpected reasoning_effort body=%#v", got)
+	}
+}
+
 func TestOpenAIProviderChatStreamReportsUsage(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

@@ -143,7 +143,7 @@ func (ui *terminalUI) completionMatchesForText(current string) ([]string, error)
 }
 
 var chatCommandList = []string{
-	"/help", "/login", "/model", "/stream", "/tools", "/autosave",
+	"/help", "/login", "/model", "/stream", "/think", "/tools", "/autosave",
 	"/new", "/save", "/session", "/compact", "/clear", "/exit",
 }
 

@@ -29,6 +29,7 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		printHelpLine(out, "/login", "set up provider authentication")
 		printHelpLine(out, "/model", "choose and set model")
 		printHelpLine(out, "/stream", "choose streaming mode")
+		printHelpLine(out, "/think", "set thinking level")
 		printHelpLine(out, "/tools", "choose tool events level")
 		printHelpLine(out, "/autosave", "choose autosave mode")
 		printHelpLine(out, "/new", "start a new session")

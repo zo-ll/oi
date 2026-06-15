@@ -11,6 +11,7 @@ import (
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
+	"github.com/zo-ll/oi/internal/provider"
 	"github.com/zo-ll/oi/internal/session"
 )
 
@@ -46,7 +47,11 @@ func (s *chatState) header(root string) string {
 	if s != nil && s.rt != nil {
 		level = s.rt.ThinkingLevel
 	}
-	return formatHeader(s.sel.Model, root, s.contextWindow, level)
+	usage := provider.Usage{}
+	if s != nil && s.rt != nil {
+		usage = s.rt.LastUsage
+	}
+	return formatHeader(s.sel.Model, root, s.contextWindow, usage, level)
 }
 
 func (s *chatState) applyCommandResult(newRT *agent.Runtime, newSel config.Selection, newStreaming, newAutosave bool, newTools toolVerbosity, out io.Writer) {

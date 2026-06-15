@@ -150,7 +150,7 @@ func (p *OpenAIProvider) buildRequest(req Request, stream bool) (map[string]any,
 	if len(req.Tools) > 0 {
 		body["tools"] = toOpenAITools(req.Tools)
 	}
-	if supportsThinkingLevel(model) && req.ThinkingLevel != "" {
+	if supportsThinkingLevel(model) && req.ThinkingLevel != "" && req.ThinkingLevel != "off" {
 		body["reasoning_effort"] = req.ThinkingLevel
 	}
 	return body, nil
@@ -159,6 +159,9 @@ func (p *OpenAIProvider) buildRequest(req Request, stream bool) (map[string]any,
 func supportsThinkingLevel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 	if strings.HasPrefix(m, "o") && len(m) > 1 && m[1] >= '0' && m[1] <= '9' {
+		return true
+	}
+	if strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "gpt5") {
 		return true
 	}
 	if strings.Contains(m, "reasoning") {

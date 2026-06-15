@@ -99,6 +99,7 @@ func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps
 		} else {
 			runNonStreamingTurnTUI(ui, state, line)
 		}
+		ui.setHeader(state.header(root))
 	}
 }
 
