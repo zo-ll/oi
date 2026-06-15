@@ -16,6 +16,7 @@ type terminalUI struct {
 	width           int
 	prompt          string
 	promptLines     int
+	promptCursorRow int
 	outputColumn    int
 	editing         bool
 	raw             bool
@@ -144,6 +145,13 @@ func (ui *terminalUI) renderPromptAt(text string, cursor int) {
 		ui.promptLines = 1
 	}
 	row, col := promptCursorPosition(ui.prompt, text, ui.width, cursor)
+	if row < 0 {
+		row = 0
+	}
+	if row >= ui.promptLines {
+		row = ui.promptLines - 1
+	}
+	ui.promptCursorRow = row
 	bottom := ui.promptLines - 1
 	if up := bottom - row; up > 0 {
 		_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dA", up))
@@ -190,6 +198,9 @@ func (ui *terminalUI) clearPromptLocked() {
 		return
 	}
 	_, _ = io.WriteString(ui.out, "\r")
+	if ui.promptLines > 0 && ui.promptCursorRow < ui.promptLines-1 {
+		_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dB", ui.promptLines-1-ui.promptCursorRow))
+	}
 	for i := 0; i < total-1; i++ {
 		_, _ = io.WriteString(ui.out, "\x1b[1A")
 	}
@@ -204,6 +215,7 @@ func (ui *terminalUI) clearPromptLocked() {
 	}
 	_, _ = io.WriteString(ui.out, "\r")
 	ui.promptLines = 0
+	ui.promptCursorRow = 0
 	ui.promptHintLines = 0
 	ui.editing = false
 }
@@ -296,6 +308,7 @@ func (ui *terminalUI) ClearScreen() {
 	_, _ = io.WriteString(ui.out, "\x1b[2J\x1b[H")
 	ui.outputColumn = 0
 	ui.promptLines = 0
+	ui.promptCursorRow = 0
 	ui.editing = false
 }
 
