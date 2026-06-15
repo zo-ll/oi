@@ -267,6 +267,35 @@ func TestFormatHeaderShowsValuesOnly(t *testing.T) {
 	}
 }
 
+func TestFilterPickerItems(t *testing.T) {
+	got := filterPickerItems([]string{"alpha", "beta", "gamma"}, "et")
+	if len(got) != 1 || got[0] != "beta" {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestOverlayPickerFiltersTypedInput(t *testing.T) {
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inR.Close()
+	defer inW.Close()
+	out, err := os.CreateTemp(t.TempDir(), "picker-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: inR, out: out, width: 80}
+	go func() {
+		_, _ = inW.Write([]byte{'b', 'e', '\n'})
+	}()
+	selected, ok := ui.overlayPicker("choose", []string{"alpha", "beta", "gamma"})
+	if !ok || selected != "beta" {
+		t.Fatalf("selected=%q ok=%v", selected, ok)
+	}
+}
+
 func TestOverlayPickerHandlesShortItemLists(t *testing.T) {
 	inR, inW, err := os.Pipe()
 	if err != nil {

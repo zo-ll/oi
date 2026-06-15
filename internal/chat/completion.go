@@ -270,6 +270,17 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 		return "", false
 	}
 	idx := 0
+	query := ""
+	filtered := append([]string(nil), items...)
+	refilter := func() {
+		filtered = filterPickerItems(items, query)
+		if idx >= len(filtered) {
+			idx = len(filtered) - 1
+		}
+		if idx < 0 {
+			idx = 0
+		}
+	}
 	overlayLines := 0
 	draw := func(first bool) {
 		ui.mu.Lock()
@@ -286,17 +297,17 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 			ui.clearPromptLocked()
 		}
 		start := idx - idx%maxCompletionMatchesShown
-		if start+maxCompletionMatchesShown > len(items) {
-			start = len(items) - maxCompletionMatchesShown
+		if start+maxCompletionMatchesShown > len(filtered) {
+			start = len(filtered) - maxCompletionMatchesShown
 		}
 		if start < 0 {
 			start = 0
 		}
 		end := start + maxCompletionMatchesShown
-		if end > len(items) {
-			end = len(items)
+		if end > len(filtered) {
+			end = len(filtered)
 		}
-		shown := items[start:end]
+		shown := filtered[start:end]
 		count := 0
 		writeLine := func(text string) {
 			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
@@ -304,13 +315,19 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 			_, _ = io.WriteString(ui.out, "\r\n")
 			count++
 		}
-		header := fmt.Sprintf("%s  up/down nav  enter pick  esc cancel", title)
+		header := fmt.Sprintf("%s  type filter  up/down nav  enter pick  esc cancel", title)
+		if query != "" {
+			header += "  filter: " + query
+		}
 		for _, line := range wrapLine(header, ui.width) {
 			writeLine(line)
 		}
+		if len(shown) == 0 {
+			writeLine("  no matches")
+		}
 		for _, item := range shown {
 			marker := "  "
-			if idx >= start && items[idx] == item {
+			if idx >= start && idx < len(filtered) && filtered[idx] == item {
 				marker = "> "
 			}
 			for _, line := range wrapLine(marker+item, ui.width) {
@@ -357,6 +374,15 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 		switch b {
 		case 3:
 			return "", false
+		case 8, 127:
+			if query != "" {
+				runes := []rune(query)
+				query = string(runes[:len(runes)-1])
+				refilter()
+				draw(false)
+			} else {
+				ui.bell()
+			}
 		case 27:
 			kind, _, handled, _ := ui.readEscapeSequence()
 			if !handled {
@@ -364,14 +390,22 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 			}
 			switch kind {
 			case "up":
+				if len(filtered) == 0 {
+					ui.bell()
+					continue
+				}
 				idx--
 				if idx < 0 {
-					idx = len(items) - 1
+					idx = len(filtered) - 1
 				}
 				draw(false)
 			case "down":
+				if len(filtered) == 0 {
+					ui.bell()
+					continue
+				}
 				idx++
-				if idx >= len(items) {
+				if idx >= len(filtered) {
 					idx = 0
 				}
 				draw(false)
@@ -379,21 +413,35 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 				return "", false
 			}
 		case '\r', '\n':
-			return items[idx], true
-		case '1', '2', '3', '4', '5', '6', '7':
-			digit := int(b - '1')
-			start := idx - idx%maxCompletionMatchesShown
-			pos := start + digit
-			if pos >= 0 && pos < len(items) {
-				idx = pos
+			if len(filtered) == 0 {
+				ui.bell()
+				continue
+			}
+			return filtered[idx], true
+		default:
+			if b >= 32 {
+				query += string(rune(b))
+				refilter()
 				draw(false)
 			} else {
 				ui.bell()
 			}
-		default:
-			ui.bell()
 		}
 	}
+}
+
+func filterPickerItems(items []string, query string) []string {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return append([]string(nil), items...)
+	}
+	var out []string
+	for _, item := range items {
+		if strings.Contains(strings.ToLower(item), query) {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func (ui *terminalUI) overlayInput(title, prompt, initial string) (string, bool) {
