@@ -102,10 +102,16 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	var resp struct {
 		Data []struct {
-			ID            string `json:"id"`
-			Name          string `json:"name"`
-			ContextWindow int    `json:"context_window"`
-			MaxContext    int    `json:"max_context_window"`
+			ID                  string   `json:"id"`
+			Name                string   `json:"name"`
+			ContextWindow       int      `json:"context_window"`
+			MaxContext          int      `json:"max_context_window"`
+			SupportedParameters []string `json:"supported_parameters"`
+			Capabilities        struct {
+				Reasoning       bool `json:"reasoning"`
+				ReasoningEffort bool `json:"reasoning_effort"`
+				Thinking        bool `json:"thinking"`
+			} `json:"capabilities"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
@@ -121,7 +127,7 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 		if window == 0 {
 			window = m.MaxContext
 		}
-		models = append(models, Model{ID: m.ID, Name: name, ContextWindow: window})
+		models = append(models, Model{ID: m.ID, Name: name, ContextWindow: window, SupportsThinking: modelSupportsThinking(m.SupportedParameters, m.Capabilities.Reasoning || m.Capabilities.ReasoningEffort || m.Capabilities.Thinking)})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil
@@ -150,22 +156,21 @@ func (p *OpenAIProvider) buildRequest(req Request, stream bool) (map[string]any,
 	if len(req.Tools) > 0 {
 		body["tools"] = toOpenAITools(req.Tools)
 	}
-	if supportsThinkingLevel(model) && req.ThinkingLevel != "" && req.ThinkingLevel != "off" {
+	if req.ThinkingLevel != "" && req.ThinkingLevel != "off" {
 		body["reasoning_effort"] = req.ThinkingLevel
 	}
 	return body, nil
 }
 
-func supportsThinkingLevel(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	if strings.HasPrefix(m, "o") && len(m) > 1 && m[1] >= '0' && m[1] <= '9' {
+func modelSupportsThinking(params []string, capability bool) bool {
+	if capability {
 		return true
 	}
-	if strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "gpt5") {
-		return true
-	}
-	if strings.Contains(m, "reasoning") {
-		return true
+	for _, param := range params {
+		switch strings.ToLower(strings.TrimSpace(param)) {
+		case "reasoning_effort", "reasoning", "thinking":
+			return true
+		}
 	}
 	return false
 }

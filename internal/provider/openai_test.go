@@ -84,7 +84,7 @@ func TestOpenAIProviderListModels(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"b-model"},{"id":"a-model"}]}`)
+		fmt.Fprint(w, `{"data":[{"id":"b-model","supported_parameters":["reasoning_effort"]},{"id":"a-model"}]}`)
 	}))
 	defer ts.Close()
 
@@ -100,6 +100,9 @@ func TestOpenAIProviderListModels(t *testing.T) {
 	}
 	if len(models) != 2 || models[0].ID != "a-model" || models[1].ID != "b-model" {
 		t.Fatalf("models = %+v", models)
+	}
+	if models[0].SupportsThinking || !models[1].SupportsThinking {
+		t.Fatalf("supports thinking = %+v", models)
 	}
 }
 
@@ -139,7 +142,7 @@ func TestOpenAIProviderChat(t *testing.T) {
 	}
 }
 
-func TestOpenAIProviderAddsReasoningEffortForGPT5(t *testing.T) {
+func TestOpenAIProviderAddsReasoningEffortWhenRuntimeEnablesIt(t *testing.T) {
 	var got map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -149,7 +152,7 @@ func TestOpenAIProviderAddsReasoningEffortForGPT5(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p, err := NewOpenAI("demo", ts.URL, "key", "gpt5.5")
+	p, err := NewOpenAI("demo", ts.URL, "key", "provider-advertised-thinking-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +168,7 @@ func TestOpenAIProviderAddsReasoningEffortForGPT5(t *testing.T) {
 	}
 }
 
-func TestOpenAIProviderSkipsReasoningEffortForNonReasoningModel(t *testing.T) {
+func TestOpenAIProviderSkipsReasoningEffortWhenOff(t *testing.T) {
 	var got map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -181,7 +184,7 @@ func TestOpenAIProviderSkipsReasoningEffortForNonReasoningModel(t *testing.T) {
 	}
 	_, err = p.Chat(context.Background(), Request{
 		Messages:      []Message{{Role: "user", Content: "hi"}},
-		ThinkingLevel: "high",
+		ThinkingLevel: "off",
 	})
 	if err != nil {
 		t.Fatal(err)

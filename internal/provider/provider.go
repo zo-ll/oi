@@ -53,9 +53,10 @@ type Response struct {
 
 // Model describes a provider model.
 type Model struct {
-	ID            string `json:"id"`
-	Name          string `json:"name,omitempty"`
-	ContextWindow int    `json:"context_window,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name,omitempty"`
+	ContextWindow    int    `json:"context_window,omitempty"`
+	SupportsThinking bool   `json:"supports_thinking,omitempty"`
 }
 
 // EventType classifies streaming events.

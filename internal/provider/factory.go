@@ -91,6 +91,7 @@ func (p *OpenCodeProvider) ListModels(ctx context.Context) ([]Model, error) {
 			if model.ContextWindow > 0 {
 				meta.ContextWindow = model.ContextWindow
 			}
+			meta.SupportsThinking = model.SupportsThinking
 			out = append(out, meta)
 			continue
 		}
@@ -163,10 +164,16 @@ func (p *OpenCodeMessagesProvider) ListModels(ctx context.Context) ([]Model, err
 	}
 	var resp struct {
 		Data []struct {
-			ID            string `json:"id"`
-			Name          string `json:"name"`
-			ContextWindow int    `json:"context_window"`
-			MaxContext    int    `json:"max_context_window"`
+			ID                  string   `json:"id"`
+			Name                string   `json:"name"`
+			ContextWindow       int      `json:"context_window"`
+			MaxContext          int      `json:"max_context_window"`
+			SupportedParameters []string `json:"supported_parameters"`
+			Capabilities        struct {
+				Reasoning       bool `json:"reasoning"`
+				ReasoningEffort bool `json:"reasoning_effort"`
+				Thinking        bool `json:"thinking"`
+			} `json:"capabilities"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
@@ -182,7 +189,7 @@ func (p *OpenCodeMessagesProvider) ListModels(ctx context.Context) ([]Model, err
 		if window == 0 {
 			window = m.MaxContext
 		}
-		models = append(models, Model{ID: m.ID, Name: name, ContextWindow: window})
+		models = append(models, Model{ID: m.ID, Name: name, ContextWindow: window, SupportsThinking: modelSupportsThinking(m.SupportedParameters, m.Capabilities.Reasoning || m.Capabilities.ReasoningEffort || m.Capabilities.Thinking)})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil

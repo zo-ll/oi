@@ -43,15 +43,18 @@ func buildRuntime(cfg *config.Config, sel config.Selection, p provider.Provider,
 	if p != nil && p.Model() != "" {
 		model = p.Model()
 	}
+	info := lookupModelInfo(p, model)
 	return &agent.Runtime{
-		Provider:       p,
-		Tools:          tools,
-		Policy:         policy,
-		Session:        session.New(sel.Provider, model, root),
-		ToolTimeout:    time.Duration(cfg.Agent.ToolTimeoutSeconds) * time.Second,
-		RequestTimeout: time.Duration(cfg.Agent.RequestTimeoutSeconds) * time.Second,
-		ThinkingLevel:  cfg.Agent.ReasoningEffort,
-		Logger:         logger,
+		Provider:          p,
+		Tools:             tools,
+		Policy:            policy,
+		Session:           session.New(sel.Provider, model, root),
+		ToolTimeout:       time.Duration(cfg.Agent.ToolTimeoutSeconds) * time.Second,
+		RequestTimeout:    time.Duration(cfg.Agent.RequestTimeoutSeconds) * time.Second,
+		ContextWindow:     info.ContextWindow,
+		ThinkingLevel:     cfg.Agent.ReasoningEffort,
+		ThinkingSupported: info.SupportsThinking,
+		Logger:            logger,
 	}
 }
 

@@ -257,9 +257,13 @@ func clearScreen(out io.Writer) {
 	fmt.Fprint(out, "\x1b[2J\x1b[H")
 }
 
-func formatHeader(model, root string, contextWindow int, usage provider.Usage, think string) string {
+func formatHeader(model, root string, contextWindow int, usage provider.Usage, think string, thinkSupported bool) string {
 	header := fmt.Sprintf("oi · model %s", valueOr(model, "(none)"))
-	header += " · think " + valueOr(think, "default")
+	thinkLabel := valueOr(think, "default")
+	if !thinkSupported {
+		thinkLabel = "n/a"
+	}
+	header += " · think " + thinkLabel
 	if ctx := formatContextUsage(contextWindow, usage); ctx != "" {
 		header += " · " + ctx
 	} else if contextWindow > 0 {
@@ -270,21 +274,25 @@ func formatHeader(model, root string, contextWindow int, usage provider.Usage, t
 }
 
 func lookupContextWindow(p provider.Provider, model string) int {
+	return lookupModelInfo(p, model).ContextWindow
+}
+
+func lookupModelInfo(p provider.Provider, model string) provider.Model {
 	if p == nil || strings.TrimSpace(model) == "" {
-		return 0
+		return provider.Model{}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	models, err := p.ListModels(ctx)
 	if err != nil {
-		return 0
+		return provider.Model{}
 	}
 	for _, item := range models {
 		if item.ID == model {
-			return item.ContextWindow
+			return item
 		}
 	}
-	return 0
+	return provider.Model{}
 }
 
 func formatRetrievalNotice(notice retrieval.Notice) string {

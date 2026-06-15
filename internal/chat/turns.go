@@ -38,7 +38,10 @@ func newChatState(cfg *config.Config, sel config.Selection, rt *agent.Runtime) *
 }
 
 func (s *chatState) reconfigureRuntime(out io.Writer) {
-	s.contextWindow = lookupContextWindow(s.rt.Provider, s.sel.Model)
+	model := lookupModelInfo(s.rt.Provider, s.sel.Model)
+	s.contextWindow = model.ContextWindow
+	s.rt.ContextWindow = model.ContextWindow
+	s.rt.ThinkingSupported = model.SupportsThinking
 	configureChatRuntime(s.rt, out, s.tools)
 }
 
@@ -51,7 +54,11 @@ func (s *chatState) header(root string) string {
 	if s != nil && s.rt != nil {
 		usage = s.rt.LastUsage
 	}
-	return formatHeader(s.sel.Model, root, s.contextWindow, usage, level)
+	supported := false
+	if s != nil && s.rt != nil {
+		supported = s.rt.ThinkingSupported
+	}
+	return formatHeader(s.sel.Model, root, s.contextWindow, usage, level, supported)
 }
 
 func (s *chatState) applyCommandResult(newRT *agent.Runtime, newSel config.Selection, newStreaming, newAutosave bool, newTools toolVerbosity, out io.Writer) {

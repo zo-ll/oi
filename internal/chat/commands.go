@@ -156,8 +156,16 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		return false, rt, sel, *nextStreaming, autosave, tools, nil
 	case "/think":
 		if arg != "" {
-			if err := setThinkingLevel(cfg, arg); err != nil {
+			level, err := parseThinkingLevel(arg)
+			if err != nil {
 				return false, rt, sel, streaming, autosave, tools, err
+			}
+			if level != "" && level != "off" && (rt == nil || !rt.ThinkingSupported) {
+				return false, rt, sel, streaming, autosave, tools, fmt.Errorf("selected model does not advertise thinking levels")
+			}
+			cfg.Agent.ReasoningEffort = level
+			if err := config.Save(cfg); err != nil {
+				return false, rt, sel, streaming, autosave, tools, fmt.Errorf("save config: %w", err)
 			}
 		}
 		level := "default"
@@ -325,20 +333,16 @@ func promptSaveName(reader *bufio.Reader, out io.Writer) (string, error) {
 	return strings.TrimSpace(text), nil
 }
 
-func setThinkingLevel(cfg *config.Config, level string) error {
+func parseThinkingLevel(level string) (string, error) {
 	level = strings.ToLower(strings.TrimSpace(level))
 	switch level {
 	case "off", "low", "medium", "high":
+		return level, nil
 	case "default":
-		level = ""
+		return "", nil
 	default:
-		return fmt.Errorf("usage: /think [off|low|medium|high|default]")
+		return "", fmt.Errorf("usage: /think [off|low|medium|high|default]")
 	}
-	cfg.Agent.ReasoningEffort = level
-	if err := config.Save(cfg); err != nil {
-		return fmt.Errorf("save config: %w", err)
-	}
-	return nil
 }
 
 func pickSimpleChoice(reader *bufio.Reader, out io.Writer, title string, items []string) (string, bool, error) {
