@@ -164,9 +164,6 @@ func supportsThinkingLevel(model string) bool {
 	if strings.Contains(m, "reasoning") {
 		return true
 	}
-	if strings.HasPrefix(m, "claude-3-7-sonnet") || strings.HasPrefix(m, "claude-sonnet-4") {
-		return true
-	}
 	return false
 }
 
