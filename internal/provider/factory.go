@@ -42,7 +42,28 @@ func openCodeReasoningModel(id, name, format string, levels []string, values map
 	if len(levels) == 0 {
 		levels = []string{"off", "low", "medium", "high"}
 	}
-	return Model{ID: id, Name: name, SupportsThinking: format != "none", ThinkingFormat: format, SupportedThinkingLevels: levels, ThinkingLevelValues: values}
+	return Model{ID: id, Name: name, ContextWindow: openCodeContextWindow(id), SupportsThinking: format != "none", ThinkingFormat: format, SupportedThinkingLevels: levels, ThinkingLevelValues: values}
+}
+
+func openCodeContextWindow(id string) int {
+	switch id {
+	case "deepseek-v4-flash", "deepseek-v4-pro", "mimo-v2.5", "qwen3.6-plus", "qwen3.7-max", "qwen3.7-plus":
+		return 1000000
+	case "mimo-v2.5-pro":
+		return 1048576
+	case "minimax-m3":
+		return 512000
+	case "kimi-k2.5", "kimi-k2.6", "kimi-k2.7", "kimi-k2.7-code":
+		return 262144
+	case "glm-5", "glm-5.1":
+		return 202752
+	case "minimax-m2.7":
+		return 204800
+	case "grok-build-0.1":
+		return 256000
+	default:
+		return 0
+	}
 }
 
 const openCodeMessagesDefaultMaxTokens = 8192

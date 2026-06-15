@@ -330,6 +330,9 @@ func TestOpenCodeProviderListModelsIncludesAllAdvertisedModels(t *testing.T) {
 		if model.ID != "unknown-model" && model.ID != "grok-build-0.1" && !model.SupportsThinking {
 			t.Fatalf("opencode model missing thinking support: %+v", model)
 		}
+		if model.ID == "qwen3.7-max" && model.ContextWindow != 1000000 {
+			t.Fatalf("qwen context = %+v", model)
+		}
 	}
 	for _, want := range []string{"qwen3.7-max", "minimax-m2.7", "grok-build-0.1", "unknown-model"} {
 		if !seen[want] {
