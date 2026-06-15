@@ -153,6 +153,19 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		}
 		fmt.Fprintf(out, "streaming: %s\n", onOff(*nextStreaming))
 		return false, rt, sel, *nextStreaming, autosave, tools, nil
+	case "/think":
+		if arg != "" {
+			if err := setThinkingLevel(cfg, arg); err != nil {
+				return false, rt, sel, streaming, autosave, tools, err
+			}
+		}
+		level := "default"
+		if cfg.Agent.ReasoningEffort != "" {
+			level = cfg.Agent.ReasoningEffort
+		}
+		rt.ThinkingLevel = cfg.Agent.ReasoningEffort
+		fmt.Fprintf(out, "thinking: %s\n", level)
+		return false, rt, sel, streaming, autosave, tools, nil
 	case "/tools":
 		if arg != "" {
 			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /tools")
@@ -309,6 +322,22 @@ func promptSaveName(reader *bufio.Reader, out io.Writer) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(text), nil
+}
+
+func setThinkingLevel(cfg *config.Config, level string) error {
+	level = strings.ToLower(strings.TrimSpace(level))
+	switch level {
+	case "off", "low", "medium", "high":
+	case "default":
+		level = ""
+	default:
+		return fmt.Errorf("usage: /think [off|low|medium|high|default]")
+	}
+	cfg.Agent.ReasoningEffort = level
+	if err := config.Save(cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	return nil
 }
 
 func pickSimpleChoice(reader *bufio.Reader, out io.Writer, title string, items []string) (string, bool, error) {

@@ -42,11 +42,11 @@ func (s *chatState) reconfigureRuntime(out io.Writer) {
 }
 
 func (s *chatState) header(root string) string {
-	variant := ""
-	if s != nil && s.cfg != nil {
-		variant = s.cfg.Agent.ReasoningEffort
+	level := ""
+	if s != nil && s.rt != nil {
+		level = s.rt.ThinkingLevel
 	}
-	return formatHeader(s.sel.Model, root, s.contextWindow, variant)
+	return formatHeader(s.sel.Model, root, s.contextWindow, level)
 }
 
 func (s *chatState) applyCommandResult(newRT *agent.Runtime, newSel config.Selection, newStreaming, newAutosave bool, newTools toolVerbosity, out io.Writer) {

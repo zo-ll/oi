@@ -28,6 +28,7 @@ type Runtime struct {
 	ToolTimeout          time.Duration
 	RequestTimeout       time.Duration
 	ContextWindow        int
+	ThinkingLevel        string
 	LastUsage            provider.Usage
 	RecentRetrievedPaths []string
 	SystemPrompt         string
@@ -223,7 +224,7 @@ func jsonRaw(raw []byte) any {
 }
 
 func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, onDelta func(string), streaming bool) (provider.Response, error) {
-	req := provider.Request{Model: r.Provider.Model(), Messages: history, Tools: providerToolSpecs(r.Tools)}
+	req := provider.Request{Model: r.Provider.Model(), Messages: history, Tools: providerToolSpecs(r.Tools), ThinkingLevel: r.ThinkingLevel}
 	requestCtx, cancel := context.WithTimeout(ctx, r.RequestTimeout)
 	defer cancel()
 	if !streaming {

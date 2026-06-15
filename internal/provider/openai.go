@@ -150,7 +150,24 @@ func (p *OpenAIProvider) buildRequest(req Request, stream bool) (map[string]any,
 	if len(req.Tools) > 0 {
 		body["tools"] = toOpenAITools(req.Tools)
 	}
+	if supportsThinkingLevel(model) && req.ThinkingLevel != "" {
+		body["reasoning_effort"] = req.ThinkingLevel
+	}
 	return body, nil
+}
+
+func supportsThinkingLevel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if strings.HasPrefix(m, "o") && len(m) > 1 && m[1] >= '0' && m[1] <= '9' {
+		return true
+	}
+	if strings.Contains(m, "reasoning") {
+		return true
+	}
+	if strings.HasPrefix(m, "claude-3-7-sonnet") || strings.HasPrefix(m, "claude-sonnet-4") {
+		return true
+	}
+	return false
 }
 
 func toOpenAIMessages(messages []Message) ([]map[string]any, error) {
