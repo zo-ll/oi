@@ -517,6 +517,26 @@ func TestTerminalWriteWrappedDoesNotSplitWords(t *testing.T) {
 	}
 }
 
+func TestTerminalWriteWrappedAfterExactFit(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 10}
+	ui.writeWrapped("alpha beta gamma")
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "alpha beta\r\ngamma" {
+		t.Fatalf("out = %q", string(data))
+	}
+}
+
 func TestTerminalWriteWrappedDoesNotSplitLongWords(t *testing.T) {
 	out, err := os.CreateTemp(t.TempDir(), "term-out")
 	if err != nil {
