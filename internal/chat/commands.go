@@ -156,24 +156,24 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		return false, rt, sel, *nextStreaming, autosave, tools, nil
 	case "/think":
 		if arg != "" {
-			level, err := parseThinkingLevel(arg)
-			if err != nil {
-				return false, rt, sel, streaming, autosave, tools, err
-			}
-			if level != "" && level != "off" && (rt == nil || !rt.ThinkingSupported) {
-				return false, rt, sel, streaming, autosave, tools, fmt.Errorf("selected model does not advertise thinking levels")
-			}
-			cfg.Agent.ReasoningEffort = level
-			if err := config.Save(cfg); err != nil {
-				return false, rt, sel, streaming, autosave, tools, fmt.Errorf("save config: %w", err)
-			}
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /think")
 		}
-		level := "default"
-		if cfg.Agent.ReasoningEffort != "" {
-			level = cfg.Agent.ReasoningEffort
+		level, ok, err := chooseThinkingLevel(reader, out, cfg.Agent.ReasoningEffort)
+		if err != nil {
+			return false, rt, sel, streaming, autosave, tools, err
+		}
+		if !ok {
+			return false, rt, sel, streaming, autosave, tools, nil
+		}
+		if level != "" && level != "off" && (rt == nil || !rt.ThinkingSupported) {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("selected model does not advertise thinking levels")
+		}
+		cfg.Agent.ReasoningEffort = level
+		if err := config.Save(cfg); err != nil {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("save config: %w", err)
 		}
 		rt.ThinkingLevel = cfg.Agent.ReasoningEffort
-		fmt.Fprintf(out, "thinking: %s\n", level)
+		fmt.Fprintf(out, "thinking: %s\n", valueOr(level, "default"))
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/tools":
 		if arg != "" {
@@ -333,6 +333,18 @@ func promptSaveName(reader *bufio.Reader, out io.Writer) (string, error) {
 	return strings.TrimSpace(text), nil
 }
 
+func chooseThinkingLevel(reader *bufio.Reader, out io.Writer, current string) (string, bool, error) {
+	selected, ok, err := pickSimpleChoice(reader, out, "choose thinking level", []string{"default", "off", "low", "medium", "high"})
+	if err != nil || !ok {
+		return current, false, err
+	}
+	level, err := parseThinkingLevel(selected)
+	if err != nil {
+		return current, false, err
+	}
+	return level, true, nil
+}
+
 func parseThinkingLevel(level string) (string, error) {
 	level = strings.ToLower(strings.TrimSpace(level))
 	switch level {
@@ -341,7 +353,7 @@ func parseThinkingLevel(level string) (string, error) {
 	case "default":
 		return "", nil
 	default:
-		return "", fmt.Errorf("usage: /think [off|low|medium|high|default]")
+		return "", fmt.Errorf("usage: /think")
 	}
 }
 

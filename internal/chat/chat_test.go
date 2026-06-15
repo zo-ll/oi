@@ -712,7 +712,7 @@ func TestHandleChatCommandSessionRejectsArgs(t *testing.T) {
 }
 
 func TestHandleChatCommandRejectsArgsForExactCommands(t *testing.T) {
-	for _, line := range []string{"/help now", "/login api", "/model gpt", "/stream off", "/tools on", "/autosave off", "/save snap", "/new x", "/clear now", "/exit now"} {
+	for _, line := range []string{"/help now", "/login api", "/model gpt", "/stream off", "/think high", "/tools on", "/autosave off", "/save snap", "/new x", "/clear now", "/exit now"} {
 		_, _, _, _, _, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, nil, bufio.NewReader(strings.NewReader("")), &strings.Builder{}, line, true, true, toolVerbosityErrors)
 		if err == nil || !strings.HasPrefix(err.Error(), "usage: ") {
 			t.Fatalf("line=%q err=%v", line, err)
@@ -721,20 +721,26 @@ func TestHandleChatCommandRejectsArgsForExactCommands(t *testing.T) {
 }
 
 func TestHandleChatCommandChoicePickers(t *testing.T) {
-	picker := &pickerRecorder{choices: []string{"off", "on", "off"}}
-	_, _, _, streaming, _, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, nil, bufio.NewReader(strings.NewReader("")), picker, "/stream", true, true, toolVerbosityErrors)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	picker := &pickerRecorder{choices: []string{"off", "on", "off", "high"}}
+	rt := &agent.Runtime{ThinkingSupported: true}
+	_, _, _, streaming, _, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, rt, bufio.NewReader(strings.NewReader("")), picker, "/stream", true, true, toolVerbosityErrors)
 	if err != nil || streaming {
 		t.Fatalf("stream err=%v streaming=%v", err, streaming)
 	}
-	_, _, _, _, autosave, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, nil, bufio.NewReader(strings.NewReader("")), picker, "/autosave", true, false, toolVerbosityErrors)
+	_, _, _, _, autosave, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, rt, bufio.NewReader(strings.NewReader("")), picker, "/autosave", true, false, toolVerbosityErrors)
 	if err != nil || !autosave {
 		t.Fatalf("autosave err=%v autosave=%v", err, autosave)
 	}
-	_, _, _, _, _, tools, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, nil, bufio.NewReader(strings.NewReader("")), picker, "/tools", true, true, toolVerbosityErrors)
+	_, _, _, _, _, tools, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, rt, bufio.NewReader(strings.NewReader("")), picker, "/tools", true, true, toolVerbosityErrors)
 	if err != nil || tools != toolVerbosityOff {
 		t.Fatalf("tools err=%v tools=%v", err, tools)
 	}
-	if got := strings.Join(picker.titles, " | "); got != "choose streaming mode | choose autosave mode | choose tool visibility" {
+	_, _, _, _, _, _, err = handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, rt, bufio.NewReader(strings.NewReader("")), picker, "/think", true, true, toolVerbosityErrors)
+	if err != nil || rt.ThinkingLevel != "high" {
+		t.Fatalf("think err=%v level=%q", err, rt.ThinkingLevel)
+	}
+	if got := strings.Join(picker.titles, " | "); got != "choose streaming mode | choose autosave mode | choose tool visibility | choose thinking level" {
 		t.Fatalf("titles=%q", got)
 	}
 }
