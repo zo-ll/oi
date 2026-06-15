@@ -91,10 +91,11 @@ func (p *OpenCodeProvider) ListModels(ctx context.Context) ([]Model, error) {
 			if model.ContextWindow > 0 {
 				meta.ContextWindow = model.ContextWindow
 			}
-			meta.SupportsThinking = model.SupportsThinking
+			meta.SupportsThinking = true
 			out = append(out, meta)
 			continue
 		}
+		model.SupportsThinking = true
 		out = append(out, model)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -261,7 +262,21 @@ func (p *OpenCodeMessagesProvider) buildRequest(req Request, stream bool) (map[s
 	if len(req.Tools) > 0 {
 		body["tools"] = toOpenCodeMessageTools(req.Tools)
 	}
+	if req.ThinkingLevel != "" && req.ThinkingLevel != "off" {
+		body["thinking"] = map[string]any{"type": "enabled", "budget_tokens": thinkingBudgetTokens(req.ThinkingLevel)}
+	}
 	return body, nil
+}
+
+func thinkingBudgetTokens(level string) int {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "low":
+		return 1024
+	case "high":
+		return 4096
+	default:
+		return 2048
+	}
 }
 
 func toOpenCodeMessages(messages []Message) (string, []map[string]any, error) {

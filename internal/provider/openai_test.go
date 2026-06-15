@@ -280,6 +280,9 @@ func TestOpenCodeProviderListModelsIncludesAllAdvertisedModels(t *testing.T) {
 	seen := map[string]bool{}
 	for _, model := range models {
 		seen[model.ID] = true
+		if !model.SupportsThinking {
+			t.Fatalf("opencode model missing thinking support: %+v", model)
+		}
 	}
 	for _, want := range []string{"qwen3.7-max", "minimax-m2.7", "grok-build-0.1", "unknown-model"} {
 		if !seen[want] {
@@ -288,6 +291,33 @@ func TestOpenCodeProviderListModelsIncludesAllAdvertisedModels(t *testing.T) {
 	}
 	if seen["deepseek-v4-flash"] {
 		t.Fatalf("unexpected fallback-only model in %+v", models)
+	}
+}
+
+func TestOpenCodeMessagesProviderSendsThinkingBudget(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode messages request: %v", err)
+		}
+		fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}]}`)
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenCode("opencode-go", ts.URL, "key", "minimax-m3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Chat(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingLevel: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thinking, ok := got["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "enabled" || thinking["budget_tokens"] != float64(4096) {
+		t.Fatalf("thinking = %#v body=%#v", got["thinking"], got)
 	}
 }
 
