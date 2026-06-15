@@ -497,6 +497,26 @@ func TestReadMessageHomeEndDelete(t *testing.T) {
 	}
 }
 
+func TestTerminalWriteWrappedDoesNotSplitWords(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 9}
+	ui.writeWrapped("alpha beta")
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "alpha\r\nbeta" {
+		t.Fatalf("out = %q", string(data))
+	}
+}
+
 func TestWrapLinePrefersWordBoundaries(t *testing.T) {
 	lines := wrapLine("alpha beta gamma", 7)
 	if len(lines) != 3 {

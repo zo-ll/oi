@@ -110,7 +110,7 @@ func (ui *terminalUI) resumeRaw() error {
 }
 
 func (ui *terminalUI) refreshSize() {
-	if ui == nil {
+	if ui == nil || ui.in == nil || !isCharDevice(ui.in) {
 		return
 	}
 	width := terminalWidth(ui.in)
@@ -372,42 +372,111 @@ func (ui *terminalUI) writeWrapped(s string) {
 		ui.clearPromptLocked()
 	}
 	ui.refreshSize()
-	escapeState := 0
-	for _, r := range s {
-		if escapeState > 0 {
-			_, _ = io.WriteString(ui.out, string(r))
-			switch escapeState {
-			case 1:
-				if r == '[' {
-					escapeState = 2
-				} else if ansiEscapeFinal(r) {
-					escapeState = 0
-				}
-			case 2:
-				if ansiEscapeFinal(r) {
-					escapeState = 0
-				}
-			}
-			continue
-		}
+	runes := []rune(s)
+	for i := 0; i < len(runes); {
+		r := runes[i]
 		switch r {
 		case 27:
-			escapeState = 1
-			_, _ = io.WriteString(ui.out, string(r))
+			consumed := ui.writeANSIEscapeLocked(runes[i:])
+			i += consumed
 		case '\r':
 			_, _ = io.WriteString(ui.out, "\r")
 			ui.outputColumn = 0
+			i++
 		case '\n':
 			_, _ = io.WriteString(ui.out, "\r\n")
 			ui.outputColumn = 0
-		case '\t':
-			for i := 0; i < 4; i++ {
-				ui.writeRuneLocked(' ')
+			i++
+		case '\t', ' ':
+			j := i
+			for j < len(runes) && (runes[j] == ' ' || runes[j] == '\t') {
+				j++
 			}
+			next := j
+			for next < len(runes) && !isWrapBoundaryRune(runes[next]) {
+				next++
+			}
+			ui.writeSpaceBeforeWordLocked(next - j)
+			i = j
 		default:
-			ui.writeRuneLocked(r)
+			j := i
+			for j < len(runes) && !isWrapBoundaryRune(runes[j]) {
+				j++
+			}
+			ui.writeWordLocked(string(runes[i:j]), j-i)
+			i = j
 		}
 	}
+}
+
+func isWrapBoundaryRune(r rune) bool {
+	return r == 27 || r == '\r' || r == '\n' || r == '\t' || r == ' '
+}
+
+func (ui *terminalUI) writeANSIEscapeLocked(runes []rune) int {
+	if len(runes) == 0 {
+		return 0
+	}
+	_, _ = io.WriteString(ui.out, string(runes[0]))
+	state := 1
+	for i := 1; i < len(runes); i++ {
+		r := runes[i]
+		_, _ = io.WriteString(ui.out, string(r))
+		switch state {
+		case 1:
+			if r == '[' {
+				state = 2
+			} else if ansiEscapeFinal(r) {
+				return i + 1
+			}
+		case 2:
+			if ansiEscapeFinal(r) {
+				return i + 1
+			}
+		}
+	}
+	return len(runes)
+}
+
+func (ui *terminalUI) writeSpaceBeforeWordLocked(nextWordWidth int) {
+	if ui.width <= 0 {
+		ui.width = 80
+	}
+	if ui.outputColumn == 0 {
+		return
+	}
+	if nextWordWidth > 0 && nextWordWidth <= ui.width && ui.outputColumn+1+nextWordWidth > ui.width {
+		_, _ = io.WriteString(ui.out, "\r\n")
+		ui.outputColumn = 0
+		return
+	}
+	if ui.outputColumn+1 >= ui.width {
+		_, _ = io.WriteString(ui.out, "\r\n")
+		ui.outputColumn = 0
+		return
+	}
+	ui.writeRuneLocked(' ')
+}
+
+func (ui *terminalUI) writeWordLocked(word string, width int) {
+	if ui.width <= 0 {
+		ui.width = 80
+	}
+	if width <= 0 {
+		return
+	}
+	if width > ui.width {
+		for _, r := range word {
+			ui.writeRuneLocked(r)
+		}
+		return
+	}
+	if ui.outputColumn > 0 && ui.outputColumn+width > ui.width {
+		_, _ = io.WriteString(ui.out, "\r\n")
+		ui.outputColumn = 0
+	}
+	_, _ = io.WriteString(ui.out, word)
+	ui.outputColumn += width
 }
 
 func (ui *terminalUI) writeRuneLocked(r rune) {
