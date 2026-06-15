@@ -684,14 +684,10 @@ func TestStreamRendererPreservesTextAcrossChunks(t *testing.T) {
 	ui.startAssistantResponse()
 	r := &taggedStreamRenderer{}
 	for _, c := range chunks {
-		for _, seg := range r.Push(c) {
-			ui.writeResponseSegment(seg)
-		}
+		ui.writeStreamSegments(r.Push(c))
 	}
-	for _, seg := range r.Flush() {
-		ui.writeResponseSegment(seg)
-	}
-	ui.writeWrapped("\n")
+	ui.writeStreamSegments(r.Flush())
+	ui.finishAssistantResponse()
 	if _, err := out.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +695,8 @@ func TestStreamRendererPreservesTextAcrossChunks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := strings.ReplaceAll(string(data), "\r\n", "\n")
+	got := lastStreamFrame(string(data))
+	got = strings.ReplaceAll(got, "\r\n", "\n")
 	want := text + "\n"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
@@ -727,14 +724,10 @@ func TestStreamRendererPreservesMultilineMarkdown(t *testing.T) {
 	ui.startAssistantResponse()
 	r := &taggedStreamRenderer{}
 	for _, c := range chunks {
-		for _, seg := range r.Push(c) {
-			ui.writeResponseSegment(seg)
-		}
+		ui.writeStreamSegments(r.Push(c))
 	}
-	for _, seg := range r.Flush() {
-		ui.writeResponseSegment(seg)
-	}
-	ui.writeWrapped("\n")
+	ui.writeStreamSegments(r.Flush())
+	ui.finishAssistantResponse()
 	if _, err := out.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -742,14 +735,15 @@ func TestStreamRendererPreservesMultilineMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := strings.ReplaceAll(string(data), "\r\n", "\n")
+	got := lastStreamFrame(string(data))
+	got = strings.ReplaceAll(got, "\r\n", "\n")
 	want := text + "\n"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }
 
-func TestTerminalResponseSegmentsSeparated(t *testing.T) {
+func TestStreamContainerRendersThinkingAndAnswer(t *testing.T) {
 	out, err := os.CreateTemp(t.TempDir(), "term-out")
 	if err != nil {
 		t.Fatal(err)
@@ -757,8 +751,11 @@ func TestTerminalResponseSegmentsSeparated(t *testing.T) {
 	defer out.Close()
 	ui := &terminalUI{in: out, out: out, width: 80}
 	ui.startAssistantResponse()
-	ui.writeResponseSegment(responseSegment{text: "plan ", reasoning: true})
-	ui.writeResponseSegment(responseSegment{text: "answer\n"})
+	ui.writeStreamSegments([]responseSegment{
+		{text: "plan ", reasoning: true},
+		{text: "answer"},
+	})
+	ui.finishAssistantResponse()
 	if _, err := out.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -766,12 +763,36 @@ func TestTerminalResponseSegmentsSeparated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := string(data)
-	if !strings.Contains(got, "thinking") || !strings.Contains(got, "answer\r\n") {
-		t.Fatalf("got %q", got)
+	got := stripANSI(string(data))
+	got = strings.ReplaceAll(got, "\r\n", "\n")
+	want := "plan \n\nanswer\n"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
-	if strings.Contains(got, "response") {
-		t.Fatalf("unexpected response label: %q", got)
+}
+
+func TestStreamContainerRedrawsGrowingAnswer(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 80}
+	ui.startAssistantResponse()
+	ui.writeStreamSegments([]responseSegment{{text: "Hel"}})
+	ui.writeStreamSegments([]responseSegment{{text: "lo world"}})
+	ui.finishAssistantResponse()
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := lastStreamFrame(string(data))
+	got = strings.ReplaceAll(got, "\r\n", "\n")
+	if got != "Hello world\n" {
+		t.Fatalf("got %q", got)
 	}
 }
 
@@ -846,6 +867,54 @@ func TestFuzzyFileMatchesPrefersBasename(t *testing.T) {
 	if len(matches) == 0 || matches[0] != "internal/chat/ui.go" {
 		t.Fatalf("matches = %#v", matches)
 	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 27 && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && ((s[j] >= '0' && s[j] <= '9') || s[j] == ';') {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			i = j
+			continue
+		}
+		if s[i] == 27 {
+			i += 2
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+func lastStreamFrame(s string) string {
+	marker := "\x1b["
+	last := -1
+	for i := 0; i < len(s); {
+		if strings.HasPrefix(s[i:], marker) {
+			j := i + len(marker)
+			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+				j++
+			}
+			if j < len(s) && s[j] == 'A' {
+				last = j + 1
+				i = j + 1
+				continue
+			}
+		}
+		i++
+	}
+	if last >= 0 {
+		s = s[last:]
+	}
+	s = stripANSI(s)
+	return strings.TrimLeft(s, "\r\n")
 }
 
 func TestFormatCompletionMatches(t *testing.T) {

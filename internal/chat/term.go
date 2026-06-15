@@ -36,7 +36,9 @@ type terminalUI struct {
 	completion      completionState
 	promptHint      string
 	promptHintLines int
-	responseSection string
+	streamThinking  string
+	streamAnswer    string
+	streamLines     int
 	pickerMatches   []string
 	pickerActive    bool
 	pickerIndex     int
@@ -369,42 +371,82 @@ func (ui *terminalUI) Write(p []byte) (int, error) {
 func (ui *terminalUI) startAssistantResponse() {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
-	ui.responseSection = ""
+	ui.streamThinking = ""
+	ui.streamAnswer = ""
+	ui.streamLines = 0
 	ui.outputTail = ""
 }
 
-func (ui *terminalUI) writeResponseSegment(seg responseSegment) {
-	if seg.text == "" {
+func (ui *terminalUI) writeStreamSegments(segs []responseSegment) {
+	if len(segs) == 0 {
 		return
 	}
-	if seg.reasoning {
-		ui.ensureThinkingSection()
-		ui.writeWrapped(ui.Styled("dim", seg.text))
-		return
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	for _, seg := range segs {
+		if seg.reasoning {
+			ui.streamThinking += seg.text
+		} else {
+			ui.streamAnswer += seg.text
+		}
 	}
-	ui.ensureAnswerSection()
-	ui.writeWrapped(seg.text)
+	ui.renderStreamLocked()
 }
 
-func (ui *terminalUI) ensureThinkingSection() {
-	if ui.responseSection == "thinking" {
-		return
+func (ui *terminalUI) finishAssistantResponse() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	if ui.streamLines > 0 {
+		_, _ = io.WriteString(ui.out, "\r\n")
+		ui.streamLines = 0
 	}
-	if ui.responseSection != "" {
-		ui.writeWrapped("\n")
-	}
-	ui.writeWrapped(ui.Styled("dim", "thinking") + "\n")
-	ui.responseSection = "thinking"
+	ui.streamThinking = ""
+	ui.streamAnswer = ""
 }
 
-func (ui *terminalUI) ensureAnswerSection() {
-	if ui.responseSection == "answer" {
+func (ui *terminalUI) renderStreamLocked() {
+	ui.refreshSize()
+	width := ui.width
+	if width <= 0 {
+		width = 80
+	}
+	var lines []string
+	if thinking := cleanDisplayText(ui.streamThinking); thinking != "" {
+		for _, line := range wrapText(thinking, width) {
+			lines = append(lines, ui.Styled("dim", line))
+		}
+		lines = append(lines, "")
+	}
+	if answer := cleanDisplayText(ui.streamAnswer); answer != "" {
+		lines = append(lines, wrapText(answer, width)...)
+	}
+	if len(lines) == 0 {
 		return
 	}
-	if ui.responseSection == "thinking" {
-		ui.writeWrapped("\n")
+	if ui.streamLines > 0 {
+		_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dA", ui.streamLines))
 	}
-	ui.responseSection = "answer"
+	for i, line := range lines {
+		if i > 0 {
+			_, _ = io.WriteString(ui.out, "\r\n")
+		}
+		_, _ = io.WriteString(ui.out, "\x1b[2K")
+		_, _ = io.WriteString(ui.out, line)
+	}
+	_, _ = io.WriteString(ui.out, "\x1b[J")
+	ui.streamLines = len(lines)
+}
+
+func wrapText(text string, width int) []string {
+	var out []string
+	for _, part := range strings.Split(text, "\n") {
+		if part == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, wrapLine(part, width)...)
+	}
+	return out
 }
 
 func (ui *terminalUI) writeWrapped(s string) {

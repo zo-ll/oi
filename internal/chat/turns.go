@@ -195,16 +195,21 @@ func isWouldBlock(err error) bool {
 }
 
 func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
+	ui.startAssistantResponse()
+	renderer := &taggedStreamRenderer{}
 	resp, runErr := runAbortableTUI(ui, state.rt, func(ctx context.Context) (string, error) {
-		return state.rt.RunOnceStream(ctx, line, func(string) {})
+		return state.rt.RunOnceStream(ctx, line, func(delta string) {
+			ui.writeStreamSegments(renderer.Push(delta))
+		})
 	})
+	ui.writeStreamSegments(renderer.Flush())
+	ui.finishAssistantResponse()
 	if runErr != nil {
 		ui.notify("error: " + runErr.Error())
 		return
 	}
 	resp = cleanDisplayText(resp)
 	state.lastAssistant = resp
-	ui.notify(resp)
 	ui.blankLine()
 	state.autosaveSession(ui, ui.notify)
 }
