@@ -681,8 +681,11 @@ func TestTerminalResponseSegmentsSeparated(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(data)
-	if !strings.Contains(got, "thinking") || !strings.Contains(got, "response") || !strings.Contains(got, "answer\r\n") {
+	if !strings.Contains(got, "thinking") || !strings.Contains(got, "answer\r\n") {
 		t.Fatalf("got %q", got)
+	}
+	if strings.Contains(got, "response") {
+		t.Fatalf("unexpected response label: %q", got)
 	}
 }
 

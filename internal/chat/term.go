@@ -378,23 +378,33 @@ func (ui *terminalUI) writeResponseSegment(seg responseSegment) {
 		return
 	}
 	if seg.reasoning {
-		ui.ensureResponseSection("thinking")
+		ui.ensureThinkingSection()
 		ui.writeWrapped(ui.Styled("dim", seg.text))
 		return
 	}
-	ui.ensureResponseSection("response")
+	ui.ensureAnswerSection()
 	ui.writeWrapped(seg.text)
 }
 
-func (ui *terminalUI) ensureResponseSection(section string) {
-	if ui.responseSection == section {
+func (ui *terminalUI) ensureThinkingSection() {
+	if ui.responseSection == "thinking" {
 		return
 	}
 	if ui.responseSection != "" {
 		ui.writeWrapped("\n")
 	}
-	ui.writeWrapped(ui.Styled("dim", section) + "\n")
-	ui.responseSection = section
+	ui.writeWrapped(ui.Styled("dim", "thinking") + "\n")
+	ui.responseSection = "thinking"
+}
+
+func (ui *terminalUI) ensureAnswerSection() {
+	if ui.responseSection == "answer" {
+		return
+	}
+	if ui.responseSection == "thinking" {
+		ui.writeWrapped("\n")
+	}
+	ui.responseSection = "answer"
 }
 
 func (ui *terminalUI) writeWrapped(s string) {
