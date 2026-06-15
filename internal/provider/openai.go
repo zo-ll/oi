@@ -156,10 +156,45 @@ func (p *OpenAIProvider) buildRequest(req Request, stream bool) (map[string]any,
 	if len(req.Tools) > 0 {
 		body["tools"] = toOpenAITools(req.Tools)
 	}
-	if req.ThinkingLevel != "" && req.ThinkingLevel != "off" {
-		body["reasoning_effort"] = req.ThinkingLevel
-	}
+	applyOpenAIThinking(body, req)
 	return body, nil
+}
+
+func applyOpenAIThinking(body map[string]any, req Request) {
+	level := strings.ToLower(strings.TrimSpace(req.ThinkingLevel))
+	value := strings.TrimSpace(req.ThinkingValue)
+	if value == "" {
+		value = level
+	}
+	format := strings.ToLower(strings.TrimSpace(req.ThinkingFormat))
+	if format == "" {
+		format = "reasoning_effort"
+	}
+	switch format {
+	case "none":
+		return
+	case "deepseek":
+		if level == "off" {
+			body["thinking"] = map[string]any{"type": "disabled"}
+			return
+		}
+		if level != "" {
+			body["thinking"] = map[string]any{"type": "enabled"}
+			body["reasoning_effort"] = value
+		}
+	case "qwen":
+		if level != "" {
+			body["enable_thinking"] = level != "off"
+		}
+	case "openrouter":
+		if level != "" && level != "off" {
+			body["reasoning"] = map[string]any{"effort": value}
+		}
+	default:
+		if level != "" && level != "off" {
+			body["reasoning_effort"] = value
+		}
+	}
 }
 
 func modelSupportsThinking(params []string, capability bool) bool {

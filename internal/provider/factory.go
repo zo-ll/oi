@@ -15,27 +15,34 @@ import (
 )
 
 var openCodeChatCompletionModels = map[string]Model{
-	"big-pickle":             {ID: "big-pickle", Name: "Big Pickle"},
-	"deepseek-v4-flash":      {ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash"},
-	"deepseek-v4-flash-free": {ID: "deepseek-v4-flash-free", Name: "DeepSeek V4 Flash Free"},
-	"deepseek-v4-pro":        {ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro"},
-	"glm-5":                  {ID: "glm-5", Name: "GLM 5"},
-	"glm-5.1":                {ID: "glm-5.1", Name: "GLM 5.1"},
-	"grok-build-0.1":         {ID: "grok-build-0.1", Name: "Grok Build 0.1"},
-	"kimi-k2.5":              {ID: "kimi-k2.5", Name: "Kimi K2.5"},
-	"kimi-k2.6":              {ID: "kimi-k2.6", Name: "Kimi K2.6"},
-	"kimi-k2.7":              {ID: "kimi-k2.7", Name: "Kimi K2.7"},
-	"mimo-v2.5":              {ID: "mimo-v2.5", Name: "MiMo V2.5"},
-	"mimo-v2.5-pro":          {ID: "mimo-v2.5-pro", Name: "MiMo V2.5 Pro"},
+	"big-pickle":             openCodeReasoningModel("big-pickle", "Big Pickle", "reasoning_effort", nil, nil),
+	"deepseek-v4-flash":      openCodeReasoningModel("deepseek-v4-flash", "DeepSeek V4 Flash", "deepseek", []string{"off", "high", "xhigh"}, map[string]string{"xhigh": "max"}),
+	"deepseek-v4-flash-free": openCodeReasoningModel("deepseek-v4-flash-free", "DeepSeek V4 Flash Free", "deepseek", []string{"off", "high", "xhigh"}, map[string]string{"xhigh": "max"}),
+	"deepseek-v4-pro":        openCodeReasoningModel("deepseek-v4-pro", "DeepSeek V4 Pro", "deepseek", []string{"off", "high", "xhigh"}, map[string]string{"xhigh": "max"}),
+	"glm-5":                  openCodeReasoningModel("glm-5", "GLM 5", "reasoning_effort", nil, nil),
+	"glm-5.1":                openCodeReasoningModel("glm-5.1", "GLM 5.1", "reasoning_effort", nil, nil),
+	"grok-build-0.1":         openCodeReasoningModel("grok-build-0.1", "Grok Build 0.1", "none", []string{"off", "high", "xhigh"}, map[string]string{"xhigh": "max"}),
+	"kimi-k2.5":              openCodeReasoningModel("kimi-k2.5", "Kimi K2.5", "reasoning_effort", nil, nil),
+	"kimi-k2.6":              openCodeReasoningModel("kimi-k2.6", "Kimi K2.6", "deepseek", []string{"off", "high"}, nil),
+	"kimi-k2.7":              openCodeReasoningModel("kimi-k2.7", "Kimi K2.7", "reasoning_effort", nil, nil),
+	"kimi-k2.7-code":         openCodeReasoningModel("kimi-k2.7-code", "Kimi K2.7 Code", "reasoning_effort", nil, nil),
+	"mimo-v2.5":              openCodeReasoningModel("mimo-v2.5", "MiMo V2.5", "reasoning_effort", nil, nil),
+	"mimo-v2.5-pro":          openCodeReasoningModel("mimo-v2.5-pro", "MiMo V2.5 Pro", "reasoning_effort", nil, nil),
+	"minimax-m2.7":           openCodeReasoningModel("minimax-m2.7", "MiniMax M2.7", "reasoning_effort", nil, nil),
+	"qwen3.6-plus":           openCodeReasoningModel("qwen3.6-plus", "Qwen 3.6 Plus", "qwen", nil, nil),
 }
 
 var openCodeMessagesModels = map[string]Model{
-	"minimax-m3":   {ID: "minimax-m3", Name: "MiniMax M3"},
-	"minimax-m2.7": {ID: "minimax-m2.7", Name: "MiniMax M2.7"},
-	"minimax-m2.5": {ID: "minimax-m2.5", Name: "MiniMax M2.5"},
-	"qwen3.7-max":  {ID: "qwen3.7-max", Name: "Qwen 3.7 Max"},
-	"qwen3.7-plus": {ID: "qwen3.7-plus", Name: "Qwen 3.7 Plus"},
-	"qwen3.6-plus": {ID: "qwen3.6-plus", Name: "Qwen 3.6 Plus"},
+	"minimax-m3":   openCodeReasoningModel("minimax-m3", "MiniMax M3", "anthropic", nil, nil),
+	"qwen3.7-max":  openCodeReasoningModel("qwen3.7-max", "Qwen 3.7 Max", "anthropic", nil, nil),
+	"qwen3.7-plus": openCodeReasoningModel("qwen3.7-plus", "Qwen 3.7 Plus", "anthropic", nil, nil),
+}
+
+func openCodeReasoningModel(id, name, format string, levels []string, values map[string]string) Model {
+	if len(levels) == 0 {
+		levels = []string{"off", "low", "medium", "high"}
+	}
+	return Model{ID: id, Name: name, SupportsThinking: format != "none", ThinkingFormat: format, SupportedThinkingLevels: levels, ThinkingLevelValues: values}
 }
 
 const openCodeMessagesDefaultMaxTokens = 8192
@@ -91,11 +98,9 @@ func (p *OpenCodeProvider) ListModels(ctx context.Context) ([]Model, error) {
 			if model.ContextWindow > 0 {
 				meta.ContextWindow = model.ContextWindow
 			}
-			meta.SupportsThinking = true
 			out = append(out, meta)
 			continue
 		}
-		model.SupportsThinking = true
 		out = append(out, model)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -270,10 +275,14 @@ func (p *OpenCodeMessagesProvider) buildRequest(req Request, stream bool) (map[s
 
 func thinkingBudgetTokens(level string) int {
 	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "minimal":
+		return 512
 	case "low":
 		return 1024
 	case "high":
 		return 4096
+	case "xhigh":
+		return 8192
 	default:
 		return 2048
 	}

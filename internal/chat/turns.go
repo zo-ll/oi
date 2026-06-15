@@ -39,9 +39,15 @@ func newChatState(cfg *config.Config, sel config.Selection, rt *agent.Runtime) *
 
 func (s *chatState) reconfigureRuntime(out io.Writer) {
 	model := lookupModelInfo(s.rt.Provider, s.sel.Model)
+	level := clampThinkingLevel(model, s.rt.ThinkingLevel)
 	s.contextWindow = model.ContextWindow
 	s.rt.ContextWindow = model.ContextWindow
+	s.rt.ThinkingLevel = level
+	s.rt.ThinkingValue = thinkingValue(model, level)
+	s.rt.ThinkingFormat = model.ThinkingFormat
 	s.rt.ThinkingSupported = model.SupportsThinking
+	s.rt.SupportedThinkingLevels = supportedThinkingLevels(model)
+	s.rt.ThinkingLevelValues = model.ThinkingLevelValues
 	configureChatRuntime(s.rt, out, s.tools)
 }
 

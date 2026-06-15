@@ -23,11 +23,13 @@ type ToolSpec struct {
 
 // Request is the normalized provider request shape.
 type Request struct {
-	Model         string     `json:"model"`
-	Messages      []Message  `json:"messages"`
-	Tools         []ToolSpec `json:"tools,omitempty"`
-	Stream        bool       `json:"stream,omitempty"`
-	ThinkingLevel string     `json:"-"`
+	Model          string     `json:"model"`
+	Messages       []Message  `json:"messages"`
+	Tools          []ToolSpec `json:"tools,omitempty"`
+	Stream         bool       `json:"stream,omitempty"`
+	ThinkingLevel  string     `json:"-"`
+	ThinkingValue  string     `json:"-"`
+	ThinkingFormat string     `json:"-"`
 }
 
 // ToolCall is one normalized tool invocation from the model.
@@ -53,10 +55,13 @@ type Response struct {
 
 // Model describes a provider model.
 type Model struct {
-	ID               string `json:"id"`
-	Name             string `json:"name,omitempty"`
-	ContextWindow    int    `json:"context_window,omitempty"`
-	SupportsThinking bool   `json:"supports_thinking,omitempty"`
+	ID                      string            `json:"id"`
+	Name                    string            `json:"name,omitempty"`
+	ContextWindow           int               `json:"context_window,omitempty"`
+	SupportsThinking        bool              `json:"supports_thinking,omitempty"`
+	ThinkingFormat          string            `json:"thinking_format,omitempty"`
+	SupportedThinkingLevels []string          `json:"supported_thinking_levels,omitempty"`
+	ThinkingLevelValues     map[string]string `json:"-"`
 }
 
 // EventType classifies streaming events.

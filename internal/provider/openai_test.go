@@ -168,6 +168,53 @@ func TestOpenAIProviderAddsReasoningEffortWhenRuntimeEnablesIt(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderDeepSeekThinkingFormat(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"hello"}}]}`)
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAI("demo", ts.URL, "key", "deepseek-v4-pro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Chat(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingLevel: "xhigh", ThinkingValue: "max", ThinkingFormat: "deepseek"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thinking, ok := got["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "enabled" || got["reasoning_effort"] != "max" {
+		t.Fatalf("body=%#v", got)
+	}
+}
+
+func TestOpenAIProviderQwenThinkingFormat(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"hello"}}]}`)
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAI("demo", ts.URL, "key", "qwen3.6-plus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Chat(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingLevel: "high", ThinkingFormat: "qwen"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["enable_thinking"] != true {
+		t.Fatalf("body=%#v", got)
+	}
+}
+
 func TestOpenAIProviderSkipsReasoningEffortWhenOff(t *testing.T) {
 	var got map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +327,7 @@ func TestOpenCodeProviderListModelsIncludesAllAdvertisedModels(t *testing.T) {
 	seen := map[string]bool{}
 	for _, model := range models {
 		seen[model.ID] = true
-		if !model.SupportsThinking {
+		if model.ID != "unknown-model" && model.ID != "grok-build-0.1" && !model.SupportsThinking {
 			t.Fatalf("opencode model missing thinking support: %+v", model)
 		}
 	}
@@ -343,8 +390,6 @@ func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
 			switch req.Model {
 			case "minimax-m3":
 				fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from minimax"}]}`)
-			case "qwen3.6-plus":
-				fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from qwen 3.6"}]}`)
 			case "qwen3.7-plus":
 				fmt.Fprint(w, `{"content":[{"type":"text","text":"hello from qwen plus"}]}`)
 			case "qwen3.7-max":
@@ -380,7 +425,6 @@ func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
 		model string
 		want  string
 	}{
-		{model: "qwen3.6-plus", want: "hello from qwen 3.6"},
 		{model: "qwen3.7-plus", want: "hello from qwen plus"},
 		{model: "qwen3.7-max", want: "hello from qwen max"},
 	} {
@@ -393,7 +437,7 @@ func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
 			t.Fatalf("model %s content = %q", tc.model, resp.Content)
 		}
 	}
-	if messagesHits != 4 || chatHits != 0 {
+	if messagesHits != 3 || chatHits != 0 {
 		t.Fatalf("messagesHits=%d chatHits=%d", messagesHits, chatHits)
 	}
 
@@ -405,7 +449,7 @@ func TestOpenCodeProviderDispatchesMessagesModels(t *testing.T) {
 	if resp.Content != "hello from chat" {
 		t.Fatalf("content = %q", resp.Content)
 	}
-	if messagesHits != 4 || chatHits != 1 {
+	if messagesHits != 3 || chatHits != 1 {
 		t.Fatalf("messagesHits=%d chatHits=%d", messagesHits, chatHits)
 	}
 }

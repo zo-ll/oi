@@ -149,7 +149,7 @@ func (p *OpenAICodexProvider) ListModels(ctx context.Context) ([]Model, error) {
 		if name == "" {
 			name = id
 		}
-		models = append(models, Model{ID: id, Name: name, ContextWindow: m.ContextWindow, SupportsThinking: true})
+		models = append(models, Model{ID: id, Name: name, ContextWindow: m.ContextWindow, SupportsThinking: true, ThinkingFormat: "responses", SupportedThinkingLevels: []string{"minimal", "low", "medium", "high", "xhigh"}})
 	}
 	return models, nil
 }
@@ -226,7 +226,11 @@ func (p *OpenAICodexProvider) buildRequest(req Request) (map[string]any, error) 
 		"parallel_tool_calls": true,
 	}
 	if req.ThinkingLevel != "" && req.ThinkingLevel != "off" {
-		body["reasoning"] = map[string]any{"effort": req.ThinkingLevel}
+		effort := strings.TrimSpace(req.ThinkingValue)
+		if effort == "" {
+			effort = req.ThinkingLevel
+		}
+		body["reasoning"] = map[string]any{"effort": effort}
 	}
 	if body["instructions"] == "" {
 		body["instructions"] = "You are oi, a careful coding assistant."

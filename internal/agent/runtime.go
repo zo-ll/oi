@@ -20,25 +20,29 @@ const defaultAgentStepLimit = 96
 
 // Runtime is the core agent runtime boundary.
 type Runtime struct {
-	Provider             provider.Provider
-	Tools                *tool.Registry
-	Policy               workspace.Policy
-	Session              *session.Session
-	MaxSteps             int
-	ToolTimeout          time.Duration
-	RequestTimeout       time.Duration
-	ContextWindow        int
-	ThinkingLevel        string
-	ThinkingSupported    bool
-	LastUsage            provider.Usage
-	RecentRetrievedPaths []string
-	SystemPrompt         string
-	OnRetrieve           func(retrieval.Notice)
-	OnModelStart         func()
-	OnModelStop          func()
-	OnToolStart          func(tool.Call)
-	OnToolResult         func(tool.Call, tool.Result)
-	Logger               *ilog.Logger
+	Provider                provider.Provider
+	Tools                   *tool.Registry
+	Policy                  workspace.Policy
+	Session                 *session.Session
+	MaxSteps                int
+	ToolTimeout             time.Duration
+	RequestTimeout          time.Duration
+	ContextWindow           int
+	ThinkingLevel           string
+	ThinkingValue           string
+	ThinkingFormat          string
+	ThinkingSupported       bool
+	SupportedThinkingLevels []string
+	ThinkingLevelValues     map[string]string
+	LastUsage               provider.Usage
+	RecentRetrievedPaths    []string
+	SystemPrompt            string
+	OnRetrieve              func(retrieval.Notice)
+	OnModelStart            func()
+	OnModelStop             func()
+	OnToolStart             func(tool.Call)
+	OnToolResult            func(tool.Call, tool.Result)
+	Logger                  *ilog.Logger
 }
 
 // RunOnce executes one user request through the bounded agent loop.
@@ -226,10 +230,14 @@ func jsonRaw(raw []byte) any {
 
 func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, onDelta func(string), streaming bool) (provider.Response, error) {
 	thinkingLevel := ""
+	thinkingValue := ""
+	thinkingFormat := ""
 	if r.ThinkingSupported {
 		thinkingLevel = r.ThinkingLevel
+		thinkingValue = r.ThinkingValue
+		thinkingFormat = r.ThinkingFormat
 	}
-	req := provider.Request{Model: r.Provider.Model(), Messages: history, Tools: providerToolSpecs(r.Tools), ThinkingLevel: thinkingLevel}
+	req := provider.Request{Model: r.Provider.Model(), Messages: history, Tools: providerToolSpecs(r.Tools), ThinkingLevel: thinkingLevel, ThinkingValue: thinkingValue, ThinkingFormat: thinkingFormat}
 	requestCtx, cancel := context.WithTimeout(ctx, r.RequestTimeout)
 	defer cancel()
 	if !streaming {

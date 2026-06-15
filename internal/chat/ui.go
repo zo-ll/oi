@@ -286,6 +286,56 @@ func lookupContextWindow(p provider.Provider, model string) int {
 	return lookupModelInfo(p, model).ContextWindow
 }
 
+func supportedThinkingLevels(model provider.Model) []string {
+	if !model.SupportsThinking {
+		return []string{"off"}
+	}
+	if len(model.SupportedThinkingLevels) > 0 {
+		return append([]string(nil), model.SupportedThinkingLevels...)
+	}
+	return []string{"off", "low", "medium", "high"}
+}
+
+func thinkingValue(model provider.Model, level string) string {
+	if model.ThinkingLevelValues != nil {
+		if value, ok := model.ThinkingLevelValues[level]; ok {
+			return value
+		}
+	}
+	return level
+}
+
+func clampThinkingLevel(model provider.Model, level string) string {
+	levels := supportedThinkingLevels(model)
+	if len(levels) == 0 {
+		return "off"
+	}
+	if level == "" {
+		if containsString(levels, "medium") {
+			return "medium"
+		}
+		return levels[0]
+	}
+	if containsString(levels, level) {
+		return level
+	}
+	for _, fallback := range []string{"medium", "high", "low", "off"} {
+		if containsString(levels, fallback) {
+			return fallback
+		}
+	}
+	return levels[0]
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func lookupModelInfo(p provider.Provider, model string) provider.Model {
 	if p == nil || strings.TrimSpace(model) == "" {
 		return provider.Model{}

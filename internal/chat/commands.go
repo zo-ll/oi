@@ -8,6 +8,7 @@ import (
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
+	"github.com/zo-ll/oi/internal/provider"
 	"github.com/zo-ll/oi/internal/session"
 	"github.com/zo-ll/oi/internal/workspace"
 )
@@ -158,7 +159,11 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		if arg != "" {
 			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /think")
 		}
-		level, ok, err := chooseThinkingLevel(reader, out, cfg.Agent.ReasoningEffort)
+		levels := []string{"default", "off", "low", "medium", "high"}
+		if rt != nil && len(rt.SupportedThinkingLevels) > 0 {
+			levels = append([]string{"default"}, rt.SupportedThinkingLevels...)
+		}
+		level, ok, err := chooseThinkingLevel(reader, out, cfg.Agent.ReasoningEffort, levels)
 		if err != nil {
 			return false, rt, sel, streaming, autosave, tools, err
 		}
@@ -172,7 +177,13 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		if err := config.Save(cfg); err != nil {
 			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("save config: %w", err)
 		}
-		rt.ThinkingLevel = cfg.Agent.ReasoningEffort
+		if rt != nil {
+			rt.ThinkingLevel = clampThinkingLevel(provider.Model{SupportsThinking: rt.ThinkingSupported, SupportedThinkingLevels: rt.SupportedThinkingLevels, ThinkingLevelValues: rt.ThinkingLevelValues}, cfg.Agent.ReasoningEffort)
+			rt.ThinkingValue = thinkingValue(provider.Model{ThinkingLevelValues: rt.ThinkingLevelValues}, rt.ThinkingLevel)
+		}
+		if rt != nil {
+			level = rt.ThinkingLevel
+		}
 		fmt.Fprintf(out, "thinking: %s\n", valueOr(level, "default"))
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/tools":
@@ -333,8 +344,8 @@ func promptSaveName(reader *bufio.Reader, out io.Writer) (string, error) {
 	return strings.TrimSpace(text), nil
 }
 
-func chooseThinkingLevel(reader *bufio.Reader, out io.Writer, current string) (string, bool, error) {
-	selected, ok, err := pickSimpleChoice(reader, out, "choose thinking level", []string{"default", "off", "low", "medium", "high"})
+func chooseThinkingLevel(reader *bufio.Reader, out io.Writer, current string, levels []string) (string, bool, error) {
+	selected, ok, err := pickSimpleChoice(reader, out, "choose thinking level", levels)
 	if err != nil || !ok {
 		return current, false, err
 	}
@@ -348,7 +359,7 @@ func chooseThinkingLevel(reader *bufio.Reader, out io.Writer, current string) (s
 func parseThinkingLevel(level string) (string, error) {
 	level = strings.ToLower(strings.TrimSpace(level))
 	switch level {
-	case "off", "low", "medium", "high":
+	case "off", "minimal", "low", "medium", "high", "xhigh":
 		return level, nil
 	case "default":
 		return "", nil
