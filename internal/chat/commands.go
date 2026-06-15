@@ -86,6 +86,10 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 			return false, rt, sel, streaming, autosave, tools, err
 		}
 		rt.Session = session.New(sel.Provider, sel.Model, root)
+		modelInfo := provider.Model{SupportsThinking: rt.ThinkingSupported, SupportedThinkingLevels: rt.SupportedThinkingLevels, ThinkingLevelValues: rt.ThinkingLevelValues}
+		rt.ThinkingLevel = clampThinkingLevel(modelInfo, "off")
+		rt.ThinkingValue = thinkingValue(modelInfo, rt.ThinkingLevel)
+		rt.Session.ThinkingLevel = rt.ThinkingLevel
 		fmt.Fprintln(out, "new session started")
 		if autosave {
 			if _, err := saveSession(rt, sel); err != nil {
@@ -163,7 +167,11 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		if rt != nil && len(rt.SupportedThinkingLevels) > 0 {
 			levels = append([]string{"default"}, rt.SupportedThinkingLevels...)
 		}
-		level, ok, err := chooseThinkingLevel(reader, out, cfg.Agent.ReasoningEffort, levels)
+		currentLevel := "off"
+		if rt != nil && rt.ThinkingLevel != "" {
+			currentLevel = rt.ThinkingLevel
+		}
+		level, ok, err := chooseThinkingLevel(reader, out, currentLevel, levels)
 		if err != nil {
 			return false, rt, sel, streaming, autosave, tools, err
 		}
@@ -173,18 +181,21 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		if level != "" && level != "off" && (rt == nil || !rt.ThinkingSupported) {
 			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("selected model does not advertise thinking levels")
 		}
-		cfg.Agent.ReasoningEffort = level
-		if err := config.Save(cfg); err != nil {
-			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("save config: %w", err)
-		}
 		if rt != nil {
-			rt.ThinkingLevel = clampThinkingLevel(provider.Model{SupportsThinking: rt.ThinkingSupported, SupportedThinkingLevels: rt.SupportedThinkingLevels, ThinkingLevelValues: rt.ThinkingLevelValues}, cfg.Agent.ReasoningEffort)
-			rt.ThinkingValue = thinkingValue(provider.Model{ThinkingLevelValues: rt.ThinkingLevelValues}, rt.ThinkingLevel)
-		}
-		if rt != nil {
+			model := provider.Model{SupportsThinking: rt.ThinkingSupported, SupportedThinkingLevels: rt.SupportedThinkingLevels, ThinkingLevelValues: rt.ThinkingLevelValues}
+			rt.ThinkingLevel = clampThinkingLevel(model, level)
+			rt.ThinkingValue = thinkingValue(model, rt.ThinkingLevel)
+			if rt.Session != nil {
+				rt.Session.ThinkingLevel = rt.ThinkingLevel
+			}
 			level = rt.ThinkingLevel
 		}
-		fmt.Fprintf(out, "thinking: %s\n", valueOr(level, "default"))
+		if autosave {
+			if _, err := saveSession(rt, sel); err != nil {
+				fmt.Fprintf(out, "warning: autosave failed: %v\n", err)
+			}
+		}
+		fmt.Fprintf(out, "thinking: %s\n", valueOr(level, "off"))
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/tools":
 		if arg != "" {
@@ -285,6 +296,14 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		loaded.Model = nextSel2.Model
 		loaded.CWD = root
 		nextRT.Session = loaded
+		loadedLevel := loaded.ThinkingLevel
+		if loadedLevel == "" {
+			loadedLevel = "off"
+		}
+		modelInfo := provider.Model{SupportsThinking: nextRT.ThinkingSupported, SupportedThinkingLevels: nextRT.SupportedThinkingLevels, ThinkingLevelValues: nextRT.ThinkingLevelValues}
+		nextRT.ThinkingLevel = clampThinkingLevel(modelInfo, loadedLevel)
+		nextRT.ThinkingValue = thinkingValue(modelInfo, nextRT.ThinkingLevel)
+		nextRT.Session.ThinkingLevel = nextRT.ThinkingLevel
 		fmt.Fprintf(out, "loaded: %s\n", path)
 		if len(loaded.Messages) > 0 {
 			fmt.Fprintln(out)

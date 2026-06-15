@@ -55,6 +55,13 @@ func TestValidateSessionName(t *testing.T) {
 	}
 }
 
+func TestNewSessionThinkingDefaultsOff(t *testing.T) {
+	s := session.New("openai", "gpt", ".")
+	if s.ThinkingLevel != "off" {
+		t.Fatalf("thinking = %q", s.ThinkingLevel)
+	}
+}
+
 func TestSaveSessionNamedDoesNotMutateRollingSessionID(t *testing.T) {
 	rt := &agent.Runtime{
 		Policy: workspace.Policy{Root: t.TempDir()},
@@ -723,7 +730,7 @@ func TestHandleChatCommandRejectsArgsForExactCommands(t *testing.T) {
 func TestHandleChatCommandChoicePickers(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	picker := &pickerRecorder{choices: []string{"off", "on", "off", "high"}}
-	rt := &agent.Runtime{ThinkingSupported: true}
+	rt := &agent.Runtime{ThinkingSupported: true, Session: session.New("openai", "m", ".")}
 	_, _, _, streaming, _, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, rt, bufio.NewReader(strings.NewReader("")), picker, "/stream", true, true, toolVerbosityErrors)
 	if err != nil || streaming {
 		t.Fatalf("stream err=%v streaming=%v", err, streaming)
@@ -737,8 +744,8 @@ func TestHandleChatCommandChoicePickers(t *testing.T) {
 		t.Fatalf("tools err=%v tools=%v", err, tools)
 	}
 	_, _, _, _, _, _, err = handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, rt, bufio.NewReader(strings.NewReader("")), picker, "/think", true, true, toolVerbosityErrors)
-	if err != nil || rt.ThinkingLevel != "high" {
-		t.Fatalf("think err=%v level=%q", err, rt.ThinkingLevel)
+	if err != nil || rt.ThinkingLevel != "high" || rt.Session.ThinkingLevel != "high" {
+		t.Fatalf("think err=%v level=%q session=%q", err, rt.ThinkingLevel, rt.Session.ThinkingLevel)
 	}
 	if got := strings.Join(picker.titles, " | "); got != "choose streaming mode | choose autosave mode | choose tool visibility | choose thinking level" {
 		t.Fatalf("titles=%q", got)

@@ -29,25 +29,27 @@ type Message struct {
 
 // Session stores transcript and runtime metadata.
 type Session struct {
-	ID        string    `json:"id"`
-	Provider  string    `json:"provider,omitempty"`
-	Model     string    `json:"model,omitempty"`
-	CWD       string    `json:"cwd,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Messages  []Message `json:"messages,omitempty"`
+	ID            string    `json:"id"`
+	Provider      string    `json:"provider,omitempty"`
+	Model         string    `json:"model,omitempty"`
+	ThinkingLevel string    `json:"thinking_level,omitempty"`
+	CWD           string    `json:"cwd,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Messages      []Message `json:"messages,omitempty"`
 }
 
 // New constructs a new session with a generated ID.
 func New(providerName, model, cwd string) *Session {
 	now := time.Now().UTC()
 	return &Session{
-		ID:        now.Format("20060102-150405"),
-		Provider:  providerName,
-		Model:     model,
-		CWD:       cwd,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:            now.Format("20060102-150405"),
+		Provider:      providerName,
+		Model:         model,
+		ThinkingLevel: "off",
+		CWD:           cwd,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 }
 

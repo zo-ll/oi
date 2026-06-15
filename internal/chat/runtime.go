@@ -44,7 +44,7 @@ func buildRuntime(cfg *config.Config, sel config.Selection, p provider.Provider,
 		model = p.Model()
 	}
 	info := lookupModelInfo(p, model)
-	level := clampThinkingLevel(info, cfg.Agent.ReasoningEffort)
+	level := clampThinkingLevel(info, "off")
 	return &agent.Runtime{
 		Provider:                p,
 		Tools:                   tools,

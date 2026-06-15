@@ -48,6 +48,16 @@ func switchChatModelToChoice(cfg *config.Config, sel config.Selection, rt *agent
 	}
 	*cfg = *cfg2
 	nextRT := buildRuntime(cfg, nextSel, p, root, reader, out, rt.Logger)
+	currentLevel := "off"
+	if rt != nil && rt.ThinkingLevel != "" {
+		currentLevel = rt.ThinkingLevel
+	}
+	modelInfo := provider.Model{SupportsThinking: nextRT.ThinkingSupported, SupportedThinkingLevels: nextRT.SupportedThinkingLevels, ThinkingLevelValues: nextRT.ThinkingLevelValues}
+	nextRT.ThinkingLevel = clampThinkingLevel(modelInfo, currentLevel)
+	nextRT.ThinkingValue = thinkingValue(modelInfo, nextRT.ThinkingLevel)
+	if nextRT.Session != nil {
+		nextRT.Session.ThinkingLevel = nextRT.ThinkingLevel
+	}
 	fmt.Fprintf(out, "model set to %s\n", choice.Model.ID)
 	return nextRT, nextSel, nil
 }

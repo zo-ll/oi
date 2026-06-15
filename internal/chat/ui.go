@@ -290,10 +290,14 @@ func supportedThinkingLevels(model provider.Model) []string {
 	if !model.SupportsThinking {
 		return []string{"off"}
 	}
+	levels := []string{"off", "low", "medium", "high"}
 	if len(model.SupportedThinkingLevels) > 0 {
-		return append([]string(nil), model.SupportedThinkingLevels...)
+		levels = append([]string(nil), model.SupportedThinkingLevels...)
 	}
-	return []string{"off", "low", "medium", "high"}
+	if !containsString(levels, "off") {
+		levels = append([]string{"off"}, levels...)
+	}
+	return levels
 }
 
 func thinkingValue(model provider.Model, level string) string {
@@ -311,10 +315,7 @@ func clampThinkingLevel(model provider.Model, level string) string {
 		return "off"
 	}
 	if level == "" {
-		if containsString(levels, "medium") {
-			return "medium"
-		}
-		return levels[0]
+		level = "off"
 	}
 	if containsString(levels, level) {
 		return level
