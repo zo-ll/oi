@@ -663,6 +663,49 @@ func TestTerminalWriteWrappedExactWidthLines(t *testing.T) {
 	}
 }
 
+func TestTerminalResponseSegmentsSeparated(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 80}
+	ui.startAssistantResponse()
+	ui.writeResponseSegment(responseSegment{text: "plan ", reasoning: true})
+	ui.writeResponseSegment(responseSegment{text: "answer\n"})
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "thinking") || !strings.Contains(got, "response") || !strings.Contains(got, "answer\r\n") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestCommitInputLeavesGapBeforeResponse(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "term-out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	ui := &terminalUI{in: out, out: out, width: 80, prompt: "> "}
+	ui.commitInput("hello")
+	if _, err := out.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "> hello\r\n\r\n" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestWrapLinePrefersWordBoundaries(t *testing.T) {
 	lines := wrapLine("alpha beta gamma", 7)
 	if len(lines) != 3 {

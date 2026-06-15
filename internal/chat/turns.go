@@ -195,6 +195,7 @@ func isWouldBlock(err error) bool {
 }
 
 func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
+	ui.startAssistantResponse()
 	renderer := &taggedStreamRenderer{}
 	streamed := false
 	resp, runErr := runAbortableTUI(ui, state.rt, func(ctx context.Context) (string, error) {
@@ -285,8 +286,6 @@ type responseSegment struct {
 type taggedStreamRenderer struct {
 	pending string
 	inThink bool
-	normal  outputFormatter
-	thought outputFormatter
 }
 
 func (r *taggedStreamRenderer) Push(delta string) []responseSegment {
@@ -297,12 +296,11 @@ func (r *taggedStreamRenderer) Push(delta string) []responseSegment {
 			idx := strings.Index(r.pending, "</think>")
 			if idx < 0 {
 				keep := partialTagSuffix(r.pending, "</think>")
-				appendResponseSegment(&out, r.thought.Push(r.pending[:len(r.pending)-keep]), true)
+				appendResponseSegment(&out, cleanDisplayText(r.pending[:len(r.pending)-keep]), true)
 				r.pending = r.pending[len(r.pending)-keep:]
 				return out
 			}
-			appendResponseSegment(&out, r.thought.Push(r.pending[:idx]), true)
-			appendResponseSegment(&out, r.thought.Flush(), true)
+			appendResponseSegment(&out, cleanDisplayText(r.pending[:idx]), true)
 			r.pending = r.pending[idx+len("</think>"):]
 			r.inThink = false
 			continue
@@ -310,12 +308,11 @@ func (r *taggedStreamRenderer) Push(delta string) []responseSegment {
 		idx := strings.Index(r.pending, "<think>")
 		if idx < 0 {
 			keep := partialTagSuffix(r.pending, "<think>")
-			appendResponseSegment(&out, r.normal.Push(r.pending[:len(r.pending)-keep]), false)
+			appendResponseSegment(&out, cleanDisplayText(r.pending[:len(r.pending)-keep]), false)
 			r.pending = r.pending[len(r.pending)-keep:]
 			return out
 		}
-		appendResponseSegment(&out, r.normal.Push(r.pending[:idx]), false)
-		appendResponseSegment(&out, r.normal.Flush(), false)
+		appendResponseSegment(&out, cleanDisplayText(r.pending[:idx]), false)
 		r.pending = r.pending[idx+len("<think>"):]
 		r.inThink = true
 	}
@@ -325,14 +322,12 @@ func (r *taggedStreamRenderer) Flush() []responseSegment {
 	var out []responseSegment
 	if r.pending != "" {
 		if r.inThink {
-			appendResponseSegment(&out, r.thought.Push(r.pending), true)
+			appendResponseSegment(&out, cleanDisplayText(r.pending), true)
 		} else {
-			appendResponseSegment(&out, r.normal.Push(r.pending), false)
+			appendResponseSegment(&out, cleanDisplayText(r.pending), false)
 		}
 		r.pending = ""
 	}
-	appendResponseSegment(&out, r.normal.Flush(), false)
-	appendResponseSegment(&out, r.thought.Flush(), true)
 	return out
 }
 

@@ -36,6 +36,7 @@ type terminalUI struct {
 	completion      completionState
 	promptHint      string
 	promptHintLines int
+	responseSection string
 	pickerMatches   []string
 	pickerActive    bool
 	pickerIndex     int
@@ -352,7 +353,7 @@ func (ui *terminalUI) commitInput(text string) {
 		}
 		_, _ = io.WriteString(ui.out, line)
 	}
-	_, _ = io.WriteString(ui.out, "\r\n")
+	_, _ = io.WriteString(ui.out, "\r\n\r\n")
 	ui.outputColumn = 0
 }
 
@@ -365,15 +366,35 @@ func (ui *terminalUI) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (ui *terminalUI) startAssistantResponse() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.responseSection = ""
+	ui.outputTail = ""
+}
+
 func (ui *terminalUI) writeResponseSegment(seg responseSegment) {
 	if seg.text == "" {
 		return
 	}
 	if seg.reasoning {
+		ui.ensureResponseSection("thinking")
 		ui.writeWrapped(ui.Styled("dim", seg.text))
 		return
 	}
+	ui.ensureResponseSection("response")
 	ui.writeWrapped(seg.text)
+}
+
+func (ui *terminalUI) ensureResponseSection(section string) {
+	if ui.responseSection == section {
+		return
+	}
+	if ui.responseSection != "" {
+		ui.writeWrapped("\n")
+	}
+	ui.writeWrapped(ui.Styled("dim", section) + "\n")
+	ui.responseSection = section
 }
 
 func (ui *terminalUI) writeWrapped(s string) {
