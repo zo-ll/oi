@@ -287,9 +287,10 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 		defer ui.mu.Unlock()
 		ui.refreshSize()
 		ui.clearStatusLocked()
+		previousLines := overlayLines
 		if !first {
-			if overlayLines > 0 {
-				for i := 0; i < overlayLines; i++ {
+			if previousLines > 0 {
+				for i := 0; i < previousLines; i++ {
 					_, _ = io.WriteString(ui.out, "\x1b[1A")
 				}
 			}
@@ -333,6 +334,11 @@ func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool)
 			for _, line := range wrapLine(marker+item, ui.width) {
 				writeLine(line)
 			}
+		}
+		for count < previousLines {
+			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
+			_, _ = io.WriteString(ui.out, "\r\n")
+			count++
 		}
 		overlayLines = count
 	}
