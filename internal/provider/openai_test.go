@@ -205,7 +205,7 @@ func TestOpenAIProviderChatStreamWithToolCall(t *testing.T) {
 	}
 }
 
-func TestOpenCodeProviderListModelsOnlyIncludesAdvertisedSupportedModels(t *testing.T) {
+func TestOpenCodeProviderListModelsIncludesAllAdvertisedModels(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("path = %s", r.URL.Path)
@@ -225,11 +225,8 @@ func TestOpenCodeProviderListModelsOnlyIncludesAdvertisedSupportedModels(t *test
 	seen := map[string]bool{}
 	for _, model := range models {
 		seen[model.ID] = true
-		if model.ID == "unknown-model" {
-			t.Fatalf("unexpected unsupported model in list: %+v", model)
-		}
 	}
-	for _, want := range []string{"qwen3.7-max", "minimax-m2.7", "grok-build-0.1"} {
+	for _, want := range []string{"qwen3.7-max", "minimax-m2.7", "grok-build-0.1", "unknown-model"} {
 		if !seen[want] {
 			t.Fatalf("missing %q in %+v", want, models)
 		}

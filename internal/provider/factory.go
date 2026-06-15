@@ -24,6 +24,7 @@ var openCodeChatCompletionModels = map[string]Model{
 	"grok-build-0.1":         {ID: "grok-build-0.1", Name: "Grok Build 0.1"},
 	"kimi-k2.5":              {ID: "kimi-k2.5", Name: "Kimi K2.5"},
 	"kimi-k2.6":              {ID: "kimi-k2.6", Name: "Kimi K2.6"},
+	"kimi-k2.7":              {ID: "kimi-k2.7", Name: "Kimi K2.7"},
 	"mimo-v2.5":              {ID: "mimo-v2.5", Name: "MiMo V2.5"},
 	"mimo-v2.5-pro":          {ID: "mimo-v2.5-pro", Name: "MiMo V2.5 Pro"},
 }
@@ -81,19 +82,19 @@ func (p *OpenCodeProvider) ListModels(ctx context.Context) ([]Model, error) {
 		return nil, err
 	}
 	supported := supportedOpenCodeModels()
-	var out []Model
+	out := make([]Model, 0, len(models))
 	for _, model := range models {
-		meta, ok := supported[canonicalOpenCodeModelID(model.ID)]
-		if !ok {
+		if meta, ok := supported[canonicalOpenCodeModelID(model.ID)]; ok {
+			if model.Name != "" {
+				meta.Name = model.Name
+			}
+			if model.ContextWindow > 0 {
+				meta.ContextWindow = model.ContextWindow
+			}
+			out = append(out, meta)
 			continue
 		}
-		if model.Name != "" {
-			meta.Name = model.Name
-		}
-		if model.ContextWindow > 0 {
-			meta.ContextWindow = model.ContextWindow
-		}
-		out = append(out, meta)
+		out = append(out, model)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
