@@ -237,13 +237,15 @@ func (ui *terminalUI) redrawLocked() {
 	state := ui.rendererModel.State()
 	state.Header = ui.header
 	state.Status = ui.statusText
+	state.PromptPrefix = ""
 	state.Prompt = ""
 	state.PromptCursor = 0
 	state.Hint = ui.promptHint
 	state.Active = ui.streamRenderEntryLocked()
 	if ui.editing {
-		state.Prompt = ui.prompt + ui.promptText
-		state.PromptCursor = len([]rune(ui.prompt)) + ui.promptCursor
+		state.PromptPrefix = ui.prompt
+		state.Prompt = ui.promptText
+		state.PromptCursor = ui.promptCursor
 	}
 	frame := renderer.RenderFrame(state, ui.width)
 	_ = renderer.Paint(ui.out, frame)
