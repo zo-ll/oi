@@ -136,16 +136,36 @@ func isCharDevice(f *os.File) bool {
 }
 
 func terminalWidth(f *os.File) int {
+	rows, cols := terminalSize(f)
+	_ = rows
+	if cols > 0 {
+		return cols
+	}
+	return 80
+}
+
+func terminalHeight(f *os.File) int {
+	rows, _ := terminalSize(f)
+	if rows > 0 {
+		return rows
+	}
+	return 24
+}
+
+func terminalSize(f *os.File) (rows int, cols int) {
 	out, err := sttyCapture(f, "size")
 	if err == nil {
 		parts := strings.Fields(strings.TrimSpace(out))
 		if len(parts) == 2 {
-			if width, convErr := strconv.Atoi(parts[1]); convErr == nil && width > 0 {
-				return width
+			if r, convErr := strconv.Atoi(parts[0]); convErr == nil && r > 0 {
+				rows = r
+			}
+			if c, convErr := strconv.Atoi(parts[1]); convErr == nil && c > 0 {
+				cols = c
 			}
 		}
 	}
-	return 80
+	return rows, cols
 }
 
 func sttyCapture(f *os.File, args ...string) (string, error) {

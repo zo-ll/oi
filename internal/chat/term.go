@@ -15,6 +15,7 @@ type terminalUI struct {
 	in              *os.File
 	out             *os.File
 	width           int
+	height          int
 	header          string
 	headerLines     int
 	prompt          string
@@ -66,6 +67,7 @@ func newTerminalUI(in io.Reader, out io.Writer) (*terminalUI, bool) {
 		in:            inFile,
 		out:           outFile,
 		width:         terminalWidth(inFile),
+		height:        terminalHeight(inFile),
 		prompt:        "> ",
 		resizeCh:      make(chan os.Signal, 1),
 		clipboard:     clipboard{out: outFile},
@@ -132,6 +134,10 @@ func (ui *terminalUI) refreshSize() {
 	width := terminalWidth(ui.in)
 	if width > 0 {
 		ui.width = width
+	}
+	height := terminalHeight(ui.in)
+	if height > 0 {
+		ui.height = height
 	}
 }
 
@@ -255,6 +261,7 @@ func (ui *terminalUI) redrawLocked() {
 		state.PromptCursor = ui.promptCursor
 	}
 	frame := renderer.RenderFrame(state, ui.width)
+	frame = renderer.CropFrame(frame, ui.height)
 	if ui.rendererPainter != nil {
 		_ = ui.rendererPainter.Paint(frame)
 		return

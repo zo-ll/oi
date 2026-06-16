@@ -10,3 +10,5 @@ github.com/zo-ll/mdterm v0.0.0-20260616124409-a18de36f5ceb h1:8kNcJ8x1usb30UAVxw
 github.com/zo-ll/mdterm v0.0.0-20260616124409-a18de36f5ceb/go.mod h1:Hrj9Ji5udQsWKTgn8OOv2e+JqWhbOExPoWwiPdtESxQ=
 github.com/zo-ll/mdterm v0.0.0-20260616124537-e03bb62269a4 h1:RCd163veRxGTN65wwzQTiWLK2fCgYuRJNRDBgOx4rv8=
 github.com/zo-ll/mdterm v0.0.0-20260616124537-e03bb62269a4/go.mod h1:Hrj9Ji5udQsWKTgn8OOv2e+JqWhbOExPoWwiPdtESxQ=
+github.com/zo-ll/mdterm v0.0.0-20260616125824-8e62af62f9c0 h1:bCy2KLxAlqQ4yoY0JDGpXlqc8B9iPvKZh13B8r9rD+c=
+github.com/zo-ll/mdterm v0.0.0-20260616125824-8e62af62f9c0/go.mod h1:Hrj9Ji5udQsWKTgn8OOv2e+JqWhbOExPoWwiPdtESxQ=
