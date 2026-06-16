@@ -697,7 +697,7 @@ func TestStreamRendererPreservesTextAcrossChunks(t *testing.T) {
 	}
 	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := text + "\n"
+	want := text
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -737,7 +737,7 @@ func TestStreamRendererPreservesMultilineMarkdown(t *testing.T) {
 	}
 	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := text + "\n"
+	want := text
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -765,7 +765,7 @@ func TestStreamContainerRendersThinkingAndAnswer(t *testing.T) {
 	}
 	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := "plan \n\nanswer\n"
+	want := "plan \n\nanswer"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -791,7 +791,7 @@ func TestStreamContainerRedrawsGrowingAnswer(t *testing.T) {
 	}
 	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
-	if got != "Hello world\n" {
+	if got != "Hello world" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -811,7 +811,7 @@ func TestCommitInputLeavesGapBeforeResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(data); got != "> hello\r\n\r\n" {
+	if got := lastStreamFrame(string(data)); got != "> hello\n" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -894,35 +894,14 @@ func stripANSI(s string) string {
 }
 
 func lastStreamFrame(s string) string {
-	marker := "\x1b["
-	last := -1
-	for i := 0; i < len(s); {
-		if strings.HasPrefix(s[i:], marker) {
-			j := i + len(marker)
-			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
-				j++
-			}
-			if j < len(s) && s[j] == 'A' {
-				last = j + 1
-				i = j + 1
-				continue
-			}
-		}
-		i++
-	}
-	if last >= 0 {
-		s = s[last:]
+	const marker = "\x1b[2J\x1b[H"
+	if idx := strings.LastIndex(s, marker); idx >= 0 {
+		s = s[idx+len(marker):]
 	}
 	s = stripANSI(s)
 	s = strings.ReplaceAll(s, "\r\n", "\n")
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		if r := strings.LastIndex(line, "\r"); r >= 0 {
-			lines[i] = line[r+1:]
-		}
-	}
-	s = strings.Join(lines, "\n")
-	return strings.TrimLeft(s, "\r\n")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
 }
 
 func TestFormatCompletionMatches(t *testing.T) {
