@@ -197,12 +197,27 @@ func isWouldBlock(err error) bool {
 func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
 	ui.startAssistantResponse()
 	renderer := &taggedStreamRenderer{}
+	done := make(chan struct{})
+	ticker := time.NewTicker(33 * time.Millisecond)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				ui.flushStream()
+			case <-done:
+				return
+			}
+		}
+	}()
 	resp, runErr := runAbortableTUI(ui, state.rt, func(ctx context.Context) (string, error) {
 		return state.rt.RunOnceStream(ctx, line, func(delta string) {
 			ui.writeStreamSegments(renderer.Push(delta))
 		})
 	})
 	ui.writeStreamSegments(renderer.Flush())
+	ui.flushStream()
+	close(done)
 	ui.finishAssistantResponse()
 	if runErr != nil {
 		ui.notify("error: " + runErr.Error())

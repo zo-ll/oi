@@ -43,6 +43,7 @@ type terminalUI struct {
 	streamThinking  string
 	streamAnswer    string
 	streamActive    bool
+	streamDirty     bool
 	streamLines     int
 	streamMaxLines  int
 	pickerMatches   []string
@@ -377,6 +378,7 @@ func (ui *terminalUI) ClearScreen() {
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
 	ui.streamActive = false
+	ui.streamDirty = false
 	ui.redrawLocked()
 }
 
@@ -413,6 +415,7 @@ func (ui *terminalUI) startAssistantResponse() {
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
 	ui.streamActive = true
+	ui.streamDirty = false
 	ui.redrawLocked()
 }
 
@@ -429,6 +432,16 @@ func (ui *terminalUI) writeStreamSegments(segs []responseSegment) {
 			ui.streamAnswer += seg.text
 		}
 	}
+	ui.streamDirty = true
+}
+
+func (ui *terminalUI) flushStream() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	if !ui.streamActive || !ui.streamDirty {
+		return
+	}
+	ui.streamDirty = false
 	ui.redrawLocked()
 }
 
@@ -439,6 +452,7 @@ func (ui *terminalUI) finishAssistantResponse() {
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
 	ui.streamActive = false
+	ui.streamDirty = false
 	ui.redrawLocked()
 }
 
