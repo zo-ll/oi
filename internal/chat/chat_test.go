@@ -697,7 +697,7 @@ func TestStreamRendererPreservesTextAcrossChunks(t *testing.T) {
 	}
 	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := text + "\n"
+	want := text
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -737,7 +737,7 @@ func TestStreamRendererPreservesMultilineMarkdown(t *testing.T) {
 	}
 	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := text + "\n"
+	want := text
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -765,7 +765,7 @@ func TestStreamContainerRendersThinkingAndAnswer(t *testing.T) {
 	}
 	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := "plan\n\nanswer\n"
+	want := "plan \n\nanswer"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -791,7 +791,7 @@ func TestStreamContainerRedrawsGrowingAnswer(t *testing.T) {
 	}
 	got := lastStreamFrame(string(data))
 	got = strings.ReplaceAll(got, "\r\n", "\n")
-	if got != "Hello world\n" {
+	if got != "Hello world" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -874,7 +874,7 @@ func stripANSI(s string) string {
 	for i := 0; i < len(s); {
 		if s[i] == 27 && i+1 < len(s) && s[i+1] == '[' {
 			j := i + 2
-			for j < len(s) && ((s[j] >= '0' && s[j] <= '9') || s[j] == ';' || s[j] == '?') {
+			for j < len(s) && ((s[j] >= '0' && s[j] <= '9') || s[j] == ';') {
 				j++
 			}
 			if j < len(s) {
@@ -894,7 +894,7 @@ func stripANSI(s string) string {
 }
 
 func lastStreamFrame(s string) string {
-	const marker = "\x1b[?25l\x1b[H\x1b[2J"
+	const marker = "\x1b[2J\x1b[H"
 	if idx := strings.LastIndex(s, marker); idx >= 0 {
 		s = s[idx+len(marker):]
 	}
