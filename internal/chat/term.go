@@ -41,6 +41,7 @@ type terminalUI struct {
 	promptCursor    int
 	statusText      string
 	rendererModel   *renderer.Model
+	rendererPainter *renderer.Painter
 	streamThinking  string
 	streamAnswer    string
 	streamActive    bool
@@ -70,6 +71,9 @@ func newTerminalUI(in io.Reader, out io.Writer) (*terminalUI, bool) {
 		clipboard:     clipboard{out: outFile},
 		historyIndex:  -1,
 		rendererModel: renderer.NewModel(),
+	}
+	if isCharDevice(outFile) {
+		ui.rendererPainter = renderer.NewPainter(outFile)
 	}
 	signal.Notify(ui.resizeCh, syscall.SIGWINCH)
 	return ui, true
@@ -192,6 +196,9 @@ func (ui *terminalUI) ensureRendererModelLocked() {
 	if ui.rendererModel == nil {
 		ui.rendererModel = renderer.NewModel()
 	}
+	if ui.rendererPainter == nil && ui.out != nil && isCharDevice(ui.out) {
+		ui.rendererPainter = renderer.NewPainter(ui.out)
+	}
 }
 
 func (ui *terminalUI) streamRenderEntryLocked() *renderer.RenderEntry {
@@ -248,6 +255,10 @@ func (ui *terminalUI) redrawLocked() {
 		state.PromptCursor = ui.promptCursor
 	}
 	frame := renderer.RenderFrame(state, ui.width)
+	if ui.rendererPainter != nil {
+		_ = ui.rendererPainter.Paint(frame)
+		return
+	}
 	_ = renderer.Paint(ui.out, frame)
 }
 
@@ -338,6 +349,9 @@ func (ui *terminalUI) ClearScreen() {
 	ui.clearStatusLocked()
 	ui.clearPromptLocked()
 	ui.rendererModel = renderer.NewModel()
+	if ui.rendererPainter != nil {
+		ui.rendererPainter.Reset()
+	}
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
 	ui.streamActive = false
