@@ -265,10 +265,6 @@ func (ui *terminalUI) readEscapeSequence() (kind, text string, handled bool, err
 		return "end", "", true, nil
 	case "[3~":
 		return "delete", "", true, nil
-	case "[5~":
-		return "pageup", "", true, nil
-	case "[6~":
-		return "pagedown", "", true, nil
 	case "[200~":
 		text, err := readBracketedPaste(ui.in)
 		return "paste", text, true, err

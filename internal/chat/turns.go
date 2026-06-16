@@ -176,26 +176,8 @@ func runAbortableTUI(ui *terminalUI, rt *agent.Runtime, run func(context.Context
 				}
 				continue
 			}
-			switch b {
-			case 3:
+			if b == 27 || b == 3 {
 				markAbort()
-			case 27:
-				kind, _, handled, err := ui.readEscapeSequence()
-				if err != nil {
-					continue
-				}
-				if !handled {
-					markAbort()
-					continue
-				}
-				switch kind {
-				case "pageup":
-					ui.pageUp()
-				case "pagedown":
-					ui.pageDown()
-				case "esc":
-					markAbort()
-				}
 			}
 		}
 	}
