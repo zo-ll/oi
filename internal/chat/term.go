@@ -377,20 +377,6 @@ func (ui *terminalUI) scrollPageDown() {
 	ui.redrawLocked()
 }
 
-func (ui *terminalUI) scrollToTop() {
-	ui.mu.Lock()
-	defer ui.mu.Unlock()
-	ui.scrollOffset = 1 << 30
-	ui.redrawLocked()
-}
-
-func (ui *terminalUI) scrollToBottom() {
-	ui.mu.Lock()
-	defer ui.mu.Unlock()
-	ui.scrollOffset = 0
-	ui.redrawLocked()
-}
-
 func (ui *terminalUI) ClearScreen() {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
