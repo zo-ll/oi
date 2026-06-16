@@ -344,12 +344,6 @@ func (ui *terminalUI) readMessage(lastAssistant string) (string, error) {
 				continue
 			}
 			switch kind {
-			case "pageup":
-				ui.scrollPageUp()
-				continue
-			case "pagedown":
-				ui.scrollPageDown()
-				continue
 			case "up":
 				if ui.pickerActive && len(ui.pickerMatches) > 0 {
 					ui.pickerIndex--
