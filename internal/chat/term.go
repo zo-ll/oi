@@ -1,21 +1,19 @@
 package chat
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
-
-	renderer "github.com/zo-ll/mdterm"
 )
 
 type terminalUI struct {
 	in              *os.File
 	out             *os.File
 	width           int
-	height          int
 	header          string
 	headerLines     int
 	prompt          string
@@ -41,8 +39,7 @@ type terminalUI struct {
 	promptText      string
 	promptCursor    int
 	statusText      string
-	rendererModel   *renderer.Model
-	rendererPainter *renderer.Painter
+	transcriptLines []string
 	streamThinking  string
 	streamAnswer    string
 	streamActive    bool
@@ -64,18 +61,13 @@ func newTerminalUI(in io.Reader, out io.Writer) (*terminalUI, bool) {
 		return nil, false
 	}
 	ui := &terminalUI{
-		in:            inFile,
-		out:           outFile,
-		width:         terminalWidth(inFile),
-		height:        terminalHeight(inFile),
-		prompt:        "> ",
-		resizeCh:      make(chan os.Signal, 1),
-		clipboard:     clipboard{out: outFile},
-		historyIndex:  -1,
-		rendererModel: renderer.NewModel(),
-	}
-	if isCharDevice(outFile) {
-		ui.rendererPainter = renderer.NewPainter(outFile)
+		in:           inFile,
+		out:          outFile,
+		width:        terminalWidth(inFile),
+		prompt:       "> ",
+		resizeCh:     make(chan os.Signal, 1),
+		clipboard:    clipboard{out: outFile},
+		historyIndex: -1,
 	}
 	signal.Notify(ui.resizeCh, syscall.SIGWINCH)
 	return ui, true
@@ -134,10 +126,6 @@ func (ui *terminalUI) refreshSize() {
 	width := terminalWidth(ui.in)
 	if width > 0 {
 		ui.width = width
-	}
-	height := terminalHeight(ui.in)
-	if height > 0 {
-		ui.height = height
 	}
 }
 
@@ -198,75 +186,100 @@ func (ui *terminalUI) wrapHintLinesLocked() []string {
 	return out
 }
 
-func (ui *terminalUI) ensureRendererModelLocked() {
-	if ui.rendererModel == nil {
-		ui.rendererModel = renderer.NewModel()
+func (ui *terminalUI) streamRenderLinesLocked() []string {
+	width := ui.width
+	if width <= 0 {
+		width = 80
 	}
-	if ui.rendererPainter == nil && ui.out != nil && isCharDevice(ui.out) {
-		ui.rendererPainter = renderer.NewPainter(ui.out)
+	var lines []string
+	if thinking := cleanDisplayText(ui.streamThinking); thinking != "" {
+		for _, line := range wrapText(thinking, width) {
+			lines = append(lines, ui.Styled("dim", line))
+		}
+		if strings.TrimSpace(ui.streamAnswer) != "" {
+			lines = append(lines, "")
+		}
 	}
-}
-
-func (ui *terminalUI) streamRenderEntryLocked() *renderer.RenderEntry {
-	thinking := cleanDisplayText(ui.streamThinking)
-	answer := cleanDisplayText(ui.streamAnswer)
-	if !ui.streamActive && strings.TrimSpace(thinking) == "" && strings.TrimSpace(answer) == "" {
-		return nil
+	if answer := cleanDisplayText(ui.streamAnswer); answer != "" {
+		lines = append(lines, wrapText(answer, width)...)
 	}
-	return &renderer.RenderEntry{Kind: renderer.EntryAssistant, Thinking: thinking, Markdown: answer}
-}
-
-func formatUserTranscriptMessage(text string) string {
-	text = strings.TrimRight(text, "\n")
-	if text == "" {
-		return text
-	}
-	parts := strings.Split(text, "\n")
-	for i, part := range parts {
-		parts[i] = "> " + part
-	}
-	return strings.Join(parts, "\n")
+	return lines
 }
 
 func (ui *terminalUI) appendTranscriptMessageLocked(message string) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
-	ui.ensureRendererModelLocked()
+	width := ui.width
+	if width <= 0 {
+		width = 80
+	}
+	kind := ""
 	trimmed := strings.TrimSpace(message)
-	kind := renderer.EntrySystem
 	switch {
 	case strings.HasPrefix(trimmed, "error:"):
-		kind = renderer.EntryError
+		kind = "error"
 	case strings.HasPrefix(trimmed, "warning:"), strings.HasPrefix(trimmed, "No provider configured."), strings.HasPrefix(trimmed, "Provider "):
-		kind = renderer.EntryWarning
+		kind = "warn"
 	}
-	ui.rendererModel.AddEntry(renderer.RenderEntry{Kind: kind, Markdown: message})
+	for _, line := range wrapText(message, width) {
+		if kind != "" {
+			ui.transcriptLines = append(ui.transcriptLines, ui.Styled(kind, line))
+		} else {
+			ui.transcriptLines = append(ui.transcriptLines, line)
+		}
+	}
 }
 
 func (ui *terminalUI) redrawLocked() {
 	ui.refreshSize()
-	ui.ensureRendererModelLocked()
-	state := ui.rendererModel.State()
-	state.Header = ui.header
-	state.Status = ui.statusText
-	state.PromptPrefix = ""
-	state.Prompt = ""
-	state.PromptCursor = 0
-	state.Hint = ui.promptHint
-	state.Active = ui.streamRenderEntryLocked()
+	headerLines := ui.wrapHeaderLinesLocked()
+	hintLines := ui.wrapHintLinesLocked()
+	streamLines := []string(nil)
+	if ui.streamActive || strings.TrimSpace(ui.streamThinking) != "" || strings.TrimSpace(ui.streamAnswer) != "" {
+		streamLines = ui.streamRenderLinesLocked()
+	}
+	statusLines := []string(nil)
+	if strings.TrimSpace(ui.statusText) != "" {
+		statusLines = []string{ui.Styled("dim", ui.statusText)}
+	}
+	promptLines := []string(nil)
+	row, col := 0, 0
 	if ui.editing {
-		state.PromptPrefix = ui.prompt
-		state.Prompt = ui.promptText
-		state.PromptCursor = ui.promptCursor
+		promptLines = wrapPromptLines(ui.prompt, ui.promptText, ui.width)
+		if len(promptLines) == 0 {
+			promptLines = []string{ui.prompt}
+		}
+		row, col = promptCursorPosition(ui.prompt, ui.promptText, ui.width, ui.promptCursor)
+		ui.promptLines = len(promptLines)
+		ui.promptCursorRow = row
+	} else {
+		ui.promptLines = 0
+		ui.promptCursorRow = 0
 	}
-	frame := renderer.RenderFrame(state, ui.width)
-	frame = renderer.CropFrame(frame, ui.height)
-	if ui.rendererPainter != nil {
-		_ = ui.rendererPainter.Paint(frame)
-		return
+	var frame []string
+	frame = append(frame, headerLines...)
+	frame = append(frame, ui.transcriptLines...)
+	frame = append(frame, streamLines...)
+	frame = append(frame, statusLines...)
+	frame = append(frame, hintLines...)
+	frame = append(frame, promptLines...)
+	_, _ = io.WriteString(ui.out, "\x1b[2J\x1b[H")
+	for i, line := range frame {
+		if i > 0 {
+			_, _ = io.WriteString(ui.out, "\r\n")
+		}
+		_, _ = io.WriteString(ui.out, line)
 	}
-	_ = renderer.Paint(ui.out, frame)
+	if ui.editing && len(promptLines) > 0 {
+		if up := len(promptLines) - 1 - row; up > 0 {
+			_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dA", up))
+		}
+		_, _ = io.WriteString(ui.out, "\r")
+		if col > 0 {
+			_, _ = io.WriteString(ui.out, fmt.Sprintf("\x1b[%dC", col))
+		}
+	}
 }
 
 func (ui *terminalUI) clearPromptLocked() {
@@ -343,7 +356,12 @@ func (ui *terminalUI) decorateMessage(message string) string {
 	}
 }
 
-func (ui *terminalUI) blankLine() {}
+func (ui *terminalUI) blankLine() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	ui.transcriptLines = append(ui.transcriptLines, "")
+	ui.redrawLocked()
+}
 
 func (ui *terminalUI) clearStatusLocked() {
 	ui.statusVisible = false
@@ -355,10 +373,7 @@ func (ui *terminalUI) ClearScreen() {
 	defer ui.mu.Unlock()
 	ui.clearStatusLocked()
 	ui.clearPromptLocked()
-	ui.rendererModel = renderer.NewModel()
-	if ui.rendererPainter != nil {
-		ui.rendererPainter.Reset()
-	}
+	ui.transcriptLines = nil
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
 	ui.streamActive = false
@@ -369,8 +384,9 @@ func (ui *terminalUI) commitInput(text string) {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
 	ui.clearStatusLocked()
-	ui.ensureRendererModelLocked()
-	ui.rendererModel.AddEntry(renderer.RenderEntry{Kind: renderer.EntryUser, Markdown: formatUserTranscriptMessage(text)})
+	ui.refreshSize()
+	ui.transcriptLines = append(ui.transcriptLines, wrapPromptLines(ui.prompt, text, ui.width)...)
+	ui.transcriptLines = append(ui.transcriptLines, "")
 	ui.clearPromptLocked()
 	ui.redrawLocked()
 }
@@ -406,7 +422,6 @@ func (ui *terminalUI) writeStreamSegments(segs []responseSegment) {
 	}
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
-	ui.clearStatusLocked()
 	for _, seg := range segs {
 		if seg.reasoning {
 			ui.streamThinking += seg.text
@@ -420,8 +435,7 @@ func (ui *terminalUI) writeStreamSegments(segs []responseSegment) {
 func (ui *terminalUI) finishAssistantResponse() {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
-	ui.ensureRendererModelLocked()
-	ui.rendererModel.AddEntry(renderer.RenderEntry{Kind: renderer.EntryAssistant, Thinking: cleanDisplayText(ui.streamThinking), Markdown: cleanDisplayText(ui.streamAnswer)})
+	ui.transcriptLines = append(ui.transcriptLines, ui.streamRenderLinesLocked()...)
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
 	ui.streamActive = false
