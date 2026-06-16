@@ -40,6 +40,7 @@ type terminalUI struct {
 	promptHintLines int
 	promptText      string
 	promptCursor    int
+	scrollOffset    int
 	statusText      string
 	rendererModel   *renderer.Model
 	rendererPainter *renderer.Painter
@@ -150,6 +151,7 @@ func (ui *terminalUI) renderPromptAt(text string, cursor int) {
 	defer ui.mu.Unlock()
 	ui.promptText = text
 	ui.promptCursor = cursor
+	ui.scrollOffset = 0
 	ui.editing = true
 	ui.redrawLocked()
 }
@@ -261,7 +263,7 @@ func (ui *terminalUI) redrawLocked() {
 		state.PromptCursor = ui.promptCursor
 	}
 	frame := renderer.RenderFrame(state, ui.width)
-	frame = renderer.CropFrame(frame, ui.height)
+	frame = renderer.CropFrameWithOffset(frame, ui.height, ui.scrollOffset)
 	if ui.rendererPainter != nil {
 		_ = ui.rendererPainter.Paint(frame)
 		return
@@ -350,6 +352,31 @@ func (ui *terminalUI) clearStatusLocked() {
 	ui.statusText = ""
 }
 
+func (ui *terminalUI) scrollPageUp() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	step := ui.height / 2
+	if step < 1 {
+		step = 1
+	}
+	ui.scrollOffset += step
+	ui.redrawLocked()
+}
+
+func (ui *terminalUI) scrollPageDown() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	step := ui.height / 2
+	if step < 1 {
+		step = 1
+	}
+	ui.scrollOffset -= step
+	if ui.scrollOffset < 0 {
+		ui.scrollOffset = 0
+	}
+	ui.redrawLocked()
+}
+
 func (ui *terminalUI) ClearScreen() {
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
@@ -359,6 +386,7 @@ func (ui *terminalUI) ClearScreen() {
 	if ui.rendererPainter != nil {
 		ui.rendererPainter.Reset()
 	}
+	ui.scrollOffset = 0
 	ui.streamThinking = ""
 	ui.streamAnswer = ""
 	ui.streamActive = false
