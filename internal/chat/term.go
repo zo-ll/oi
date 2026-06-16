@@ -151,6 +151,9 @@ func (ui *terminalUI) renderPromptAt(text string, cursor int) {
 	ui.promptText = text
 	ui.promptCursor = cursor
 	ui.editing = true
+	if ui.rendererPainter != nil {
+		ui.rendererPainter.ScrollBottom()
+	}
 	ui.redrawLocked()
 }
 
@@ -261,12 +264,12 @@ func (ui *terminalUI) redrawLocked() {
 		state.PromptCursor = ui.promptCursor
 	}
 	frame := renderer.RenderFrame(state, ui.width)
-	frame = renderer.CropFrame(frame, ui.height)
 	if ui.rendererPainter != nil {
+		ui.rendererPainter.SetViewportHeight(ui.height)
 		_ = ui.rendererPainter.Paint(frame)
 		return
 	}
-	_ = renderer.Paint(ui.out, frame)
+	_ = renderer.Paint(ui.out, renderer.CropFrame(frame, ui.height))
 }
 
 func (ui *terminalUI) clearPromptLocked() {
@@ -348,6 +351,26 @@ func (ui *terminalUI) blankLine() {}
 func (ui *terminalUI) clearStatusLocked() {
 	ui.statusVisible = false
 	ui.statusText = ""
+}
+
+func (ui *terminalUI) pageUp() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	if ui.rendererPainter == nil {
+		return
+	}
+	ui.rendererPainter.PageUp()
+	ui.redrawLocked()
+}
+
+func (ui *terminalUI) pageDown() {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	if ui.rendererPainter == nil {
+		return
+	}
+	ui.rendererPainter.PageDown()
+	ui.redrawLocked()
 }
 
 func (ui *terminalUI) ClearScreen() {
