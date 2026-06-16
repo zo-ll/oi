@@ -894,7 +894,7 @@ func stripANSI(s string) string {
 }
 
 func lastStreamFrame(s string) string {
-	const marker = "\x1b[?25l\x1b[H\x1b[2J"
+	const marker = "\x1b[?25l\x1b[H\x1b[J"
 	if idx := strings.LastIndex(s, marker); idx >= 0 {
 		s = s[idx+len(marker):]
 	}

@@ -385,6 +385,7 @@ func (ui *terminalUI) writeStreamSegments(segs []responseSegment) {
 	}
 	ui.mu.Lock()
 	defer ui.mu.Unlock()
+	ui.clearStatusLocked()
 	for _, seg := range segs {
 		if seg.reasoning {
 			ui.streamThinking += seg.text
