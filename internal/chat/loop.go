@@ -10,10 +10,6 @@ import (
 )
 
 func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
-	if ui, ok := newTerminalUI(in, out); ok {
-		defer ui.Close()
-		return runTUIMode(args, in, out, ui, deps)
-	}
 	return runLineMode(args, in, out, deps)
 }
 
