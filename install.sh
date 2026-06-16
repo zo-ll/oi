@@ -15,8 +15,6 @@ if ! command -v go >/dev/null 2>&1; then
   exit 1
 fi
 
-export GOMODCACHE="${GOMODCACHE:-$HOME/.cache/go-mod}"
-mkdir -p "$GOMODCACHE"
 mkdir -p "$INSTALL_DIR"
 
 tmp="$(mktemp "$INSTALL_DIR/.oi-build-XXXXXX")"
