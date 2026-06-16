@@ -2,7 +2,7 @@
 
 Tiny agent runtime for local workflows.
 
-`oi` is a small command-line agent built around simple protocols, safe local tools, and OpenAI-compatible providers. It is written in Go and intentionally avoids external runtime dependencies.
+`oi` is a small command-line agent built around simple protocols, safe local tools, and OpenAI-compatible providers. It is written in Go and keeps runtime dependencies small; the interactive renderer is provided by the companion module [`github.com/zo-ll/mdterm`](https://github.com/zo-ll/mdterm).
 
 ## What it does
 
@@ -23,7 +23,7 @@ Tiny agent runtime for local workflows.
 - protocol-first interfaces
 - safe local tool execution
 - simple install/uninstall
-- no framework dependency
+- minimal terminal UI surface
 - useful from terminal, scripts, and external bridges
 
 ## Install
@@ -33,6 +33,8 @@ Install to `~/.local/bin/oi`:
 ```bash
 bash install.sh
 ```
+
+`install.sh` now creates a default module cache under `~/.cache/go-mod` when Go does not already have one configured.
 
 Override install directory:
 
@@ -124,14 +126,15 @@ oi rpc                  # NDJSON stdio protocol
 
 When attached to a TTY, `oi` uses a small terminal UI:
 
-- wrapped assistant output
+- full-frame semantic rendering via `mdterm`
+- markdown-aware assistant output
+- streamed assistant output with separate thinking and answer regions
 - wrapped multiline input
 - bracketed paste support
 - `Ctrl+V` to paste from system clipboard when available
 - `Ctrl+Y` to copy the last assistant reply
 - `Ctrl+K` to insert a newline
-- compact one-line header with selected model/context window when known
-- per-turn context usage when the provider reports token usage
+- compact one-line header showing model, thinking level, context usage, and cwd
 - quieter tool/status output
 - line-mode fallback outside a TTY
 
@@ -142,6 +145,7 @@ Slash commands:
 /login
 /model
 /stream
+/think
 /tools
 /autosave
 /new
@@ -152,7 +156,7 @@ Slash commands:
 /exit
 ```
 
-Sessions autosave after successful turns and save on exit by default. Use `/compact` to collapse the current session into a summary.
+Sessions autosave after successful turns and save on exit by default. New sessions default thinking to `off`. Use `/think` to choose the current model-valid thinking level, and `/compact` to collapse the current session into a summary.
 
 ## Provider login
 
@@ -171,6 +175,7 @@ Notes:
 - `oi login openai` uses the standard OpenAI API endpoint and requires a separate Platform API key.
 - `oi login opencode-go` uses OpenCode Go (`https://opencode.ai/zen/go/v1`).
 - There is no separate `/provider` command. Provider switching is implicit through `/model`.
+- Read-only shell commands can be auto-approved by workspace policy; mutating commands still require approval.
 
 ## RPC mode
 
@@ -213,4 +218,4 @@ internal/log      debug logs
 
 ## Project status
 
-Usable, still evolving. Current focus is keeping the runtime small, safe, scriptable, and protocol-friendly rather than adding a large plugin system or heavy UI.
+Usable, still evolving. Current focus is keeping the runtime small, safe, scriptable, and protocol-friendly while stabilizing the `mdterm`-backed interactive UI.

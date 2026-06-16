@@ -6,8 +6,8 @@
 - OpenAI-compatible providers
 - local tool execution
 - stdio RPC for Telegram/bot integration
-- zero external dependencies
-- standard library only
+- minimal dependency surface
+- Go-first implementation with a small companion terminal renderer module
 
 It should be minimal in code size, but strong in architecture, safety, and functionality. Go is an implementation choice here: the product goal is a small protocol-first agent runtime, not a Go-only ecosystem.
 
@@ -57,12 +57,13 @@ oi doctor
 
 4. Safe by default
    - workspace sandbox
-   - approval for writes and shell commands
+   - approval for writes and mutating shell commands
    - explicit `--unsafe` to relax policy
 
-5. Stdlib only
-   - `net/http`, `encoding/json`, `os/exec`, `path/filepath`, `bufio`, `context`
-   - no YAML/TOML, no third-party readline, no RPC framework
+5. Minimal dependencies
+   - keep the core runtime small and understandable
+   - use stdlib where it keeps complexity low
+   - allow small owned companion modules when they improve architecture, such as the `mdterm` renderer
 
 6. Protocol first
    - RPC mode is a first-class interface, not an afterthought
@@ -123,8 +124,9 @@ internal/log/
 #### `internal/chat`
 - interactive terminal mode
 - slash command handling
-- wrapped terminal output
+- semantic render-state assembly for the terminal
 - minimal clipboard integration
+- wiring to the external `mdterm` frame renderer/painter
 
 #### `internal/tool`
 - tool registry
@@ -371,7 +373,8 @@ Optional overrides:
 - execute through `sh -c` or `bash -c`
 - apply policy before execution
 - block known dangerous patterns
-- require approval by default
+- require approval by default for mutating commands
+- allow safe read-only commands to bypass approval
 
 Blocked examples:
 - `rm -rf /`
@@ -487,14 +490,14 @@ Events:
 
 ### `oi`
 - interactive terminal loop
-- minimal stdlib-only terminal UI when attached to a TTY
-- wrapped input/output with plain-text cleanup for display
+- terminal UI when attached to a TTY, with rendering delegated to `mdterm`
+- semantic full-frame render state with markdown-aware assistant output
 - streaming by default
-- header shows model context window when known
-- per-turn context usage is shown when provider usage data is available
-- commands limited to essentials: `/login`, `/model`, `/stream`, `/tools`, `/new`, `/sessions`, `/save`, `/load`, `/compact`, `/clear`, `/help`, `/exit`
+- header shows model, thinking level, context usage, and cwd when known
+- commands limited to essentials: `/login`, `/model`, `/stream`, `/think`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/help`, `/exit`
 - provider switching is implicit via model selection
 - `/login` only stores auth; `/model` performs selection
+- new sessions default thinking to `off`; `/think` opens a picker with model-valid levels
 - `/compact` manually collapses the current session into a summary
 
 ### `oi run`
@@ -567,7 +570,7 @@ Prefer JSONL for debug logs.
 
 ## Testing priorities
 
-Because stdlib-only code is manageable, test the important edges heavily.
+Because the codebase is still small and dependency-light, test the important edges heavily.
 
 ### Must-test units
 
@@ -595,7 +598,7 @@ Because stdlib-only code is manageable, test the important edges heavily.
 - works with your current OpenAI-compatible subscriptions
 - can inspect and edit repo files safely
 - can be driven reliably by a Telegram bot over stdio RPC
-- remains dependency-free and understandable
+- remains small and understandable
 - has a clean enough core that local backends can be added later without redesign
 
 ---

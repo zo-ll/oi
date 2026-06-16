@@ -57,12 +57,13 @@ Implemented and working in the new Go codebase:
   - events for streaming, tools, errors, done
 - Chat:
   - default `oi` mode
-  - stdlib TUI with wrapped input/output, clipboard paste/copy, and line-mode fallback
+  - terminal UI backed by `mdterm`, with semantic frame rendering, clipboard paste/copy, and line-mode fallback
   - streaming output
-  - context-window header and per-turn context-usage display when available
-  - `/help`, `/login`, `/model`, `/stream`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/exit`
+  - header with model, thinking level, context usage, and cwd when available
+  - `/help`, `/login`, `/model`, `/stream`, `/think`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/exit`
   - `/login` flow: choose `sub` or `api`, then provider
   - `/model` interactive numbered picker
+  - `/think` picker constrained to model-valid thinking levels; new sessions default to `off`
   - provider switching implicit through `/model`
 - Sessions/logs:
   - rolling autosave
@@ -110,11 +111,12 @@ Current active phase: **Phase 10 — hardening, cleanup, and real-world smoke te
 - Add integration tests for key flows.
 - Improve `oi doctor`.
 - Keep docs current.
-- Make list/picker UX usable enough until a real picker/TUI lands.
+- Make list/picker UX usable enough while stabilizing the current `mdterm`-backed TUI.
 
 ### Done when
 
 - v1 behavior is understandable from README/RPC docs/roadmap.
+- interactive rendering behavior is documented accurately.
 - Common login/model/session flows are tested.
 - No core file is doing too many unrelated jobs.
 - Browser-login OpenAI subscription path is clearly separate from OpenAI Platform API keys.
@@ -188,7 +190,7 @@ After `internal/picker` exists:
 
 ---
 
-## TUI — rich terminal interface
+## TUI — richer terminal interface
 
 ### Source
 
@@ -196,7 +198,7 @@ After `internal/picker` exists:
 
 ### Goals
 
-Replace the minimal readline-style chat with a richer terminal UI when v1 is stable.
+Extend the current `mdterm`-backed chat UI into a richer terminal interface when v1 is stable.
 
 ### Planned features
 
