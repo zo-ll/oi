@@ -72,7 +72,7 @@ oi doctor
 ## Non-goals for v1
 
 Do not build these first:
-- large/full-screen TUI framework
+- fullscreen TUI framework
 - RAG
 - vision/image support
 - heavyweight clipboard abstractions
@@ -91,6 +91,7 @@ internal/config/
 internal/provider/
 internal/agent/
 internal/chat/
+internal/lineedit/
 internal/tool/
 internal/workspace/
 internal/rpc/
@@ -110,6 +111,7 @@ internal/log/
 #### `internal/provider`
 - provider interface
 - OpenAI-compatible implementation
+- OpenCode Go provider with chat completions and messages backends
 - SSE streaming parser
 - tool-call normalization
 
@@ -121,10 +123,17 @@ internal/log/
 - final answer handling
 
 #### `internal/chat`
-- interactive terminal mode
+- interactive chat loop
 - slash command handling
-- wrapped terminal output
-- minimal clipboard integration
+- streaming output to terminal
+- tool activity display
+- model/thinking configuration
+
+#### `internal/lineedit`
+- shell-style prompt editing (raw mode, cursor movement, history, paste)
+- slash command picker with arrow-key navigation
+- reusable selector for model/session/choice pickers
+- line-mode fallback outside a TTY
 
 #### `internal/tool`
 - tool registry
@@ -214,7 +223,7 @@ Fallbacks:
     "max_tool_output_bytes": 65536,
     "tool_timeout_seconds": 20,
     "request_timeout_seconds": 600,
-    "approval_mode": "prompt"
+    "approval_mode": "auto"
   }
 }
 ```
@@ -382,8 +391,8 @@ Blocked examples:
 
 ### Approval modes
 
+- `auto`: no prompt inside workspace safe policy (default)
 - `prompt`: ask before writes/commands
-- `auto`: no prompt inside workspace safe policy
 - `never`: read-only, deny mutations
 
 ---
@@ -487,12 +496,13 @@ Events:
 
 ### `oi`
 - interactive terminal loop
-- minimal stdlib-only terminal UI when attached to a TTY
-- wrapped input/output with plain-text cleanup for display
+- shell-style line editor when attached to a TTY (`internal/lineedit`)
+- plain streaming output in the terminal flow — no fullscreen takeover
 - streaming by default
-- header shows model context window when known
-- per-turn context usage is shown when provider usage data is available
-- commands limited to essentials: `/login`, `/model`, `/stream`, `/tools`, `/new`, `/sessions`, `/save`, `/load`, `/compact`, `/clear`, `/help`, `/exit`
+- `/status` shows model, context, thinking, and session info on demand
+- commands: `/help`, `/status`, `/login`, `/model`, `/stream`, `/think`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/exit`
+- arrow-key pickers for model, thinking level, and other choices
+- slash command picker: type `/` to browse commands
 - provider switching is implicit via model selection
 - `/login` only stores auth; `/model` performs selection
 - `/compact` manually collapses the current session into a summary
@@ -607,5 +617,4 @@ Only after v1 is stable:
 - patch/diff tool
 - project summaries
 - RAG
-- TUI
 - vision

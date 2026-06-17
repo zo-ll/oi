@@ -122,26 +122,27 @@ oi rpc                  # NDJSON stdio protocol
 
 ## Interactive mode
 
-When attached to a TTY, `oi` uses a small terminal UI:
+When attached to a TTY, `oi` uses a small shell-style line editor (`internal/lineedit`):
 
-- wrapped assistant output
-- wrapped multiline input
+- editable prompt with left/right cursor movement, home/end, backspace, delete
+- history prev/next
 - bracketed paste support
-- `Ctrl+V` to paste from system clipboard when available
-- `Ctrl+Y` to copy the last assistant reply
-- `Ctrl+K` to insert a newline
-- compact one-line header with selected model/context window when known
-- per-turn context usage when the provider reports token usage
-- quieter tool/status output
+- slash command picker: type `/` to see available commands, arrow keys to navigate, enter/tab to pick
+- arrow-key pickers for `/model`, `/think`, `/stream`, `/tools`, `/autosave`, `/login`, `/session`
+- plain streaming output in the terminal flow — no fullscreen takeover
+- shell scrollback remains usable
+- `/status` shows model, context usage, thinking level, and session info on demand
 - line-mode fallback outside a TTY
 
 Slash commands:
 
 ```text
 /help
+/status
 /login
 /model
 /stream
+/think
 /tools
 /autosave
 /new
@@ -200,7 +201,8 @@ High-level shape:
 
 ```text
 cmd/oi            CLI commands
-internal/chat     interactive terminal mode
+internal/lineedit shell-style line editor and picker
+internal/chat     interactive chat loop and commands
 internal/agent    agent loop and tool-call handling
 internal/provider OpenAI-compatible providers
 internal/tool     local tool registry

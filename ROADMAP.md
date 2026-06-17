@@ -2,7 +2,7 @@
 
 This file tracks the current implementation roadmap. The original compile-only rebuild plan has mostly been completed; the project is now in stabilization/hardening with a larger feature backlog migrated from `oi-old` issues.
 
-## Current status — 2026-06-02
+## Current status — 2026-06-17
 
 Implemented and working in the new Go codebase:
 
@@ -11,12 +11,15 @@ Implemented and working in the new Go codebase:
   - `internal/config`
   - `internal/provider`
   - `internal/agent`
+  - `internal/lineedit`
+  - `internal/chat`
   - `internal/tool`
   - `internal/workspace`
   - `internal/rpc`
   - `internal/session`
   - `internal/log`
   - `internal/oauth`
+  - `internal/retrieval`
 - Config/auth:
   - XDG config/state paths
   - `config.json` and private `auth.json`
@@ -33,7 +36,7 @@ Implemented and working in the new Go codebase:
 - Workspace/policy:
   - root detection
   - path safety checks
-  - approval modes
+  - approval modes (default: `auto`)
   - output truncation
   - per-tool timeouts
 - Tools:
@@ -55,14 +58,21 @@ Implemented and working in the new Go codebase:
   - NDJSON stdio framing
   - prompt/state/provider/model commands
   - events for streaming, tools, errors, done
+- Line editor (`internal/lineedit`):
+  - shell-style prompt editing: cursor movement, home/end, backspace, delete
+  - history prev/next
+  - bracketed paste
+  - slash command picker: type `/` to browse, arrows to navigate, enter/tab to pick
+  - reusable arrow-key selector for `/model`, `/think`, `/stream`, `/tools`, `/autosave`, `/login`, `/session`
+  - dim styling for picker overlays
+  - line-mode fallback outside a TTY
 - Chat:
   - default `oi` mode
-  - stdlib TUI with wrapped input/output, clipboard paste/copy, and line-mode fallback
-  - streaming output
-  - context-window header and per-turn context-usage display when available
-  - `/help`, `/login`, `/model`, `/stream`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/exit`
+  - plain streaming output in terminal flow — no fullscreen takeover
+  - `/status` command for model/context/thinking/session info on demand
+  - `/help`, `/status`, `/login`, `/model`, `/stream`, `/think`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/exit`
   - `/login` flow: choose `sub` or `api`, then provider
-  - `/model` interactive numbered picker
+  - `/model` interactive arrow-key picker
   - provider switching implicit through `/model`
 - Sessions/logs:
   - rolling autosave
@@ -141,80 +151,32 @@ Only after cloud-first v1 is stable.
 
 The following plans came from open `oi-old` issues and should be considered post-v1 unless marked otherwise.
 
-## Picker/list UX — high priority, can be before full TUI
+## Picker/list UX — done
 
-### Source
+### Status
 
-- Current new requirement: list rendering is unusable without a fuzzy/selectable UI.
-- Related `oi-old` idea: #21 — `@` file fuzzy completion in input.
-
-### Problem
-
-The current numbered lists are barely usable for large model/session/file lists. We need a built-in fzf-like selector for `oi`; this is not about removing an existing dependency in the new codebase.
-
-### Plan
-
-Create `internal/picker/` with a built-in fuzzy selector:
-
-- Stdlib-only.
-- Fuzzy matching:
-  - substring match
-  - simple scoring
-  - rank by score and recency where applicable
-- Keyboard navigation:
-  - arrows / Ctrl-N / Ctrl-P
-  - Enter select
-  - Esc cancel
-- Search/filter input.
-- Works before the full TUI exists.
-- Can be reused by:
-  - `/model`
-  - `/sessions` / `/load`
-  - command picker
-  - skill picker if skills return
-  - file picker and `@file` completion
-
-### TUI relationship
-
-This can be implemented as a standalone picker first, then later become a TUI component. It should be designed so the full TUI can reuse it rather than replace it.
+Implemented in `internal/lineedit`. The line editor provides:
+- arrow-key selector with filter typing
+- slash command picker (type `/` to browse)
+- reused by `/model`, `/think`, `/stream`, `/tools`, `/autosave`, `/login`, `/session`
+- dim styling for overlay text
+- line-mode numbered fallback outside a TTY
 
 ### `@` file fuzzy completion
 
-After `internal/picker` exists:
-
-- Typing `@` in input opens fuzzy file search.
-- Search current workspace files, with sane depth/ignore limits.
-- Selecting a file inserts its path at the cursor.
+Partially done: `@` file completion exists through the completion hook. Fuzzy file matching is available in `internal/chat/completion.go`.
 
 ---
 
 ## TUI — rich terminal interface
 
-### Source
+### Status
 
-- `oi-old` #17 — TUI: rich terminal interface with panes, markdown rendering, event loop
+Built and removed. A fullscreen TUI was implemented and then reverted in favor of a shell-style line editor (`internal/lineedit`). The project does not want a fullscreen takeover app; plain terminal output with a small editable prompt layer is the intended model.
 
-### Goals
+### Future
 
-Replace the minimal readline-style chat with a richer terminal UI when v1 is stable.
-
-### Planned features
-
-- Framebuffer with diff-based rendering.
-- Chat pane.
-- Input pane.
-- Status bar.
-- Multi-line input.
-- History.
-- Tab completion.
-- Mouse and resize support.
-- Markdown rendering.
-- Syntax highlighting for code blocks.
-- Built-in picker/list component, replacing the current numbered-list UX.
-
-### Notes
-
-Do not start with the full TUI if a smaller `internal/picker` solves the urgent list UX. Build picker first, then fold it into the TUI.
+If a richer terminal interface is ever needed, it should build on `internal/lineedit` rather than replace it. The non-goals remain: no panes, no transcript renderer, no custom viewport/scrollback system, no alternate-screen UI.
 
 ---
 
