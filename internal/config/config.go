@@ -67,7 +67,7 @@ func Default() *Config {
 			MaxToolOutputBytes:    64 * 1024,
 			ToolTimeoutSeconds:    20,
 			RequestTimeoutSeconds: 600,
-			ApprovalMode:          "prompt",
+			ApprovalMode:          "auto",
 		},
 	}
 }
