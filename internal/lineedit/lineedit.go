@@ -32,6 +32,8 @@ type Editor struct {
 	raw          bool
 	renderedRows int
 	hint         []string
+	hintIndex    int
+	hintActive   bool
 }
 
 func New(in *os.File, out io.Writer, prompt string, complete Completer) *Editor {
@@ -64,6 +66,23 @@ func (e *Editor) ReadLine() (string, error) {
 	e.historyIndex = -1
 	e.historyDraft = ""
 	e.hint = nil
+	e.hintActive = false
+	e.hintIndex = 0
+	refreshHint := func(current string) {
+		e.hint = nil
+		e.hintActive = false
+		if e.complete == nil || len(current) == 0 || current[0] != '/' {
+			return
+		}
+		completion, err := e.complete(current)
+		if err != nil || len(completion.Matches) == 0 {
+			return
+		}
+		e.hint = completion.Matches
+		e.hintActive = true
+		e.hintIndex = 0
+	}
+	refreshHint("")
 	e.render(buf, cursor)
 
 	for {
@@ -76,6 +95,7 @@ func (e *Editor) ReadLine() (string, error) {
 		case '\r', '\n':
 			text := strings.TrimRight(string(buf), "\n")
 			e.hint = nil
+			e.hintActive = false
 			e.render(buf, cursor)
 			_, _ = io.WriteString(e.out, "\r\n")
 			e.renderedRows = 0
@@ -84,10 +104,14 @@ func (e *Editor) ReadLine() (string, error) {
 			}
 			return text, nil
 		case 3:
+			e.hint = nil
+			e.hintActive = false
 			e.clear()
 			return "", io.EOF
 		case 4:
 			if len(buf) == 0 {
+				e.hint = nil
+				e.hintActive = false
 				e.clear()
 				return "", io.EOF
 			}
@@ -101,12 +125,19 @@ func (e *Editor) ReadLine() (string, error) {
 			if cursor > 0 {
 				buf = append(buf[:cursor-1], buf[cursor:]...)
 				cursor--
-				e.hint = nil
+				refreshHint(string(buf))
 				e.render(buf, cursor)
 			} else {
 				e.bell()
 			}
 		case 9:
+			if e.hintActive && len(e.hint) > 0 {
+				buf = []rune(e.hint[e.hintIndex])
+				cursor = len(buf)
+				refreshHint(string(buf))
+				e.render(buf, cursor)
+				continue
+			}
 			if e.complete == nil || cursor != len(buf) {
 				e.bell()
 				continue
@@ -121,18 +152,20 @@ func (e *Editor) ReadLine() (string, error) {
 				cursor = len(buf)
 			}
 			e.hint = completion.Matches
+			e.hintActive = len(completion.Matches) > 0
+			e.hintIndex = 0
 			if completion.Text == "" && len(completion.Matches) == 0 {
 				e.bell()
 			}
 			e.render(buf, cursor)
 		case 11:
 			buf = buf[:cursor]
-			e.hint = nil
+			refreshHint(string(buf))
 			e.render(buf, cursor)
 		case 21:
 			buf = buf[cursor:]
 			cursor = 0
-			e.hint = nil
+			refreshHint(string(buf))
 			e.render(buf, cursor)
 		case 27:
 			kind, text, handled, err := e.readEscape()
@@ -146,19 +179,35 @@ func (e *Editor) ReadLine() (string, error) {
 			}
 			switch kind {
 			case "up":
+				if e.hintActive && len(e.hint) > 0 {
+					e.hintIndex--
+					if e.hintIndex < 0 {
+						e.hintIndex = len(e.hint) - 1
+					}
+					e.render(buf, cursor)
+					continue
+				}
 				if next, ok := e.historyPrev(string(buf)); ok {
 					buf = []rune(next)
 					cursor = len(buf)
-					e.hint = nil
+					refreshHint(string(buf))
 					e.render(buf, cursor)
 				} else {
 					e.bell()
 				}
 			case "down":
+				if e.hintActive && len(e.hint) > 0 {
+					e.hintIndex++
+					if e.hintIndex >= len(e.hint) {
+						e.hintIndex = 0
+					}
+					e.render(buf, cursor)
+					continue
+				}
 				if next, ok := e.historyNext(); ok {
 					buf = []rune(next)
 					cursor = len(buf)
-					e.hint = nil
+					refreshHint(string(buf))
 					e.render(buf, cursor)
 				} else {
 					e.bell()
@@ -186,7 +235,7 @@ func (e *Editor) ReadLine() (string, error) {
 			case "delete":
 				if cursor < len(buf) {
 					buf = append(buf[:cursor], buf[cursor+1:]...)
-					e.hint = nil
+					refreshHint(string(buf))
 					e.render(buf, cursor)
 				} else {
 					e.bell()
@@ -195,7 +244,7 @@ func (e *Editor) ReadLine() (string, error) {
 				paste := []rune(normalizePaste(text))
 				buf = append(buf[:cursor], append(paste, buf[cursor:]...)...)
 				cursor += len(paste)
-				e.hint = nil
+				refreshHint(string(buf))
 				e.render(buf, cursor)
 			}
 		default:
@@ -217,7 +266,7 @@ func (e *Editor) ReadLine() (string, error) {
 				}
 				buf = append(buf[:cursor], append([]rune{r}, buf[cursor:]...)...)
 				cursor++
-				e.hint = nil
+				refreshHint(string(buf))
 				e.render(buf, cursor)
 			}
 		}
@@ -251,7 +300,7 @@ func (e *Editor) Select(title string, items []string) (string, bool, error) {
 		rows = 0
 		writeLine := func(text string) {
 			_, _ = io.WriteString(e.out, "\r\x1b[2K")
-			_, _ = io.WriteString(e.out, text)
+			_, _ = io.WriteString(e.out, dim(text))
 			_, _ = io.WriteString(e.out, "\r\n")
 			rows++
 		}
@@ -266,14 +315,14 @@ func (e *Editor) Select(title string, items []string) (string, bool, error) {
 			writeLine("  no matches")
 			return
 		}
-		start := idx - idx%8
-		if start+8 > len(filtered) {
-			start = len(filtered) - 8
+		start := idx - idx%5
+		if start+5 > len(filtered) {
+			start = len(filtered) - 5
 		}
 		if start < 0 {
 			start = 0
 		}
-		end := start + 8
+		end := start + 5
 		if end > len(filtered) {
 			end = len(filtered)
 		}
@@ -477,14 +526,35 @@ func filterItems(items []string, query string) []string {
 }
 
 func (e *Editor) hintLines() []string {
-	if len(e.hint) == 0 {
+	if !e.hintActive || len(e.hint) == 0 {
 		return nil
 	}
-	limit := len(e.hint)
-	if limit > 8 {
-		limit = 8
+	pageSize := 5
+	start := e.hintIndex - pageSize/2
+	if start < 0 {
+		start = 0
 	}
-	return []string{"tab: " + strings.Join(e.hint[:limit], "  ")}
+	end := start + pageSize
+	if end > len(e.hint) {
+		end = len(e.hint)
+		start = end - pageSize
+		if start < 0 {
+			start = 0
+		}
+	}
+	var lines []string
+	for i := start; i < end; i++ {
+		marker := "  "
+		if i == e.hintIndex {
+			marker = "> "
+		}
+		lines = append(lines, dim(marker+e.hint[i]))
+	}
+	return lines
+}
+
+func dim(text string) string {
+	return "\x1b[2m" + text + "\x1b[0m"
 }
 
 func (e *Editor) bell() {
