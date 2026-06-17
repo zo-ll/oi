@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"strconv"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
+	"golang.org/x/term"
 )
 
 type Completion struct {
@@ -28,12 +32,20 @@ type Editor struct {
 	history      []string
 	historyIndex int
 	historyDraft string
-	rawState     string
+	rawState     *term.State
 	raw          bool
 	renderedRows int
 	hint         []string
 	hintIndex    int
 	hintActive   bool
+
+	mu           sync.Mutex
+	renderBuf    []rune
+	renderCursor int
+	status       string
+	statusRows   int
+	writeCol     int
+	writePending string
 }
 
 func New(in *os.File, out io.Writer, prompt string, complete Completer) *Editor {
@@ -53,6 +65,161 @@ func IsTerminal(f *os.File) bool {
 
 func (e *Editor) Close() error {
 	return e.disableRaw()
+}
+
+func (e *Editor) ShowStatus(text string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.status = strings.TrimSpace(text)
+	if e.renderedRows > 0 {
+		e.renderLocked(e.renderBuf, e.renderCursor)
+		return
+	}
+	e.renderStandaloneStatusLocked()
+
+}
+
+func (e *Editor) ClearStandaloneStatus() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.clearStandaloneStatusLocked()
+}
+
+func (e *Editor) renderStandaloneStatusLocked() {
+	e.clearStandaloneStatusLocked()
+	if e.status == "" {
+		return
+	}
+	lines := e.statusLines()
+	for i, line := range lines {
+		if i > 0 {
+			_, _ = io.WriteString(e.out, "\r\n")
+		}
+		_, _ = io.WriteString(e.out, "\r\x1b[2K")
+		_, _ = io.WriteString(e.out, line)
+	}
+	e.statusRows = len(lines)
+}
+
+func (e *Editor) clearStandaloneStatusLocked() {
+	if e.statusRows == 0 {
+		return
+	}
+	if e.statusRows > 1 {
+		_, _ = io.WriteString(e.out, fmt.Sprintf("\x1b[%dA", e.statusRows-1))
+	}
+	_, _ = io.WriteString(e.out, "\r\x1b[J")
+	e.statusRows = 0
+}
+
+func (e *Editor) ClearStatus() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.status = ""
+	if e.renderedRows > 0 {
+		e.renderLocked(e.renderBuf, e.renderCursor)
+		return
+	}
+	e.clearStandaloneStatusLocked()
+}
+
+func (e *Editor) Write(p []byte) (int, error) {
+	e.mu.Lock()
+	e.clearStandaloneStatusLocked()
+	err := e.writeWrappedLocked(string(p))
+	e.mu.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (e *Editor) writeWrappedLocked(s string) error {
+	for len(s) > 0 {
+		if strings.HasPrefix(s, "\x1b[") {
+			seq, rest := splitANSI(s)
+			e.writePending += seq
+			s = rest
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		s = s[size:]
+		switch r {
+		case '\r':
+			if err := e.flushPendingWordLocked(); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(e.out, "\r"); err != nil {
+				return err
+			}
+			e.writeCol = 0
+		case '\n':
+			if err := e.flushPendingWordLocked(); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(e.out, "\n"); err != nil {
+				return err
+			}
+			e.writeCol = 0
+		case ' ', '\t':
+			if err := e.flushPendingWordLocked(); err != nil {
+				return err
+			}
+			w := runewidth.RuneWidth(r)
+			if w <= 0 {
+				w = 1
+			}
+			if e.writeCol+w > safeRenderWidth(e.width) {
+				if _, err := io.WriteString(e.out, "\n"); err != nil {
+					return err
+				}
+				e.writeCol = 0
+				continue
+			}
+			if _, err := io.WriteString(e.out, string(r)); err != nil {
+				return err
+			}
+			e.writeCol += w
+		default:
+			e.writePending += string(r)
+		}
+	}
+	return nil
+}
+
+func (e *Editor) flushPendingWordLocked() error {
+	if e.writePending == "" {
+		return nil
+	}
+	w := displayWidth(stripANSI(e.writePending))
+	if e.writeCol > 0 && e.writeCol+w > safeRenderWidth(e.width) {
+		if _, err := io.WriteString(e.out, "\n"); err != nil {
+			return err
+		}
+		e.writeCol = 0
+	}
+	if _, err := io.WriteString(e.out, e.writePending); err != nil {
+		return err
+	}
+	e.writeCol += w
+	e.writePending = ""
+	return nil
+}
+
+func (e *Editor) Styled(kind, text string) string {
+	switch kind {
+	case "dim":
+		return dim(text)
+	case "warn":
+		return "\x1b[33m" + text + "\x1b[0m"
+	case "command":
+		return "\x1b[36m" + text + "\x1b[0m"
+	default:
+		return text
+	}
 }
 
 func (e *Editor) ReadLine() (string, error) {
@@ -84,6 +251,8 @@ func (e *Editor) ReadLine() (string, error) {
 	}
 	refreshHint("")
 	e.render(buf, cursor)
+	stopResize := e.watchResize(e.rerenderSaved)
+	defer stopResize()
 
 	for {
 		b, err := readByte(e.in)
@@ -98,7 +267,7 @@ func (e *Editor) ReadLine() (string, error) {
 			e.hintActive = false
 			e.render(buf, cursor)
 			_, _ = io.WriteString(e.out, "\r\n")
-			e.renderedRows = 0
+			e.markClean()
 			if strings.TrimSpace(text) != "" {
 				e.addHistory(text)
 			}
@@ -120,6 +289,12 @@ func (e *Editor) ReadLine() (string, error) {
 			e.render(buf, cursor)
 		case 5:
 			cursor = len(buf)
+			e.render(buf, cursor)
+		case 2:
+			cursor = wordLeft(buf, cursor)
+			e.render(buf, cursor)
+		case 6:
+			cursor = wordRight(buf, cursor)
 			e.render(buf, cursor)
 		case 8, 127:
 			if cursor > 0 {
@@ -226,6 +401,12 @@ func (e *Editor) ReadLine() (string, error) {
 				} else {
 					e.bell()
 				}
+			case "word-left":
+				cursor = wordLeft(buf, cursor)
+				e.render(buf, cursor)
+			case "word-right":
+				cursor = wordRight(buf, cursor)
+				e.render(buf, cursor)
 			case "home":
 				cursor = 0
 				e.render(buf, cursor)
@@ -286,6 +467,7 @@ func (e *Editor) Select(title string, items []string) (string, bool, error) {
 	query := ""
 	filtered := append([]string(nil), items...)
 	rows := 0
+	var draw func()
 	refilter := func() {
 		filtered = filterItems(items, query)
 		if idx >= len(filtered) {
@@ -295,7 +477,9 @@ func (e *Editor) Select(title string, items []string) (string, bool, error) {
 			idx = 0
 		}
 	}
-	draw := func() {
+	draw = func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
 		clearRows(e.out, rows)
 		rows = 0
 		writeLine := func(text string) {
@@ -337,7 +521,13 @@ func (e *Editor) Select(title string, items []string) (string, bool, error) {
 		}
 	}
 	draw()
+	stopResize := e.watchResize(func() {
+		if draw != nil {
+			draw()
+		}
+	})
 	defer clearRows(e.out, rows)
+	defer stopResize()
 
 	for {
 		b, err := readByte(e.in)
@@ -448,9 +638,32 @@ func (e *Editor) historyNext() (string, bool) {
 }
 
 func (e *Editor) render(buf []rune, cursor int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.renderLocked(buf, cursor)
+}
+
+func (e *Editor) rerenderSaved() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.renderedRows > 0 {
+		e.renderLocked(e.renderBuf, e.renderCursor)
+	}
+}
+
+func (e *Editor) markClean() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.renderedRows = 0
+}
+
+func (e *Editor) renderLocked(buf []rune, cursor int) {
 	if e.width <= 0 {
 		e.width = terminalWidth(e.in)
 	}
+	e.clearStandaloneStatusLocked()
+	e.renderBuf = append(e.renderBuf[:0], buf...)
+	e.renderCursor = cursor
 	if e.renderedRows > 0 {
 		if e.renderedRows > 1 {
 			_, _ = io.WriteString(e.out, fmt.Sprintf("\x1b[%dA", e.renderedRows-1))
@@ -459,7 +672,8 @@ func (e *Editor) render(buf []rune, cursor int) {
 	}
 
 	lines := wrapPromptLines(e.prompt, string(buf), e.width)
-	all := append([]string(nil), e.hintLines()...)
+	all := e.statusLines()
+	all = append(all, e.hintLines()...)
 	all = append(all, lines...)
 	for i, line := range all {
 		if i > 0 {
@@ -470,7 +684,7 @@ func (e *Editor) render(buf []rune, cursor int) {
 	e.renderedRows = len(all)
 
 	promptRow, col := promptCursorPosition(e.prompt, string(buf), e.width, cursor)
-	row := len(e.hintLines()) + promptRow
+	row := len(e.statusLines()) + len(e.hintLines()) + promptRow
 	if up := len(all) - 1 - row; up > 0 {
 		_, _ = io.WriteString(e.out, fmt.Sprintf("\x1b[%dA", up))
 	}
@@ -481,6 +695,12 @@ func (e *Editor) render(buf []rune, cursor int) {
 }
 
 func (e *Editor) clear() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.clearLocked()
+}
+
+func (e *Editor) clearLocked() {
 	if e.renderedRows == 0 {
 		return
 	}
@@ -553,8 +773,50 @@ func (e *Editor) hintLines() []string {
 	return lines
 }
 
+func (e *Editor) statusLines() []string {
+	if e.status == "" {
+		return nil
+	}
+	lines := wrapLine(e.status, e.width)
+	for i := range lines {
+		lines[i] = dim(lines[i])
+	}
+	return lines
+}
+
 func dim(text string) string {
 	return "\x1b[2m" + text + "\x1b[0m"
+}
+
+func splitANSI(s string) (seq, rest string) {
+	if !strings.HasPrefix(s, "\x1b[") {
+		return "", s
+	}
+	for i := 2; i < len(s); i++ {
+		b := s[i]
+		if b >= 0x40 && b <= 0x7e {
+			return s[:i+1], s[i+1:]
+		}
+	}
+	return s, ""
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for len(s) > 0 {
+		if strings.HasPrefix(s, "\x1b[") {
+			_, rest := splitANSI(s)
+			s = rest
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		b.WriteRune(r)
+		s = s[size:]
+	}
+	return b.String()
 }
 
 func (e *Editor) bell() {
@@ -565,14 +827,11 @@ func (e *Editor) enableRaw() error {
 	if e.raw {
 		return nil
 	}
-	state, err := sttyCapture(e.in, "-g")
+	state, err := term.MakeRaw(int(e.in.Fd()))
 	if err != nil {
 		return err
 	}
-	if err := sttyRun(e.in, "raw", "-echo"); err != nil {
-		return err
-	}
-	e.rawState = strings.TrimSpace(state)
+	e.rawState = state
 	e.raw = true
 	_, _ = io.WriteString(e.out, "\x1b[?2004h")
 	return nil
@@ -584,10 +843,10 @@ func (e *Editor) disableRaw() error {
 	}
 	_, _ = io.WriteString(e.out, "\x1b[?2004l")
 	e.raw = false
-	if e.rawState == "" {
+	if e.rawState == nil {
 		return nil
 	}
-	return sttyRun(e.in, e.rawState)
+	return term.Restore(int(e.in.Fd()), e.rawState)
 }
 
 func readByte(f *os.File) (byte, error) {
@@ -600,6 +859,12 @@ func (e *Editor) readEscape() (kind, text string, handled bool, err error) {
 	first, err := readByte(e.in)
 	if err != nil {
 		return "", "", false, err
+	}
+	if first == 'b' {
+		return "word-left", "", true, nil
+	}
+	if first == 'f' {
+		return "word-right", "", true, nil
 	}
 	if first != '[' {
 		return "", "", false, nil
@@ -631,6 +896,10 @@ func (e *Editor) readEscape() (kind, text string, handled bool, err error) {
 		return "end", "", true, nil
 	case "[3~":
 		return "delete", "", true, nil
+	case "[1;3D", "[1;5D", "[5D":
+		return "word-left", "", true, nil
+	case "[1;3C", "[1;5C", "[5C":
+		return "word-right", "", true, nil
 	case "[200~":
 		text, err := readBracketedPaste(e.in)
 		return "paste", text, true, err
@@ -669,10 +938,12 @@ func normalizePaste(s string) string {
 }
 
 func wrapPromptLines(prompt, text string, width int) []string {
-	if width <= len(prompt)+1 {
-		width = len(prompt) + 20
+	width = safeRenderWidth(width)
+	promptW := displayWidth(prompt)
+	if width <= promptW+1 {
+		width = promptW + 20
 	}
-	cont := strings.Repeat(" ", len(prompt))
+	cont := strings.Repeat(" ", promptW)
 	parts := strings.Split(text, "\n")
 	var lines []string
 	for i, part := range parts {
@@ -680,7 +951,7 @@ func wrapPromptLines(prompt, text string, width int) []string {
 		if i == 0 {
 			prefix = prompt
 		}
-		pieces := wrapLine(part, width-len(prefix))
+		pieces := wrapLineFromRunes([]rune(part), width-displayWidth(prefix))
 		if len(pieces) == 0 {
 			lines = append(lines, prefix)
 			continue
@@ -700,20 +971,140 @@ func wrapPromptLines(prompt, text string, width int) []string {
 }
 
 func wrapLine(s string, width int) []string {
+	width = safeRenderWidth(width)
 	if width <= 1 || s == "" {
 		return []string{s}
 	}
-	runes := []rune(s)
+	return wrapLineFromRunes([]rune(s), width)
+}
+
+func safeRenderWidth(width int) int {
+	if width > 1 {
+		return width - 1
+	}
+	return width
+}
+
+func wrapLineFromRunes(runes []rune, width int) []string {
+	if width <= 1 || len(runes) == 0 {
+		return []string{string(runes)}
+	}
 	var lines []string
 	for len(runes) > 0 {
-		if len(runes) <= width {
+		used := 0
+		cut := 0
+		lastSpace := -1
+		for cut < len(runes) {
+			rw := runewidth.RuneWidth(runes[cut])
+			if rw < 0 {
+				rw = 0
+			}
+			if cut > 0 && used+rw > width {
+				break
+			}
+			used += rw
+			if isWordSpace(runes[cut]) {
+				lastSpace = cut
+			}
+			cut++
+			if used >= width {
+				break
+			}
+		}
+		if cut >= len(runes) {
 			lines = append(lines, string(runes))
 			break
 		}
-		lines = append(lines, string(runes[:width]))
-		runes = runes[width:]
+		if lastSpace > 0 {
+			lines = append(lines, string(trimRightSpaces(runes[:lastSpace])))
+			runes = trimLeftSpaces(runes[lastSpace+1:])
+			continue
+		}
+		if cut == 0 {
+			cut = 1
+		}
+		lines = append(lines, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	if len(lines) == 0 {
+		return []string{""}
 	}
 	return lines
+}
+
+func trimLeftSpaces(runes []rune) []rune {
+	for len(runes) > 0 && isWordSpace(runes[0]) {
+		runes = runes[1:]
+	}
+	return runes
+}
+
+func trimRightSpaces(runes []rune) []rune {
+	for len(runes) > 0 && isWordSpace(runes[len(runes)-1]) {
+		runes = runes[:len(runes)-1]
+	}
+	return runes
+}
+
+func displayWidth(s string) int {
+	return runewidth.StringWidth(s)
+}
+
+func wordLeft(buf []rune, cursor int) int {
+	if cursor <= 0 {
+		return 0
+	}
+	i := cursor
+	for i > 0 && isWordSpace(buf[i-1]) {
+		i--
+	}
+	for i > 0 && !isWordSpace(buf[i-1]) {
+		i--
+	}
+	return i
+}
+
+func wordRight(buf []rune, cursor int) int {
+	if cursor >= len(buf) {
+		return len(buf)
+	}
+	i := cursor
+	for i < len(buf) && !isWordSpace(buf[i]) {
+		i++
+	}
+	for i < len(buf) && isWordSpace(buf[i]) {
+		i++
+	}
+	return i
+}
+
+func isWordSpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n'
+}
+
+func (e *Editor) watchResize(redraw func()) func() {
+	ch := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(ch, syscall.SIGWINCH)
+	go func() {
+		for {
+			select {
+			case <-ch:
+				e.mu.Lock()
+				e.width = terminalWidth(e.in)
+				e.mu.Unlock()
+				if redraw != nil {
+					redraw()
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(ch)
+		close(done)
+	}
 }
 
 func promptCursorPosition(prompt, text string, width, cursor int) (int, int) {
@@ -725,53 +1116,14 @@ func promptCursorPosition(prompt, text string, width, cursor int) (int, int) {
 		cursor = len(runes)
 	}
 	lines := wrapPromptLines(prompt, string(runes[:cursor]), width)
-	return len(lines) - 1, len([]rune(lines[len(lines)-1]))
+	return len(lines) - 1, displayWidth(lines[len(lines)-1])
 }
 
 func terminalWidth(f *os.File) int {
-	out, err := sttyCapture(f, "size")
-	if err == nil {
-		parts := strings.Fields(strings.TrimSpace(out))
-		if len(parts) == 2 {
-			if width, convErr := strconv.Atoi(parts[1]); convErr == nil && width > 0 {
-				return width
-			}
+	if f != nil {
+		if width, _, err := term.GetSize(int(f.Fd())); err == nil && width > 0 {
+			return width
 		}
 	}
 	return 80
-}
-
-func sttyCapture(f *os.File, args ...string) (string, error) {
-	name := f.Name()
-	for _, flag := range []string{"-F", "-f"} {
-		cmdArgs := append([]string{flag, name}, args...)
-		cmd := exec.Command("stty", cmdArgs...)
-		cmd.Stdin = f
-		data, err := cmd.Output()
-		if err == nil {
-			return string(data), nil
-		}
-	}
-	cmd := exec.Command("stty", args...)
-	cmd.Stdin = f
-	data, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func sttyRun(f *os.File, args ...string) error {
-	name := f.Name()
-	for _, flag := range []string{"-F", "-f"} {
-		cmdArgs := append([]string{flag, name}, args...)
-		cmd := exec.Command("stty", cmdArgs...)
-		cmd.Stdin = f
-		if err := cmd.Run(); err == nil {
-			return nil
-		}
-	}
-	cmd := exec.Command("stty", args...)
-	cmd.Stdin = f
-	return cmd.Run()
 }

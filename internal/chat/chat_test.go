@@ -410,7 +410,7 @@ func TestTaggedStreamRendererSplitWord(t *testing.T) {
 	r := &taggedStreamRenderer{}
 	var b strings.Builder
 	for _, chunk := range []string{"feed", "back "} {
-		for _, seg := range r.Push(chunk) {
+		for _, seg := range r.Push(chunk, false) {
 			b.WriteString(seg.text)
 		}
 	}
@@ -419,6 +419,14 @@ func TestTaggedStreamRendererSplitWord(t *testing.T) {
 	}
 	if got := b.String(); got != "feedback " {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestTaggedStreamRendererNativeReasoning(t *testing.T) {
+	r := &taggedStreamRenderer{}
+	segs := r.Push("think this through", true)
+	if len(segs) != 1 || !segs[0].reasoning || segs[0].text != "think this through" {
+		t.Fatalf("segments = %#v", segs)
 	}
 }
 

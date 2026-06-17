@@ -51,11 +51,13 @@ func (r *Runtime) RunOnce(ctx context.Context, input string) (string, error) {
 }
 
 // RunOnceStream executes one user request and forwards text deltas as they arrive.
-func (r *Runtime) RunOnceStream(ctx context.Context, input string, onDelta func(string)) (string, error) {
+// reasoning is true for provider-native thinking/reasoning deltas that should be
+// displayed differently from final answer text.
+func (r *Runtime) RunOnceStream(ctx context.Context, input string, onDelta func(delta string, reasoning bool)) (string, error) {
 	return r.run(ctx, input, onDelta, true)
 }
 
-func (r *Runtime) run(ctx context.Context, input string, onDelta func(string), streaming bool) (string, error) {
+func (r *Runtime) run(ctx context.Context, input string, onDelta func(string, bool), streaming bool) (string, error) {
 	if r == nil {
 		return "", errors.New("nil runtime")
 	}
@@ -216,7 +218,7 @@ func jsonRaw(raw []byte) any {
 	return string(raw)
 }
 
-func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, onDelta func(string), streaming bool) (provider.Response, error) {
+func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, onDelta func(string, bool), streaming bool) (provider.Response, error) {
 	thinkingLevel := ""
 	thinkingValue := ""
 	thinkingFormat := ""
@@ -252,6 +254,9 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 		}
 		if ev.Reasoning != "" {
 			resp.Reasoning += ev.Reasoning
+			if onDelta != nil {
+				onDelta(ev.Reasoning, true)
+			}
 		}
 		if ev.Usage.InputTokens > 0 || ev.Usage.OutputTokens > 0 {
 			resp.Usage = ev.Usage
@@ -259,7 +264,7 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 		if ev.Delta != "" {
 			resp.Content += ev.Delta
 			if onDelta != nil {
-				onDelta(ev.Delta)
+				onDelta(ev.Delta, false)
 			}
 		}
 		if ev.ToolCall != nil {

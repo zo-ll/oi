@@ -67,7 +67,7 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 		return lineedit.Completion{Matches: matches}, nil
 	})
 	defer editor.Close()
-	cmdOut := interactiveCommandOutput{Writer: out, editor: editor}
+	cmdOut := interactiveCommandOutput{Writer: editor, editor: editor}
 
 	state, startupNotice, err := loadChatRuntime(args, root, reader, cmdOut)
 	if err != nil {
@@ -118,6 +118,25 @@ func (o interactiveCommandOutput) overlayPicker(title string, items []string) (s
 		return "", false
 	}
 	return selected, ok
+}
+
+func (o interactiveCommandOutput) Styled(kind, text string) string {
+	if o.editor == nil {
+		return text
+	}
+	return o.editor.Styled(kind, text)
+}
+
+func (o interactiveCommandOutput) ShowStatus(text string) {
+	if o.editor != nil {
+		o.editor.ShowStatus(text)
+	}
+}
+
+func (o interactiveCommandOutput) ClearStatus() {
+	if o.editor != nil {
+		o.editor.ClearStatus()
+	}
 }
 
 func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) error {

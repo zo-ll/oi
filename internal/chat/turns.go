@@ -66,9 +66,19 @@ func (s *chatState) autosaveSession(out io.Writer, warn func(string)) {
 }
 
 func runStreamingTurnLine(out io.Writer, state *chatState, line string) {
+	// Streaming output is itself the progress indicator. A concurrent model
+	// spinner rewrites terminal lines while deltas are being printed, corrupting
+	// the response. Keep tool status enabled, but suppress model start/stop status
+	// for streaming turns.
+	onModelStart, onModelStop := state.rt.OnModelStart, state.rt.OnModelStop
+	state.rt.OnModelStart, state.rt.OnModelStop = nil, nil
+	defer func() {
+		state.rt.OnModelStart, state.rt.OnModelStop = onModelStart, onModelStop
+	}()
+
 	renderer := &taggedStreamRenderer{}
-	_, runErr := state.rt.RunOnceStream(context.Background(), line, func(delta string) {
-		for _, seg := range renderer.Push(delta) {
+	_, runErr := state.rt.RunOnceStream(context.Background(), line, func(delta string, reasoning bool) {
+		for _, seg := range renderer.Push(delta, reasoning) {
 			writeResponseSegment(out, seg)
 		}
 	})
@@ -105,7 +115,12 @@ type taggedStreamRenderer struct {
 	inThink bool
 }
 
-func (r *taggedStreamRenderer) Push(delta string) []responseSegment {
+func (r *taggedStreamRenderer) Push(delta string, reasoning bool) []responseSegment {
+	if reasoning {
+		var out []responseSegment
+		appendResponseSegment(&out, cleanDisplayText(delta), true)
+		return out
+	}
 	r.pending += delta
 	var out []responseSegment
 	for {
