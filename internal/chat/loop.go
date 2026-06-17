@@ -4,12 +4,19 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
+	"github.com/zo-ll/oi/internal/lineedit"
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
 func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
+	if inFile, ok := in.(*os.File); ok && lineedit.IsTerminal(inFile) {
+		if outFile, ok := out.(*os.File); ok && lineedit.IsTerminal(outFile) {
+			return runEditMode(args, inFile, outFile, deps)
+		}
+	}
 	return runLineMode(args, in, out, deps)
 }
 
@@ -34,6 +41,61 @@ func loadChatRuntime(args []string, root string, in io.Reader, out io.Writer) (*
 	state := newChatState(cfg, sel, rt)
 	state.reconfigureRuntime(out)
 	return state, startupNotice, nil
+}
+
+func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (err error) {
+	root, err := workspace.DetectRoot("")
+	if err != nil {
+		return err
+	}
+	reader := bufio.NewReader(in)
+	completerUI := &terminalUI{workspaceRoot: root}
+	editor := lineedit.New(in, out, "> ", func(text string) (lineedit.Completion, error) {
+		next, _, matches, changed, err := completerUI.completeAtPath(text)
+		if err != nil {
+			return lineedit.Completion{}, err
+		}
+		if changed {
+			return lineedit.Completion{Text: next, Matches: matches}, nil
+		}
+		return lineedit.Completion{Matches: matches}, nil
+	})
+	defer editor.Close()
+
+	state, startupNotice, err := loadChatRuntime(args, root, reader, out)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out, state.header(root))
+	if startupNotice != "" {
+		fmt.Fprintln(out, startupNotice)
+	}
+
+	for {
+		line, err := editor.ReadLine()
+		if err != nil {
+			return exitChat(out, state.rt, state.sel, state.autosave)
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "/") {
+			exit, cmdErr := runChatCommand(deps, state, reader, out, line)
+			if cmdErr != nil {
+				fmt.Fprintf(out, "error: %v\n", cmdErr)
+			}
+			if exit {
+				return nil
+			}
+			continue
+		}
+		if state.streaming {
+			runStreamingTurnLine(out, state, line)
+		} else {
+			runNonStreamingTurnLine(out, state, line)
+		}
+	}
 }
 
 func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps Dependencies) (err error) {

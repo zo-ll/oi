@@ -269,6 +269,13 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 			break
 		}
 	}
+	if len(resp.ToolCalls) == 0 {
+		content, calls, ok := provider.ParseContentEnvelopeForCompatibility(stringsTrim(resp.Content))
+		if ok {
+			resp.Content = content
+			resp.ToolCalls = calls
+		}
+	}
 	return resp, nil
 }
 

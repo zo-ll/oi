@@ -215,6 +215,55 @@ func TestOpenAIProviderQwenThinkingFormat(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderAddsToolChoiceAuto(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"hello"}}]}`)
+	}))
+	defer ts.Close()
+
+	p, err := NewOpenAI("demo", ts.URL, "key", "demo-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Chat(context.Background(), Request{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+		Tools:    []ToolSpec{{Name: "list_dir", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %#v body=%#v", got["tool_choice"], got)
+	}
+}
+
+func TestParseContentEnvelopeForLlamaTextToolCalls(t *testing.T) {
+	for _, content := range []string{
+		`<function>
+  {"name": "list_dir", "arguments": {"path": "."}}
+</function>`,
+		`{{"name": "list_dir", "arguments": {"path": "."}}}`,
+		"```json\n{\n  \"name\": \"list_dir\",\n  \"arguments\": {\n    \"path\": \".\"\n  }\n}\n```",
+		"I'll inspect it.\n\n```json\n{\"name\":\"list_dir\",\"arguments\":{\"path\":\".\"}}\n```",
+	} {
+		final, calls, ok := ParseContentEnvelopeForCompatibility(content)
+		if !ok || final != "" || len(calls) != 1 {
+			t.Fatalf("parsed %q as final=%q calls=%+v ok=%v", content, final, calls, ok)
+		}
+		var args map[string]string
+		if err := json.Unmarshal(calls[0].Args, &args); err != nil {
+			t.Fatalf("args: %v", err)
+		}
+		if calls[0].Name != "list_dir" || args["path"] != "." {
+			t.Fatalf("calls = %+v", calls)
+		}
+	}
+}
+
 func TestOpenAIProviderSkipsReasoningEffortWhenOff(t *testing.T) {
 	var got map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

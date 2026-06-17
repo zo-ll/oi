@@ -155,6 +155,7 @@ func (p *OpenAIProvider) buildRequest(req Request, stream bool) (map[string]any,
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = toOpenAITools(req.Tools)
+		body["tool_choice"] = "auto"
 	}
 	applyOpenAIThinking(body, req)
 	return body, nil
@@ -516,6 +517,7 @@ func parseChatResponse(data []byte) (Response, error) {
 }
 
 func parseContentEnvelope(content string) (string, []ToolCall, bool) {
+	content = unwrapTextToolCall(content)
 	if content == "" || (content[0] != '{' && content[0] != '[') {
 		return "", nil, false
 	}
@@ -561,6 +563,32 @@ func parseContentEnvelope(content string) (string, []ToolCall, bool) {
 		}
 	}
 	return "", nil, false
+}
+
+// ParseContentEnvelopeForCompatibility recognizes text-encoded tool calls from
+// local OpenAI-compatible servers that do not emit native tool_calls fields.
+func ParseContentEnvelopeForCompatibility(content string) (string, []ToolCall, bool) {
+	return parseContentEnvelope(content)
+}
+
+func unwrapTextToolCall(content string) string {
+	content = strings.TrimSpace(content)
+	if start := strings.Index(content, "```"); start >= 0 {
+		fenced := content[start:]
+		if newline := strings.IndexByte(fenced, '\n'); newline >= 0 {
+			body := fenced[newline+1:]
+			if end := strings.Index(body, "```"); end >= 0 {
+				content = strings.TrimSpace(body[:end])
+			}
+		}
+	}
+	if strings.HasPrefix(content, "<function>") && strings.HasSuffix(content, "</function>") {
+		content = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(content, "<function>"), "</function>"))
+	}
+	if strings.HasPrefix(content, "{{") && strings.HasSuffix(content, "}}") {
+		content = strings.TrimSpace(content[1 : len(content)-1])
+	}
+	return content
 }
 
 func decodeToolCalls(raw json.RawMessage) ([]ToolCall, error) {
