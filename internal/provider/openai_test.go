@@ -361,7 +361,7 @@ func TestOpenCodeProviderListModelsIncludesAllAdvertisedModels(t *testing.T) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"qwen3.7-max"},{"id":"minimax-m2.7"},{"id":"grok-build-0.1"},{"id":"unknown-model"}]}`)
+		fmt.Fprint(w, `{"data":[{"id":"qwen3.7-max"},{"id":"minimax-m2.7"},{"id":"glm-5.2"},{"id":"grok-build-0.1"},{"id":"unknown-model"}]}`)
 	}))
 	defer ts.Close()
 
@@ -382,8 +382,11 @@ func TestOpenCodeProviderListModelsIncludesAllAdvertisedModels(t *testing.T) {
 		if model.ID == "qwen3.7-max" && model.ContextWindow != 1000000 {
 			t.Fatalf("qwen context = %+v", model)
 		}
+		if model.ID == "glm-5.2" && (model.ContextWindow != 202752 || model.ThinkingFormat != "reasoning_effort") {
+			t.Fatalf("glm context/profile = %+v", model)
+		}
 	}
-	for _, want := range []string{"qwen3.7-max", "minimax-m2.7", "grok-build-0.1", "unknown-model"} {
+	for _, want := range []string{"qwen3.7-max", "minimax-m2.7", "glm-5.2", "grok-build-0.1", "unknown-model"} {
 		if !seen[want] {
 			t.Fatalf("missing %q in %+v", want, models)
 		}

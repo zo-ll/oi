@@ -21,6 +21,7 @@ var openCodeChatCompletionModels = map[string]Model{
 	"deepseek-v4-pro":        openCodeReasoningModel("deepseek-v4-pro", "DeepSeek V4 Pro", "deepseek", []string{"off", "high", "xhigh"}, map[string]string{"xhigh": "max"}),
 	"glm-5":                  openCodeReasoningModel("glm-5", "GLM 5", "reasoning_effort", nil, nil),
 	"glm-5.1":                openCodeReasoningModel("glm-5.1", "GLM 5.1", "reasoning_effort", nil, nil),
+	"glm-5.2":                openCodeReasoningModel("glm-5.2", "GLM 5.2", "reasoning_effort", nil, nil),
 	"grok-build-0.1":         openCodeReasoningModel("grok-build-0.1", "Grok Build 0.1", "none", []string{"off", "high", "xhigh"}, map[string]string{"xhigh": "max"}),
 	"kimi-k2.5":              openCodeReasoningModel("kimi-k2.5", "Kimi K2.5", "reasoning_effort", nil, nil),
 	"kimi-k2.6":              openCodeReasoningModel("kimi-k2.6", "Kimi K2.6", "deepseek", []string{"off", "high"}, nil),
@@ -55,7 +56,7 @@ func openCodeContextWindow(id string) int {
 		return 512000
 	case "kimi-k2.5", "kimi-k2.6", "kimi-k2.7", "kimi-k2.7-code":
 		return 262144
-	case "glm-5", "glm-5.1":
+	case "glm-5", "glm-5.1", "glm-5.2":
 		return 202752
 	case "minimax-m2.7":
 		return 204800
