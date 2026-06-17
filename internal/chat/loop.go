@@ -20,6 +20,12 @@ func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
 	return runLineMode(args, in, out, deps)
 }
 
+type completionContext struct {
+	workspaceRoot string
+	fileList      []string
+	completion    completionState
+}
+
 func loadChatRuntime(args []string, root string, in io.Reader, out io.Writer) (*chatState, string, error) {
 	opts, err := parseCommonOptions("", args)
 	if err != nil {
@@ -49,9 +55,9 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 		return err
 	}
 	reader := bufio.NewReader(in)
-	completerUI := &terminalUI{workspaceRoot: root}
+	completer := &completionContext{workspaceRoot: root}
 	editor := lineedit.New(in, out, "> ", func(text string) (lineedit.Completion, error) {
-		next, _, matches, changed, err := completerUI.completeAtPath(text)
+		next, _, matches, changed, err := completer.completeAtPath(text)
 		if err != nil {
 			return lineedit.Completion{}, err
 		}
@@ -61,14 +67,14 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 		return lineedit.Completion{Matches: matches}, nil
 	})
 	defer editor.Close()
+	cmdOut := interactiveCommandOutput{Writer: out, editor: editor}
 
-	state, startupNotice, err := loadChatRuntime(args, root, reader, out)
+	state, startupNotice, err := loadChatRuntime(args, root, reader, cmdOut)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, state.header(root))
 	if startupNotice != "" {
-		fmt.Fprintln(out, startupNotice)
+		fmt.Fprintln(cmdOut, startupNotice)
 	}
 
 	for {
@@ -81,9 +87,9 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 			continue
 		}
 		if strings.HasPrefix(line, "/") {
-			exit, cmdErr := runChatCommand(deps, state, reader, out, line)
+			exit, cmdErr := runChatCommand(deps, state, reader, cmdOut, line)
 			if cmdErr != nil {
-				fmt.Fprintf(out, "error: %v\n", cmdErr)
+				fmt.Fprintf(cmdOut, "error: %v\n", cmdErr)
 			}
 			if exit {
 				return nil
@@ -91,74 +97,27 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 			continue
 		}
 		if state.streaming {
-			runStreamingTurnLine(out, state, line)
+			runStreamingTurnLine(cmdOut, state, line)
 		} else {
-			runNonStreamingTurnLine(out, state, line)
+			runNonStreamingTurnLine(cmdOut, state, line)
 		}
 	}
 }
 
-func runTUIMode(args []string, in io.Reader, out io.Writer, ui *terminalUI, deps Dependencies) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			_ = ui.disableRawMode()
-			err = fmt.Errorf("tui panic: %v", r)
-		}
-	}()
-	root, err := workspace.DetectRoot("")
-	if err != nil {
-		return err
-	}
-	ui.setWorkspaceRoot(root)
-	if err := ui.enableRawMode(); err != nil {
-		return runLineMode(args, in, out, deps)
-	}
-	defer ui.disableRawMode()
-	reader := bufio.NewReader(in)
-	promptInput := &promptInput{ui: ui, reader: reader}
-	state, startupNotice, err := loadChatRuntime(args, root, promptInput, ui)
-	if err != nil {
-		return err
-	}
-	ui.setHeader(state.header(root))
-	if startupNotice != "" {
-		ui.notify(startupNotice)
-	}
+type interactiveCommandOutput struct {
+	io.Writer
+	editor *lineedit.Editor
+}
 
-	for {
-		line, err := ui.readMessage(state.lastAssistant)
-		if err != nil {
-			_ = ui.suspendRaw()
-			return exitChat(ui, state.rt, state.sel, state.autosave)
-		}
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		ui.commitInput(line)
-		if strings.HasPrefix(line, "/") {
-			if err := ui.suspendRaw(); err != nil {
-				return err
-			}
-			exit, cmdErr := runChatCommand(deps, state, reader, ui, line)
-			ui.setHeader(state.header(root))
-			if resumeErr := ui.resumeRaw(); resumeErr != nil {
-				return resumeErr
-			}
-			if cmdErr != nil {
-				ui.notify("error: " + cmdErr.Error())
-			}
-			if exit {
-				return nil
-			}
-			continue
-		}
-		if state.streaming {
-			runStreamingTurnTUI(ui, state, line)
-		} else {
-			runNonStreamingTurnTUI(ui, state, line)
-		}
-		ui.setHeader(state.header(root))
+func (o interactiveCommandOutput) overlayPicker(title string, items []string) (string, bool) {
+	if o.editor == nil {
+		return "", false
 	}
+	selected, ok, err := o.editor.Select(title, items)
+	if err != nil {
+		return "", false
+	}
+	return selected, ok
 }
 
 func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
@@ -172,7 +131,6 @@ func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) 
 		return err
 	}
 
-	fmt.Fprintln(out, state.header(root))
 	if startupNotice != "" {
 		fmt.Fprintln(out, startupNotice)
 	}

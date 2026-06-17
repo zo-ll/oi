@@ -253,17 +253,41 @@ func TestCleanDisplayText(t *testing.T) {
 	}
 }
 
-func TestFormatContextUsage(t *testing.T) {
-	got := formatContextUsage(272000, provider.Usage{InputTokens: 136000})
-	if got != "ctx 136.0k / 272.0k (50%)" {
+func TestFormatStatusContextUsageShowsZero(t *testing.T) {
+	got := formatStatusContextUsage(272000, provider.Usage{})
+	if got != "0 / 272.0k (0%)" {
 		t.Fatalf("got %q", got)
 	}
 }
 
-func TestFormatHeaderShowsValuesOnly(t *testing.T) {
-	got := formatHeader("gpt5.5", "/tmp/project", 272000, provider.Usage{InputTokens: 136000}, "high", true)
-	if got != "oi · gpt5.5 · high · 136.0k / 272.0k (50%) · /tmp/project" {
-		t.Fatalf("got %q", got)
+func TestPrintStatusShowsChatState(t *testing.T) {
+	rt := &agent.Runtime{
+		ContextWindow:     272000,
+		LastUsage:         provider.Usage{InputTokens: 136000},
+		ThinkingLevel:     "high",
+		ThinkingSupported: true,
+		Policy:            workspace.Policy{Root: "/tmp/project"},
+		Session:           session.New("openai", "gpt5.5", "/tmp/project"),
+		Provider:          &fakeChatProvider{},
+	}
+	rt.Session.Messages = []session.Message{{Role: "user", Content: "hi"}}
+	var out strings.Builder
+	printStatus(&out, config.Selection{Provider: "openai", Model: "gpt5.5"}, rt, true, false, toolVerbosityErrors)
+	got := out.String()
+	for _, want := range []string{
+		"provider: openai\n",
+		"model: gpt5.5\n",
+		"cwd: /tmp/project\n",
+		"context: 136.0k / 272.0k (50%)\n",
+		"thinking: high\n",
+		"streaming: on\n",
+		"autosave: off\n",
+		"tools: errors\n",
+		"session messages: 1\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status missing %q in:\n%s", want, got)
+		}
 	}
 }
 
@@ -271,54 +295,6 @@ func TestFilterPickerItems(t *testing.T) {
 	got := filterPickerItems([]string{"alpha", "beta", "gamma"}, "et")
 	if len(got) != 1 || got[0] != "beta" {
 		t.Fatalf("got = %#v", got)
-	}
-}
-
-func TestOverlayPickerFiltersTypedInput(t *testing.T) {
-	inR, inW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer inR.Close()
-	defer inW.Close()
-	out, err := os.CreateTemp(t.TempDir(), "picker-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: inR, out: out, width: 80}
-	go func() {
-		_, _ = inW.Write([]byte{'b', 'e', '\n'})
-	}()
-	selected, ok := ui.overlayPicker("choose", []string{"alpha", "beta", "gamma"})
-	if !ok || selected != "beta" {
-		t.Fatalf("selected=%q ok=%v", selected, ok)
-	}
-}
-
-func TestOverlayPickerHandlesShortItemLists(t *testing.T) {
-	inR, inW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer inR.Close()
-	defer inW.Close()
-	out, err := os.CreateTemp(t.TempDir(), "picker-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: inR, out: out, width: 80}
-	go func() {
-		_, _ = inW.Write([]byte{27})
-		_ = inW.Close()
-	}()
-	selected, ok := ui.overlayPicker("choose login type", []string{
-		"sub  ChatGPT subscription / browser login",
-		"api  Provider API key",
-	})
-	if ok || selected != "" {
-		t.Fatalf("selected=%q ok=%v", selected, ok)
 	}
 }
 
@@ -430,203 +406,6 @@ func TestHandleChatCommandCompact(t *testing.T) {
 	}
 }
 
-func TestWrapPromptLines(t *testing.T) {
-	lines := wrapPromptLines("oi> ", "abcdefghi", 8)
-	if len(lines) < 2 {
-		t.Fatalf("lines = %#v", lines)
-	}
-	if lines[0] != "oi> abcd" {
-		t.Fatalf("first = %q", lines[0])
-	}
-}
-
-func TestPromptCursorPositionWraps(t *testing.T) {
-	row, col := promptCursorPosition("oi> ", "abcdefghi", 8, 6)
-	if row != 1 || col != 6 {
-		t.Fatalf("row=%d col=%d", row, col)
-	}
-}
-
-func TestReadMessageEditsAtCursor(t *testing.T) {
-	inR, inW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer inR.Close()
-	defer inW.Close()
-	out, err := os.CreateTemp(t.TempDir(), "prompt-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: inR, out: out, width: 80, prompt: "> ", historyIndex: -1}
-	go func() {
-		_, _ = inW.Write([]byte{'a', 'b', 'c', 27, '[', 'D', 27, '[', 'D', 'X', '\n'})
-	}()
-	got, err := ui.readMessage("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "aXbc" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestReadMessageHomeEndDelete(t *testing.T) {
-	inR, inW, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer inR.Close()
-	defer inW.Close()
-	out, err := os.CreateTemp(t.TempDir(), "prompt-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: inR, out: out, width: 80, prompt: "> ", historyIndex: -1}
-	go func() {
-		_, _ = inW.Write([]byte{'a', 'b', 'c', 27, '[', 'H', 'X', 27, '[', 'F', 'Y', 27, '[', 'H', 27, '[', '3', '~', '\n'})
-	}()
-	got, err := ui.readMessage("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "abcY" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestTerminalWriteWrappedDoesNotSplitWords(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 9}
-	ui.writeWrapped("alpha beta")
-	ui.writeWrapped("\n")
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "alpha\r\nbeta\r\n" {
-		t.Fatalf("out = %q", string(data))
-	}
-}
-
-func TestTerminalWriteWrappedKeepsWordsAcrossChunks(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 9}
-	ui.writeWrapped("feed")
-	ui.writeWrapped("back now")
-	ui.writeWrapped("\n")
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "feed\r\nback") || !strings.Contains(string(data), "feedback") {
-		t.Fatalf("out = %q", string(data))
-	}
-}
-
-func TestTerminalWriteWrappedAfterExactFit(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 10}
-	ui.writeWrapped("alpha beta gamma")
-	ui.writeWrapped("\n")
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "alpha beta\r\ngamma\r\n" {
-		t.Fatalf("out = %q", string(data))
-	}
-}
-
-func TestTerminalWriteWrappedDoesNotSplitLongWords(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 5}
-	ui.writeWrapped("supercalifragilistic")
-	ui.writeWrapped("\n")
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := strings.TrimSuffix(string(data), "\r\n")
-	if strings.Contains(text, "\r\n") {
-		t.Fatalf("word was split: %q", string(data))
-	}
-}
-
-func TestTerminalWriteWrappedJoinsSplitStreamingWord(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 80}
-	ui.writeWrapped("feed")
-	ui.writeWrapped("back ")
-	ui.writeWrapped("works\n")
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(data); got != "feedback works\r\n" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestTerminalWriteWrappedStreamingWordBoundary(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 10}
-	for _, chunk := range []string{"alpha", " beta", " gam", "ma\n"} {
-		ui.writeWrapped(chunk)
-	}
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(data); got != "alpha beta\r\ngamma\r\n" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestTaggedStreamRendererSplitWord(t *testing.T) {
 	r := &taggedStreamRenderer{}
 	var b strings.Builder
@@ -639,196 +418,6 @@ func TestTaggedStreamRendererSplitWord(t *testing.T) {
 		b.WriteString(seg.text)
 	}
 	if got := b.String(); got != "feedback " {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestTerminalWriteWrappedExactWidthLines(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 5}
-	ui.writeWrapped("alpha beta\n")
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(data); got != "alpha\r\nbeta\r\n" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestStreamRendererPreservesTextAcrossChunks(t *testing.T) {
-	text := "Here is my opinion. Let me also peek. Here is my take."
-	var chunks []string
-	runes := []rune(text)
-	for i := 0; i < len(runes); {
-		n := 3
-		if i+n > len(runes) {
-			n = len(runes) - i
-		}
-		chunks = append(chunks, string(runes[i:i+n]))
-		i += n
-	}
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 80}
-	ui.startAssistantResponse()
-	r := &taggedStreamRenderer{}
-	for _, c := range chunks {
-		ui.writeStreamSegments(r.Push(c))
-	}
-	ui.writeStreamSegments(r.Flush())
-	ui.finishAssistantResponse()
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := lastStreamFrame(string(data))
-	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := text
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}
-
-func TestStreamRendererPreservesMultilineMarkdown(t *testing.T) {
-	text := "Brief take:\n\n- It's oi, a small agent.\n- Design is clean.\n\nOverall: solid."
-	var chunks []string
-	runes := []rune(text)
-	for i := 0; i < len(runes); {
-		n := 5
-		if i+n > len(runes) {
-			n = len(runes) - i
-		}
-		chunks = append(chunks, string(runes[i:i+n]))
-		i += n
-	}
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 80}
-	ui.startAssistantResponse()
-	r := &taggedStreamRenderer{}
-	for _, c := range chunks {
-		ui.writeStreamSegments(r.Push(c))
-	}
-	ui.writeStreamSegments(r.Flush())
-	ui.finishAssistantResponse()
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := lastStreamFrame(string(data))
-	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := text
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}
-
-func TestStreamContainerRendersThinkingAndAnswer(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 80}
-	ui.startAssistantResponse()
-	ui.writeStreamSegments([]responseSegment{
-		{text: "plan ", reasoning: true},
-		{text: "answer"},
-	})
-	ui.finishAssistantResponse()
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := lastStreamFrame(string(data))
-	got = strings.ReplaceAll(got, "\r\n", "\n")
-	want := "plan \n\nanswer"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}
-
-func TestStreamContainerRedrawsGrowingAnswer(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 80}
-	ui.startAssistantResponse()
-	ui.writeStreamSegments([]responseSegment{{text: "Hel"}})
-	ui.writeStreamSegments([]responseSegment{{text: "lo world"}})
-	ui.finishAssistantResponse()
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := lastStreamFrame(string(data))
-	got = strings.ReplaceAll(got, "\r\n", "\n")
-	if got != "Hello world" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestCommitInputLeavesGapBeforeResponse(t *testing.T) {
-	out, err := os.CreateTemp(t.TempDir(), "term-out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	ui := &terminalUI{in: out, out: out, width: 80, prompt: "> "}
-	ui.commitInput("hello")
-	if _, err := out.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := lastStreamFrame(string(data)); got != "> hello\n" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestWrapLinePrefersWordBoundaries(t *testing.T) {
-	lines := wrapLine("alpha beta gamma", 7)
-	if len(lines) != 3 {
-		t.Fatalf("lines = %#v", lines)
-	}
-	if lines[0] != "alpha" || lines[1] != "beta" || lines[2] != "gamma" {
-		t.Fatalf("lines = %#v", lines)
-	}
-}
-
-func TestNormalizePastedText(t *testing.T) {
-	got := normalizePastedText("a\r\nb\rc")
-	if got != "a\nb\nc" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -869,41 +458,6 @@ func TestFuzzyFileMatchesPrefersBasename(t *testing.T) {
 	}
 }
 
-func stripANSI(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); {
-		if s[i] == 27 && i+1 < len(s) && s[i+1] == '[' {
-			j := i + 2
-			for j < len(s) && ((s[j] >= '0' && s[j] <= '9') || s[j] == ';') {
-				j++
-			}
-			if j < len(s) {
-				j++
-			}
-			i = j
-			continue
-		}
-		if s[i] == 27 {
-			i += 2
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
-}
-
-func lastStreamFrame(s string) string {
-	const marker = "\x1b[2J\x1b[H"
-	if idx := strings.LastIndex(s, marker); idx >= 0 {
-		s = s[idx+len(marker):]
-	}
-	s = stripANSI(s)
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "")
-	return s
-}
-
 func TestFormatCompletionMatches(t *testing.T) {
 	got := formatCompletionMatches([]string{"a.go", "b.go", "c.go"})
 	if !strings.Contains(got, "matches:") || !strings.Contains(got, "1. a.go") || !strings.Contains(got, "3. c.go") {
@@ -916,9 +470,8 @@ func TestCompletionMatchesForBareAt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ui := &terminalUI{historyIndex: -1}
-	ui.setWorkspaceRoot(root)
-	matches, err := ui.completionMatchesForText("@")
+	c := &completionContext{workspaceRoot: root}
+	matches, err := c.completionMatchesForText("@")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -959,28 +512,6 @@ func TestFilterByPrefix(t *testing.T) {
 	got := filterByPrefix([]string{"/model", "/help", "/login"}, "mo")
 	if len(got) != 1 || got[0] != "/model" {
 		t.Fatalf("got = %#v", got)
-	}
-}
-
-func TestPromptHistoryNavigation(t *testing.T) {
-	ui := &terminalUI{historyIndex: -1}
-	ui.addHistoryEntry("first")
-	ui.addHistoryEntry("second")
-	got, ok := ui.historyPrev("draft")
-	if !ok || got != "second" {
-		t.Fatalf("prev1 = %q ok=%v", got, ok)
-	}
-	got, ok = ui.historyPrev("draft")
-	if !ok || got != "first" {
-		t.Fatalf("prev2 = %q ok=%v", got, ok)
-	}
-	got, ok = ui.historyNext()
-	if !ok || got != "second" {
-		t.Fatalf("next1 = %q ok=%v", got, ok)
-	}
-	got, ok = ui.historyNext()
-	if !ok || got != "draft" {
-		t.Fatalf("next2 = %q ok=%v", got, ok)
 	}
 }
 
@@ -1102,7 +633,7 @@ func TestHandleChatCommandSessionRejectsArgs(t *testing.T) {
 }
 
 func TestHandleChatCommandRejectsArgsForExactCommands(t *testing.T) {
-	for _, line := range []string{"/help now", "/login api", "/model gpt", "/stream off", "/think high", "/tools on", "/autosave off", "/save snap", "/new x", "/clear now", "/exit now"} {
+	for _, line := range []string{"/help now", "/status now", "/login api", "/model gpt", "/stream off", "/think high", "/tools on", "/autosave off", "/save snap", "/new x", "/clear now", "/exit now"} {
 		_, _, _, _, _, _, err := handleChatCommand(Dependencies{}, config.Default(), config.Selection{}, nil, bufio.NewReader(strings.NewReader("")), &strings.Builder{}, line, true, true, toolVerbosityErrors)
 		if err == nil || !strings.HasPrefix(err.Error(), "usage: ") {
 			t.Fatalf("line=%q err=%v", line, err)

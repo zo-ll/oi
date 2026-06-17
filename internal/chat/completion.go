@@ -2,7 +2,6 @@ package chat
 
 import (
 	"fmt"
-	"io"
 	"io/fs"
 	"path/filepath"
 	"sort"
@@ -25,89 +24,29 @@ type inputUI interface {
 
 const maxCompletionMatchesShown = 7
 
-func (ui *terminalUI) setWorkspaceRoot(root string) {
-	if ui == nil {
-		return
-	}
-	ui.workspaceRoot = strings.TrimSpace(root)
-	ui.fileList = nil
-	ui.completion = completionState{}
-}
-
-func (ui *terminalUI) addHistoryEntry(text string) {
-	if ui == nil {
-		return
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	if n := len(ui.history); n > 0 && ui.history[n-1] == text {
-		ui.historyIndex = -1
-		ui.historyDraft = ""
-		return
-	}
-	ui.history = append(ui.history, text)
-	if len(ui.history) > 200 {
-		ui.history = ui.history[len(ui.history)-200:]
-	}
-	ui.historyIndex = -1
-	ui.historyDraft = ""
-}
-
-func (ui *terminalUI) historyPrev(current string) (string, bool) {
-	if ui == nil || len(ui.history) == 0 {
-		return "", false
-	}
-	if ui.historyIndex == -1 {
-		ui.historyDraft = current
-		ui.historyIndex = len(ui.history) - 1
-	} else if ui.historyIndex > 0 {
-		ui.historyIndex--
-	} else {
-		return "", false
-	}
-	ui.completion = completionState{}
-	return ui.history[ui.historyIndex], true
-}
-
-func (ui *terminalUI) historyNext() (string, bool) {
-	if ui == nil || ui.historyIndex == -1 {
-		return "", false
-	}
-	if ui.historyIndex < len(ui.history)-1 {
-		ui.historyIndex++
-		ui.completion = completionState{}
-		return ui.history[ui.historyIndex], true
-	}
-	ui.historyIndex = -1
-	ui.completion = completionState{}
-	return ui.historyDraft, true
-}
-
-func (ui *terminalUI) completeAtPath(current string) (next string, status string, matches []string, changed bool, err error) {
-	matches, err = ui.completionMatchesForText(current)
+func (c *completionContext) completeAtPath(current string) (next string, status string, matches []string, changed bool, err error) {
+	matches, err = c.completionMatchesForText(current)
 	if err != nil {
 		return current, "", nil, false, err
 	}
 	if len(matches) == 0 {
-		ui.completion = completionState{}
+		c.completion = completionState{}
 		return current, "", nil, false, nil
 	}
 	if exact := exactMatch(current, matches); exact != "" {
-		ui.completion = completionState{candidates: []string{exact}, index: 0}
+		c.completion = completionState{candidates: []string{exact}, index: 0}
 		return replaceTrailingToken(current, exact), exact, matches, true, nil
 	}
 	if len(matches) == 1 {
-		ui.completion = completionState{candidates: matches, index: 0}
+		c.completion = completionState{candidates: matches, index: 0}
 		return replaceTrailingToken(current, matches[0]), matches[0], matches, true, nil
 	}
-	ui.completion = completionState{}
+	c.completion = completionState{}
 	return current, formatCompletionMatches(matches), matches, false, nil
 }
 
-func (ui *terminalUI) completionMatchesForText(current string) ([]string, error) {
-	if ui == nil {
+func (c *completionContext) completionMatchesForText(current string) ([]string, error) {
+	if c == nil {
 		return nil, nil
 	}
 	start, _, token, ok := trailingToken(current)
@@ -116,7 +55,7 @@ func (ui *terminalUI) completionMatchesForText(current string) ([]string, error)
 	}
 	if strings.HasPrefix(token, "@") {
 		query := strings.TrimSpace(strings.TrimPrefix(token, "@"))
-		files, err := ui.workspaceFiles()
+		files, err := c.workspaceFiles()
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +83,7 @@ func (ui *terminalUI) completionMatchesForText(current string) ([]string, error)
 
 var chatCommandList = []string{
 	"/help", "/login", "/model", "/stream", "/think", "/tools", "/autosave",
-	"/new", "/save", "/session", "/compact", "/clear", "/exit",
+	"/status", "/new", "/save", "/session", "/compact", "/clear", "/exit",
 }
 
 func chatCommands() []string {
@@ -258,184 +197,6 @@ func pickerHint(matches []string, index int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (ui *terminalUI) pickMatch(current string, idx int) string {
-	if ui == nil || idx < 0 || idx >= len(ui.pickerMatches) {
-		return current
-	}
-	return replaceTrailingToken(current, ui.pickerMatches[idx])
-}
-
-func (ui *terminalUI) overlayPicker(title string, items []string) (string, bool) {
-	if ui == nil || len(items) == 0 {
-		return "", false
-	}
-	idx := 0
-	query := ""
-	filtered := append([]string(nil), items...)
-	refilter := func() {
-		filtered = filterPickerItems(items, query)
-		if idx >= len(filtered) {
-			idx = len(filtered) - 1
-		}
-		if idx < 0 {
-			idx = 0
-		}
-	}
-	overlayLines := 0
-	draw := func(first bool) {
-		ui.mu.Lock()
-		defer ui.mu.Unlock()
-		ui.refreshSize()
-		ui.clearStatusLocked()
-		previousLines := overlayLines
-		if !first {
-			if previousLines > 0 {
-				for i := 0; i < previousLines; i++ {
-					_, _ = io.WriteString(ui.out, "\x1b[1A")
-				}
-			}
-		} else {
-			ui.clearPromptLocked()
-		}
-		start := idx - idx%maxCompletionMatchesShown
-		if start+maxCompletionMatchesShown > len(filtered) {
-			start = len(filtered) - maxCompletionMatchesShown
-		}
-		if start < 0 {
-			start = 0
-		}
-		end := start + maxCompletionMatchesShown
-		if end > len(filtered) {
-			end = len(filtered)
-		}
-		shown := filtered[start:end]
-		count := 0
-		writeLine := func(text string) {
-			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
-			_, _ = io.WriteString(ui.out, ui.Styled("dim", text))
-			_, _ = io.WriteString(ui.out, "\r\n")
-			count++
-		}
-		header := fmt.Sprintf("%s  type filter  up/down nav  enter pick  esc cancel", title)
-		if query != "" {
-			header += "  filter: " + query
-		}
-		for _, line := range wrapLine(header, ui.width) {
-			writeLine(line)
-		}
-		if len(shown) == 0 {
-			writeLine("  no matches")
-		}
-		for _, item := range shown {
-			marker := "  "
-			if idx >= start && idx < len(filtered) && filtered[idx] == item {
-				marker = "> "
-			}
-			for _, line := range wrapLine(marker+item, ui.width) {
-				writeLine(line)
-			}
-		}
-		for count < previousLines {
-			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
-			_, _ = io.WriteString(ui.out, "\r\n")
-			count++
-		}
-		overlayLines = count
-	}
-	draw(true)
-	rawWasActive := ui.raw
-	if !rawWasActive {
-		_ = ui.enableRawMode()
-	}
-	defer func() {
-		if !rawWasActive {
-			_ = ui.disableRawMode()
-		}
-		ui.mu.Lock()
-		defer ui.mu.Unlock()
-		if overlayLines <= 0 {
-			return
-		}
-		_, _ = io.WriteString(ui.out, "\r")
-		for i := 0; i < overlayLines-1; i++ {
-			_, _ = io.WriteString(ui.out, "\x1b[1A")
-		}
-		for i := 0; i < overlayLines; i++ {
-			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
-			if i < overlayLines-1 {
-				_, _ = io.WriteString(ui.out, "\x1b[1B")
-			}
-		}
-		for i := 0; i < overlayLines-1; i++ {
-			_, _ = io.WriteString(ui.out, "\x1b[1A")
-		}
-		_, _ = io.WriteString(ui.out, "\r")
-		ui.outputColumn = 0
-	}()
-	for {
-		b, err := readByte(ui.in)
-		if err != nil {
-			return "", false
-		}
-		switch b {
-		case 3:
-			return "", false
-		case 8, 127:
-			if query != "" {
-				runes := []rune(query)
-				query = string(runes[:len(runes)-1])
-				refilter()
-				draw(false)
-			} else {
-				ui.bell()
-			}
-		case 27:
-			kind, _, handled, _ := ui.readEscapeSequence()
-			if !handled {
-				return "", false
-			}
-			switch kind {
-			case "up":
-				if len(filtered) == 0 {
-					ui.bell()
-					continue
-				}
-				idx--
-				if idx < 0 {
-					idx = len(filtered) - 1
-				}
-				draw(false)
-			case "down":
-				if len(filtered) == 0 {
-					ui.bell()
-					continue
-				}
-				idx++
-				if idx >= len(filtered) {
-					idx = 0
-				}
-				draw(false)
-			default:
-				return "", false
-			}
-		case '\r', '\n':
-			if len(filtered) == 0 {
-				ui.bell()
-				continue
-			}
-			return filtered[idx], true
-		default:
-			if b >= 32 {
-				query += string(rune(b))
-				refilter()
-				draw(false)
-			} else {
-				ui.bell()
-			}
-		}
-	}
-}
-
 func filterPickerItems(items []string, query string) []string {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
@@ -448,104 +209,6 @@ func filterPickerItems(items []string, query string) []string {
 		}
 	}
 	return out
-}
-
-func (ui *terminalUI) overlayInput(title, prompt, initial string) (string, bool) {
-	if ui == nil {
-		return "", false
-	}
-	buf := []rune(initial)
-	overlayLines := 0
-	draw := func(first bool) {
-		ui.mu.Lock()
-		defer ui.mu.Unlock()
-		ui.refreshSize()
-		ui.clearStatusLocked()
-		if !first {
-			if overlayLines > 0 {
-				for i := 0; i < overlayLines; i++ {
-					_, _ = io.WriteString(ui.out, "\x1b[1A")
-				}
-			}
-		} else {
-			ui.clearPromptLocked()
-		}
-		count := 0
-		writeLine := func(text string) {
-			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
-			_, _ = io.WriteString(ui.out, ui.Styled("dim", text))
-			_, _ = io.WriteString(ui.out, "\r\n")
-			count++
-		}
-		header := fmt.Sprintf("%s  enter save  esc cancel", title)
-		for _, line := range wrapLine(header, ui.width) {
-			writeLine(line)
-		}
-		for _, line := range wrapLine(prompt+string(buf), ui.width) {
-			writeLine(line)
-		}
-		overlayLines = count
-	}
-	draw(true)
-	rawWasActive := ui.raw
-	if !rawWasActive {
-		_ = ui.enableRawMode()
-	}
-	defer func() {
-		if !rawWasActive {
-			_ = ui.disableRawMode()
-		}
-		ui.mu.Lock()
-		defer ui.mu.Unlock()
-		if overlayLines <= 0 {
-			return
-		}
-		_, _ = io.WriteString(ui.out, "\r")
-		for i := 0; i < overlayLines-1; i++ {
-			_, _ = io.WriteString(ui.out, "\x1b[1A")
-		}
-		for i := 0; i < overlayLines; i++ {
-			_, _ = io.WriteString(ui.out, "\r\x1b[2K")
-			if i < overlayLines-1 {
-				_, _ = io.WriteString(ui.out, "\x1b[1B")
-			}
-		}
-		for i := 0; i < overlayLines-1; i++ {
-			_, _ = io.WriteString(ui.out, "\x1b[1A")
-		}
-		_, _ = io.WriteString(ui.out, "\r")
-		ui.outputColumn = 0
-	}()
-	for {
-		b, err := readByte(ui.in)
-		if err != nil {
-			return "", false
-		}
-		switch b {
-		case 3:
-			return "", false
-		case 27:
-			kind, _, handled, _ := ui.readEscapeSequence()
-			if !handled || kind == "esc" {
-				return "", false
-			}
-			ui.bell()
-		case '\r', '\n':
-			return strings.TrimSpace(string(buf)), true
-		case 8, 127:
-			if len(buf) > 0 {
-				buf = buf[:len(buf)-1]
-				draw(false)
-			} else {
-				ui.bell()
-			}
-		default:
-			if b >= 32 {
-				buf = append(buf, rune(b))
-				draw(false)
-			}
-		}
-	}
 }
 
 func formatCompletionMatches(matches []string) string {
@@ -578,14 +241,14 @@ func trailingToken(s string) (start, end int, token string, ok bool) {
 	return start, end, token, token != ""
 }
 
-func (ui *terminalUI) workspaceFiles() ([]string, error) {
-	if ui == nil {
+func (c *completionContext) workspaceFiles() ([]string, error) {
+	if c == nil {
 		return nil, nil
 	}
-	if ui.fileList != nil {
-		return ui.fileList, nil
+	if c.fileList != nil {
+		return c.fileList, nil
 	}
-	root := ui.workspaceRoot
+	root := c.workspaceRoot
 	if root == "" {
 		return nil, nil
 	}
@@ -621,7 +284,7 @@ func (ui *terminalUI) workspaceFiles() ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(out)
-	ui.fileList = out
+	c.fileList = out
 	return out, nil
 }
 

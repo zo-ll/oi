@@ -27,6 +27,7 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /help")
 		}
 		printHelpLine(out, "/help", "show commands")
+		printHelpLine(out, "/status", "show model, context, and session status")
 		printHelpLine(out, "/login", "set up provider authentication")
 		printHelpLine(out, "/model", "choose and set model")
 		printHelpLine(out, "/stream", "choose streaming mode")
@@ -43,6 +44,12 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 		printHelpLine(out, "Ctrl+Y", "copy last assistant reply")
 		printHelpLine(out, "Ctrl+K", "insert newline")
 		printHelpLine(out, "Ctrl+D", "exit on empty input")
+		return false, rt, sel, streaming, autosave, tools, nil
+	case "/status":
+		if arg != "" {
+			return false, rt, sel, streaming, autosave, tools, fmt.Errorf("usage: /status")
+		}
+		printStatus(out, sel, rt, streaming, autosave, tools)
 		return false, rt, sel, streaming, autosave, tools, nil
 	case "/compact":
 		if arg != "" {
@@ -313,6 +320,44 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 	default:
 		return false, rt, sel, streaming, autosave, tools, fmt.Errorf("unknown command: %s", cmd)
 	}
+}
+
+func printStatus(out io.Writer, sel config.Selection, rt *agent.Runtime, streaming bool, autosave bool, tools toolVerbosity) {
+	root := ""
+	model := sel.Model
+	providerName := sel.Provider
+	contextWindow := 0
+	usage := provider.Usage{}
+	thinking := "off"
+	thinkingSupported := false
+	sessionMessages := 0
+	if rt != nil {
+		root = rt.Policy.Root
+		contextWindow = rt.ContextWindow
+		usage = rt.LastUsage
+		thinking = valueOr(rt.ThinkingLevel, "off")
+		thinkingSupported = rt.ThinkingSupported
+		if rt.Provider != nil && rt.Provider.Model() != "" {
+			model = rt.Provider.Model()
+		}
+		if rt.Session != nil {
+			sessionMessages = len(rt.Session.Messages)
+			providerName = valueOr(rt.Session.Provider, providerName)
+			model = valueOr(rt.Session.Model, model)
+		}
+	}
+	if !thinkingSupported {
+		thinking = "n/a"
+	}
+	fmt.Fprintf(out, "provider: %s\n", valueOr(providerName, "(none)"))
+	fmt.Fprintf(out, "model: %s\n", valueOr(model, "(none)"))
+	fmt.Fprintf(out, "cwd: %s\n", valueOr(root, "(none)"))
+	fmt.Fprintf(out, "context: %s\n", valueOr(formatStatusContextUsage(contextWindow, usage), "n/a"))
+	fmt.Fprintf(out, "thinking: %s\n", thinking)
+	fmt.Fprintf(out, "streaming: %s\n", onOff(streaming))
+	fmt.Fprintf(out, "autosave: %s\n", onOff(autosave))
+	fmt.Fprintf(out, "tools: %s\n", tools)
+	fmt.Fprintf(out, "session messages: %d\n", sessionMessages)
 }
 
 func chooseStreamMode(reader *bufio.Reader, out io.Writer, current bool) (*bool, error) {

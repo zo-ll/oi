@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -257,21 +255,7 @@ func clearScreen(out io.Writer) {
 	fmt.Fprint(out, "\x1b[2J\x1b[H")
 }
 
-func formatHeader(model, root string, contextWindow int, usage provider.Usage, think string, thinkSupported bool) string {
-	header := fmt.Sprintf("oi · %s", valueOr(model, "(none)"))
-	thinkLabel := valueOr(think, "default")
-	if !thinkSupported {
-		thinkLabel = "n/a"
-	}
-	header += " · " + thinkLabel
-	if ctx := formatHeaderContextUsage(contextWindow, usage); ctx != "" {
-		header += " · " + ctx
-	}
-	header += " · " + shortenPath(root)
-	return header
-}
-
-func formatHeaderContextUsage(window int, usage provider.Usage) string {
+func formatStatusContextUsage(window int, usage provider.Usage) string {
 	if window <= 0 {
 		return ""
 	}
@@ -280,10 +264,6 @@ func formatHeaderContextUsage(window int, usage provider.Usage) string {
 	}
 	pct := usage.InputTokens * 100 / window
 	return fmt.Sprintf("%s / %s (%d%%)", formatCount(usage.InputTokens), formatCount(window), pct)
-}
-
-func lookupContextWindow(p provider.Provider, model string) int {
-	return lookupModelInfo(p, model).ContextWindow
 }
 
 func supportedThinkingLevels(model provider.Model) []string {
@@ -366,14 +346,6 @@ func formatRetrievalNotice(notice retrieval.Notice) string {
 	return fmt.Sprintf("retrieved %d snippets from %d %s", notice.SnippetCount, notice.FileCount, files)
 }
 
-func formatContextUsage(window int, usage provider.Usage) string {
-	if window <= 0 || usage.InputTokens <= 0 {
-		return ""
-	}
-	pct := usage.InputTokens * 100 / window
-	return fmt.Sprintf("ctx %s / %s (%d%%)", formatCount(usage.InputTokens), formatCount(window), pct)
-}
-
 func formatCount(n int) string {
 	switch {
 	case n >= 1000000:
@@ -383,24 +355,6 @@ func formatCount(n int) string {
 	default:
 		return fmt.Sprintf("%d", n)
 	}
-}
-
-func shortenPath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "(none)"
-	}
-	home, err := os.UserHomeDir()
-	if err == nil && home != "" {
-		if path == home {
-			return "~"
-		}
-		prefix := home + string(filepath.Separator)
-		if strings.HasPrefix(path, prefix) {
-			return "~" + string(filepath.Separator) + strings.TrimPrefix(path, prefix)
-		}
-	}
-	return path
 }
 
 var displayReplacer = strings.NewReplacer(

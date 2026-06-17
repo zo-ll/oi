@@ -1,6 +1,9 @@
 package lineedit
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestWrapPromptLines(t *testing.T) {
 	lines := wrapPromptLines("oi> ", "abcdefghi", 8)
@@ -44,5 +47,14 @@ func TestHistoryNavigation(t *testing.T) {
 	}
 	if got, ok := e.historyNext(); !ok || got != "draft" {
 		t.Fatalf("draft = %q %v", got, ok)
+	}
+}
+
+func TestClearRowsAccountsForTrailingNewline(t *testing.T) {
+	var out strings.Builder
+	clearRows(&out, 3)
+	got := out.String()
+	if !strings.Contains(got, "\x1b[3A") {
+		t.Fatalf("clearRows should move up over all rendered rows, got %q", got)
 	}
 }

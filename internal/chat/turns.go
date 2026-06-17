@@ -4,15 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
-	"sync"
-	"syscall"
-	"time"
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
-	"github.com/zo-ll/oi/internal/provider"
 	"github.com/zo-ll/oi/internal/session"
 )
 
@@ -52,22 +47,6 @@ func (s *chatState) reconfigureRuntime(out io.Writer) {
 	configureChatRuntime(s.rt, out, s.tools)
 }
 
-func (s *chatState) header(root string) string {
-	level := ""
-	if s != nil && s.rt != nil {
-		level = s.rt.ThinkingLevel
-	}
-	usage := provider.Usage{}
-	if s != nil && s.rt != nil {
-		usage = s.rt.LastUsage
-	}
-	supported := false
-	if s != nil && s.rt != nil {
-		supported = s.rt.ThinkingSupported
-	}
-	return formatHeader(s.sel.Model, root, s.contextWindow, usage, level, supported)
-}
-
 func (s *chatState) applyCommandResult(newRT *agent.Runtime, newSel config.Selection, newStreaming, newAutosave bool, newTools toolVerbosity, out io.Writer) {
 	s.rt = newRT
 	s.sel = newSel
@@ -86,149 +65,6 @@ func (s *chatState) autosaveSession(out io.Writer, warn func(string)) {
 	}
 }
 
-type turnResult struct {
-	resp string
-	err  error
-}
-
-func runAbortableTUI(ui *terminalUI, rt *agent.Runtime, run func(context.Context) (string, error)) (string, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	var mu sync.Mutex
-	active := false
-	aborted := false
-	setActive := func(next bool) {
-		mu.Lock()
-		defer mu.Unlock()
-		if active == next {
-			return
-		}
-		active = next
-		_ = setTerminalNonblock(ui.in, next)
-	}
-	isActive := func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return active
-	}
-	markAbort := func() {
-		mu.Lock()
-		already := aborted
-		aborted = true
-		mu.Unlock()
-		if !already {
-			cancel()
-			ui.notify("aborting...")
-		}
-	}
-	wasAborted := func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return aborted
-	}
-
-	var prevStart, prevStop func()
-	if rt != nil {
-		prevStart = rt.OnModelStart
-		prevStop = rt.OnModelStop
-		rt.OnModelStart = func() {
-			setActive(true)
-			if prevStart != nil {
-				prevStart()
-			}
-		}
-		rt.OnModelStop = func() {
-			setActive(false)
-			if prevStop != nil {
-				prevStop()
-			}
-		}
-		defer func() {
-			rt.OnModelStart = prevStart
-			rt.OnModelStop = prevStop
-		}()
-	}
-	defer setActive(false)
-
-	ch := make(chan turnResult, 1)
-	go func() {
-		resp, err := run(ctx)
-		ch <- turnResult{resp: resp, err: err}
-	}()
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case res := <-ch:
-			if wasAborted() {
-				return res.resp, fmt.Errorf("aborted")
-			}
-			return res.resp, res.err
-		case <-ticker.C:
-			if !isActive() {
-				continue
-			}
-			b, err := readByte(ui.in)
-			if err != nil {
-				if isWouldBlock(err) {
-					continue
-				}
-				continue
-			}
-			if b == 27 || b == 3 {
-				markAbort()
-			}
-		}
-	}
-}
-
-func setTerminalNonblock(f *os.File, enabled bool) error {
-	return syscall.SetNonblock(int(f.Fd()), enabled)
-}
-
-func isWouldBlock(err error) bool {
-	if pathErr, ok := err.(*os.PathError); ok {
-		err = pathErr.Err
-	}
-	return err == syscall.EAGAIN || err == syscall.EWOULDBLOCK
-}
-
-func runStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
-	ui.startAssistantResponse()
-	renderer := &taggedStreamRenderer{}
-	resp, runErr := runAbortableTUI(ui, state.rt, func(ctx context.Context) (string, error) {
-		return state.rt.RunOnceStream(ctx, line, func(delta string) {
-			ui.writeStreamSegments(renderer.Push(delta))
-		})
-	})
-	ui.writeStreamSegments(renderer.Flush())
-	ui.finishAssistantResponse()
-	if runErr != nil {
-		ui.notify("error: " + runErr.Error())
-		return
-	}
-	resp = cleanDisplayText(resp)
-	state.lastAssistant = resp
-	ui.blankLine()
-	state.autosaveSession(ui, ui.notify)
-}
-
-func runNonStreamingTurnTUI(ui *terminalUI, state *chatState, line string) {
-	resp, runErr := runAbortableTUI(ui, state.rt, func(ctx context.Context) (string, error) {
-		return state.rt.RunOnce(ctx, line)
-	})
-	if runErr != nil {
-		ui.notify("error: " + runErr.Error())
-		return
-	}
-	resp = cleanDisplayText(resp)
-	state.lastAssistant = resp
-	ui.notify(resp)
-	ui.blankLine()
-	state.autosaveSession(ui, ui.notify)
-}
-
 func runStreamingTurnLine(out io.Writer, state *chatState, line string) {
 	renderer := &taggedStreamRenderer{}
 	_, runErr := state.rt.RunOnceStream(context.Background(), line, func(delta string) {
@@ -244,9 +80,6 @@ func runStreamingTurnLine(out io.Writer, state *chatState, line string) {
 		fmt.Fprintf(out, "error: %v\n", runErr)
 		return
 	}
-	if ctx := formatContextUsage(state.contextWindow, state.rt.LastUsage); ctx != "" {
-		fmt.Fprintln(out, ctx)
-	}
 	fmt.Fprintln(out)
 	state.autosaveSession(out, func(msg string) { fmt.Fprintln(out, msg) })
 }
@@ -258,9 +91,6 @@ func runNonStreamingTurnLine(out io.Writer, state *chatState, line string) {
 		return
 	}
 	fmt.Fprintln(out, cleanDisplayText(resp))
-	if ctx := formatContextUsage(state.contextWindow, state.rt.LastUsage); ctx != "" {
-		fmt.Fprintln(out, ctx)
-	}
 	fmt.Fprintln(out)
 	state.autosaveSession(out, func(msg string) { fmt.Fprintln(out, msg) })
 }

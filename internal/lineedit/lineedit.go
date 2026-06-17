@@ -224,6 +224,139 @@ func (e *Editor) ReadLine() (string, error) {
 	}
 }
 
+func (e *Editor) Select(title string, items []string) (string, bool, error) {
+	if len(items) == 0 {
+		return "", false, nil
+	}
+	if err := e.enableRaw(); err != nil {
+		return "", false, err
+	}
+	defer e.disableRaw()
+
+	idx := 0
+	query := ""
+	filtered := append([]string(nil), items...)
+	rows := 0
+	refilter := func() {
+		filtered = filterItems(items, query)
+		if idx >= len(filtered) {
+			idx = len(filtered) - 1
+		}
+		if idx < 0 {
+			idx = 0
+		}
+	}
+	draw := func() {
+		clearRows(e.out, rows)
+		rows = 0
+		writeLine := func(text string) {
+			_, _ = io.WriteString(e.out, "\r\x1b[2K")
+			_, _ = io.WriteString(e.out, text)
+			_, _ = io.WriteString(e.out, "\r\n")
+			rows++
+		}
+		header := title + "  type filter  up/down nav  enter pick  ctrl-c cancel"
+		if query != "" {
+			header += "  filter: " + query
+		}
+		for _, line := range wrapLine(header, e.width) {
+			writeLine(line)
+		}
+		if len(filtered) == 0 {
+			writeLine("  no matches")
+			return
+		}
+		start := idx - idx%8
+		if start+8 > len(filtered) {
+			start = len(filtered) - 8
+		}
+		if start < 0 {
+			start = 0
+		}
+		end := start + 8
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		for i := start; i < end; i++ {
+			marker := "  "
+			if i == idx {
+				marker = "> "
+			}
+			for _, line := range wrapLine(marker+filtered[i], e.width) {
+				writeLine(line)
+			}
+		}
+	}
+	draw()
+	defer clearRows(e.out, rows)
+
+	for {
+		b, err := readByte(e.in)
+		if err != nil {
+			return "", false, err
+		}
+		switch b {
+		case 3:
+			return "", false, nil
+		case '\r', '\n':
+			if len(filtered) == 0 {
+				e.bell()
+				continue
+			}
+			return filtered[idx], true, nil
+		case 8, 127:
+			if query == "" {
+				e.bell()
+				continue
+			}
+			runes := []rune(query)
+			query = string(runes[:len(runes)-1])
+			refilter()
+			draw()
+		case 27:
+			kind, _, handled, err := e.readEscape()
+			if err != nil {
+				return "", false, err
+			}
+			if !handled {
+				return "", false, nil
+			}
+			switch kind {
+			case "up":
+				if len(filtered) == 0 {
+					e.bell()
+					continue
+				}
+				idx--
+				if idx < 0 {
+					idx = len(filtered) - 1
+				}
+				draw()
+			case "down":
+				if len(filtered) == 0 {
+					e.bell()
+					continue
+				}
+				idx++
+				if idx >= len(filtered) {
+					idx = 0
+				}
+				draw()
+			default:
+				return "", false, nil
+			}
+		default:
+			if b >= 32 {
+				query += string(rune(b))
+				refilter()
+				draw()
+			} else {
+				e.bell()
+			}
+		}
+	}
+}
+
 func (e *Editor) addHistory(text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -307,6 +440,40 @@ func (e *Editor) clear() {
 	}
 	_, _ = io.WriteString(e.out, "\r\x1b[J")
 	e.renderedRows = 0
+}
+
+func clearRows(out io.Writer, rows int) {
+	if rows <= 0 {
+		return
+	}
+	_, _ = io.WriteString(out, "\r")
+	if rows > 0 {
+		_, _ = io.WriteString(out, fmt.Sprintf("\x1b[%dA", rows))
+	}
+	for i := 0; i < rows; i++ {
+		_, _ = io.WriteString(out, "\r\x1b[2K")
+		if i < rows-1 {
+			_, _ = io.WriteString(out, "\x1b[1B")
+		}
+	}
+	if rows > 1 {
+		_, _ = io.WriteString(out, fmt.Sprintf("\x1b[%dA", rows-1))
+	}
+	_, _ = io.WriteString(out, "\r")
+}
+
+func filterItems(items []string, query string) []string {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return append([]string(nil), items...)
+	}
+	var out []string
+	for _, item := range items {
+		if strings.Contains(strings.ToLower(item), query) {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func (e *Editor) hintLines() []string {
