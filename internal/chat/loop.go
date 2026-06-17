@@ -7,13 +7,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zo-ll/oi/internal/lineedit"
 	"github.com/zo-ll/oi/internal/workspace"
+	"github.com/zo-ll/tide"
 )
 
 func Run(args []string, in io.Reader, out io.Writer, deps Dependencies) error {
-	if inFile, ok := in.(*os.File); ok && lineedit.IsTerminal(inFile) {
-		if outFile, ok := out.(*os.File); ok && lineedit.IsTerminal(outFile) {
+	if inFile, ok := in.(*os.File); ok && tide.IsTerminal(inFile) {
+		if outFile, ok := out.(*os.File); ok && tide.IsTerminal(outFile) {
 			return runEditMode(args, inFile, outFile, deps)
 		}
 	}
@@ -47,96 +47,6 @@ func loadChatRuntime(args []string, root string, in io.Reader, out io.Writer) (*
 	state := newChatState(cfg, sel, rt)
 	state.reconfigureRuntime(out)
 	return state, startupNotice, nil
-}
-
-func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (err error) {
-	root, err := workspace.DetectRoot("")
-	if err != nil {
-		return err
-	}
-	reader := bufio.NewReader(in)
-	completer := &completionContext{workspaceRoot: root}
-	editor := lineedit.New(in, out, "> ", func(text string) (lineedit.Completion, error) {
-		next, _, matches, changed, err := completer.completeAtPath(text)
-		if err != nil {
-			return lineedit.Completion{}, err
-		}
-		if changed {
-			return lineedit.Completion{Text: next, Matches: matches}, nil
-		}
-		return lineedit.Completion{Matches: matches}, nil
-	})
-	defer editor.Close()
-	cmdOut := interactiveCommandOutput{Writer: editor, editor: editor}
-
-	state, startupNotice, err := loadChatRuntime(args, root, reader, cmdOut)
-	if err != nil {
-		return err
-	}
-	if startupNotice != "" {
-		fmt.Fprintln(cmdOut, startupNotice)
-	}
-
-	for {
-		line, err := editor.ReadLine()
-		if err != nil {
-			return exitChat(out, state.rt, state.sel, state.autosave)
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "/") {
-			exit, cmdErr := runChatCommand(deps, state, reader, cmdOut, line)
-			if cmdErr != nil {
-				fmt.Fprintf(cmdOut, "error: %v\n", cmdErr)
-			}
-			if exit {
-				return nil
-			}
-			continue
-		}
-		if state.streaming {
-			runStreamingTurnLine(cmdOut, state, line)
-		} else {
-			runNonStreamingTurnLine(cmdOut, state, line)
-		}
-	}
-}
-
-type interactiveCommandOutput struct {
-	io.Writer
-	editor *lineedit.Editor
-}
-
-func (o interactiveCommandOutput) overlayPicker(title string, items []string) (string, bool) {
-	if o.editor == nil {
-		return "", false
-	}
-	selected, ok, err := o.editor.Select(title, items)
-	if err != nil {
-		return "", false
-	}
-	return selected, ok
-}
-
-func (o interactiveCommandOutput) Styled(kind, text string) string {
-	if o.editor == nil {
-		return text
-	}
-	return o.editor.Styled(kind, text)
-}
-
-func (o interactiveCommandOutput) ShowStatus(text string) {
-	if o.editor != nil {
-		o.editor.ShowStatus(text)
-	}
-}
-
-func (o interactiveCommandOutput) ClearStatus() {
-	if o.editor != nil {
-		o.editor.ClearStatus()
-	}
 }
 
 func runLineMode(args []string, in io.Reader, out io.Writer, deps Dependencies) error {

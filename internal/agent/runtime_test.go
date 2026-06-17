@@ -17,11 +17,12 @@ import (
 )
 
 type fakeProvider struct {
-	name      string
-	model     string
-	responses []provider.Response
-	requests  []provider.Request
-	deadlines []deadlineRecord
+	name            string
+	model           string
+	responses       []provider.Response
+	streamResponses [][]provider.Event
+	requests        []provider.Request
+	deadlines       []deadlineRecord
 }
 
 type deadlineRecord struct {
@@ -33,8 +34,21 @@ func (f *fakeProvider) Name() string                                         { r
 func (f *fakeProvider) Model() string                                        { return f.model }
 func (f *fakeProvider) SetModel(model string)                                { f.model = model }
 func (f *fakeProvider) ListModels(context.Context) ([]provider.Model, error) { return nil, nil }
-func (f *fakeProvider) ChatStream(context.Context, provider.Request) (<-chan provider.Event, error) {
-	return nil, nil
+func (f *fakeProvider) ChatStream(ctx context.Context, req provider.Request) (<-chan provider.Event, error) {
+	f.requests = append(f.requests, req)
+	deadline, ok := ctx.Deadline()
+	f.deadlines = append(f.deadlines, deadlineRecord{deadline: deadline, ok: ok})
+	events := []provider.Event{{Delta: "", Done: true}}
+	if len(f.streamResponses) > 0 {
+		events = f.streamResponses[0]
+		f.streamResponses = f.streamResponses[1:]
+	}
+	ch := make(chan provider.Event, len(events))
+	for _, ev := range events {
+		ch <- ev
+	}
+	close(ch)
+	return ch, nil
 }
 func (f *fakeProvider) Chat(ctx context.Context, req provider.Request) (provider.Response, error) {
 	f.requests = append(f.requests, req)
@@ -99,6 +113,88 @@ func TestRunOnceFinalAnswer(t *testing.T) {
 	}
 	if len(p.requests) != 1 {
 		t.Fatalf("requests = %d", len(p.requests))
+	}
+}
+
+func TestRunOnceStreamSuppressesContentFromToolPlanningStep(t *testing.T) {
+	callArgs := json.RawMessage(`{"text":"ok"}`)
+	p := &fakeProvider{name: "fake", model: "m", streamResponses: [][]provider.Event{
+		{{Reasoning: "need tool"}, {Delta: "first."}, {ToolCall: &provider.ToolCall{ID: "1", Name: "echo", Args: callArgs}}, {Done: true}},
+		{{Delta: "final"}, {Done: true}},
+	}}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(fakeTool{}), Policy: workspace.Policy{Root: "."}, MaxSteps: 3}
+	var deltas []string
+	out, err := r.RunOnceStream(context.Background(), "hello", func(delta string, reasoning bool) {
+		if reasoning {
+			deltas = append(deltas, "reasoning:"+delta)
+			return
+		}
+		deltas = append(deltas, delta)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "final" {
+		t.Fatalf("out = %q", out)
+	}
+	got := strings.Join(deltas, "|")
+	if got != "reasoning:need tool|final" {
+		t.Fatalf("deltas = %q", got)
+	}
+}
+
+func TestRunOnceStreamObservedStreamsDraftAndMarksToolStep(t *testing.T) {
+	callArgs := json.RawMessage(`{"text":"ok"}`)
+	p := &fakeProvider{name: "fake", model: "m", streamResponses: [][]provider.Event{
+		{{Delta: "draft"}, {ToolCall: &provider.ToolCall{ID: "1", Name: "echo", Args: callArgs}}, {Done: true}},
+		{{Delta: "final"}, {Done: true}},
+	}}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(fakeTool{}), Policy: workspace.Policy{Root: "."}, MaxSteps: 3}
+	var deltas []string
+	var steps []bool
+	out, err := r.RunOnceStreamObserved(context.Background(), "hello", StreamObserver{
+		Delta: func(delta string, reasoning bool) {
+			if !reasoning {
+				deltas = append(deltas, delta)
+			}
+		},
+		StepDone: func(toolCalls bool) {
+			steps = append(steps, toolCalls)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "final" {
+		t.Fatalf("out = %q", out)
+	}
+	if got := strings.Join(deltas, "|"); got != "draft|final" {
+		t.Fatalf("deltas = %q", got)
+	}
+	if len(steps) != 2 || !steps[0] || steps[1] {
+		t.Fatalf("steps = %#v", steps)
+	}
+}
+
+func TestRunOnceStreamFlushesFinalContentAfterStepIsFinal(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m", streamResponses: [][]provider.Event{
+		{{Delta: strings.Repeat("a", 48)}, {Delta: "b"}, {Done: true}},
+	}}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, MaxSteps: 1}
+	var deltas []string
+	out, err := r.RunOnceStream(context.Background(), "hello", func(delta string, reasoning bool) {
+		if !reasoning {
+			deltas = append(deltas, delta)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != strings.Repeat("a", 48)+"b" {
+		t.Fatalf("out = %q", out)
+	}
+	if len(deltas) != 1 || deltas[0] != strings.Repeat("a", 48)+"b" {
+		t.Fatalf("deltas = %#v", deltas)
 	}
 }
 

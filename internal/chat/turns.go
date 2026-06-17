@@ -77,15 +77,19 @@ func runStreamingTurnLine(out io.Writer, state *chatState, line string) {
 	}()
 
 	renderer := &taggedStreamRenderer{}
+	blocks := &responseBlockWriter{out: out}
 	_, runErr := state.rt.RunOnceStream(context.Background(), line, func(delta string, reasoning bool) {
+		if reasoning {
+			return
+		}
 		for _, seg := range renderer.Push(delta, reasoning) {
-			writeResponseSegment(out, seg)
+			blocks.Write(seg)
 		}
 	})
 	for _, seg := range renderer.Flush() {
-		writeResponseSegment(out, seg)
+		blocks.Write(seg)
 	}
-	fmt.Fprintln(out)
+	blocks.Finish()
 	if runErr != nil {
 		fmt.Fprintf(out, "error: %v\n", runErr)
 		return
@@ -100,8 +104,9 @@ func runNonStreamingTurnLine(out io.Writer, state *chatState, line string) {
 		fmt.Fprintf(out, "error: %v\n", runErr)
 		return
 	}
-	fmt.Fprintln(out, cleanDisplayText(resp))
-	fmt.Fprintln(out)
+	blocks := &responseBlockWriter{out: out}
+	blocks.Write(responseSegment{text: cleanDisplayText(resp)})
+	blocks.Finish()
 	state.autosaveSession(out, func(msg string) { fmt.Fprintln(out, msg) })
 }
 
@@ -111,11 +116,8 @@ type responseSegment struct {
 }
 
 type taggedStreamRenderer struct {
-	pending       string
-	inThink       bool
-	emitted       bool
-	lastReasoning bool
-	trailingNL    int
+	pending string
+	inThink bool
 }
 
 func (r *taggedStreamRenderer) Push(delta string, reasoning bool) []responseSegment {
@@ -183,30 +185,11 @@ func (r *taggedStreamRenderer) appendResponseSegment(out *[]responseSegment, tex
 	if text == "" {
 		return
 	}
-	if r.emitted && r.lastReasoning && !reasoning {
-		if need := 2 - r.trailingNL - leadingNewlines(text); need > 0 {
-			text = strings.Repeat("\n", need) + text
-		}
-	}
 	if n := len(*out); n > 0 && (*out)[n-1].reasoning == reasoning {
 		(*out)[n-1].text += text
 	} else {
 		*out = append(*out, responseSegment{text: text, reasoning: reasoning})
 	}
-	r.emitted = true
-	r.lastReasoning = reasoning
-	r.trailingNL = trailingNewlines(text)
-}
-
-func leadingNewlines(text string) int {
-	n := 0
-	for _, r := range text {
-		if r != '\n' {
-			break
-		}
-		n++
-	}
-	return n
 }
 
 func trailingNewlines(text string) int {
@@ -217,15 +200,57 @@ func trailingNewlines(text string) int {
 	return n
 }
 
-func writeResponseSegment(out io.Writer, seg responseSegment) {
-	if seg.text == "" {
-		return
-	}
+type responseBlockWriter struct {
+	out          io.Writer
+	current      string
+	trailingNL   int
+	wroteContent bool
+}
+
+func (w *responseBlockWriter) Write(seg responseSegment) {
+	kind := "response"
 	if seg.reasoning {
-		fmt.Fprint(out, styleText(out, "dim", seg.text))
+		kind = "thinking"
+	}
+	text := seg.text
+	if w.current != kind {
+		text = strings.TrimLeft(text, "\n")
+	}
+	if text == "" {
 		return
 	}
-	fmt.Fprint(out, seg.text)
+	w.beginBlock(kind)
+	w.trailingNL = trailingNewlines(text)
+	if seg.reasoning {
+		text = styleText(w.out, "dim", text)
+	}
+	fmt.Fprint(w.out, text)
+	w.wroteContent = true
+}
+
+func (w *responseBlockWriter) beginBlock(kind string) {
+	if w.current == kind {
+		return
+	}
+	if w.current != "" {
+		w.ensureBlankLine()
+	}
+	w.current = kind
+	w.trailingNL = 0
+}
+
+func (w *responseBlockWriter) ensureBlankLine() {
+	for w.trailingNL < 2 {
+		fmt.Fprintln(w.out)
+		w.trailingNL++
+	}
+}
+
+func (w *responseBlockWriter) Finish() {
+	if !w.wroteContent {
+		return
+	}
+	w.ensureBlankLine()
 }
 
 func lastAssistantMessage(rt *agent.Runtime) *session.Message {

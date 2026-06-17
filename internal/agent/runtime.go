@@ -47,17 +47,26 @@ type Runtime struct {
 
 // RunOnce executes one user request through the bounded agent loop.
 func (r *Runtime) RunOnce(ctx context.Context, input string) (string, error) {
-	return r.run(ctx, input, nil, false)
+	return r.run(ctx, input, StreamObserver{}, false)
 }
 
 // RunOnceStream executes one user request and forwards text deltas as they arrive.
 // reasoning is true for provider-native thinking/reasoning deltas that should be
 // displayed differently from final answer text.
 func (r *Runtime) RunOnceStream(ctx context.Context, input string, onDelta func(delta string, reasoning bool)) (string, error) {
-	return r.run(ctx, input, onDelta, true)
+	return r.run(ctx, input, StreamObserver{Delta: onDelta}, true)
 }
 
-func (r *Runtime) run(ctx context.Context, input string, onDelta func(string, bool), streaming bool) (string, error) {
+type StreamObserver struct {
+	Delta    func(delta string, reasoning bool)
+	StepDone func(toolCalls bool)
+}
+
+func (r *Runtime) RunOnceStreamObserved(ctx context.Context, input string, obs StreamObserver) (string, error) {
+	return r.run(ctx, input, obs, true)
+}
+
+func (r *Runtime) run(ctx context.Context, input string, obs StreamObserver, streaming bool) (string, error) {
 	if r == nil {
 		return "", errors.New("nil runtime")
 	}
@@ -92,11 +101,10 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string, bo
 	for step := 0; step < r.MaxSteps; step++ {
 		history := r.providerHistory(retrievalContext)
 		r.logEvent("provider_request", map[string]any{"step": step + 1, "streaming": streaming, "message_count": len(history)})
-		deltaForward := onDelta
 		if r.OnModelStart != nil {
 			r.OnModelStart()
 		}
-		resp, err := r.callProvider(ctx, history, deltaForward, streaming)
+		resp, err := r.callProvider(ctx, history, obs, streaming)
 		if r.OnModelStop != nil {
 			r.OnModelStop()
 		}
@@ -110,6 +118,9 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string, bo
 			r.LastUsage = resp.Usage
 		}
 		if len(resp.ToolCalls) == 0 {
+			if obs.StepDone != nil {
+				obs.StepDone(false)
+			}
 			if resp.Content == "" {
 				err := fmt.Errorf("provider returned neither content nor tool calls")
 				r.logEvent("provider_error", map[string]any{"step": step + 1, "error": err.Error()})
@@ -119,6 +130,9 @@ func (r *Runtime) run(ctx context.Context, input string, onDelta func(string, bo
 			r.Session.UpdatedAt = time.Now().UTC()
 			r.logEvent("assistant_final", map[string]any{"step": step + 1, "content": resp.Content})
 			return resp.Content, nil
+		}
+		if obs.StepDone != nil {
+			obs.StepDone(true)
 		}
 
 		for i := range resp.ToolCalls {
@@ -218,7 +232,7 @@ func jsonRaw(raw []byte) any {
 	return string(raw)
 }
 
-func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, onDelta func(string, bool), streaming bool) (provider.Response, error) {
+func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, obs StreamObserver, streaming bool) (provider.Response, error) {
 	thinkingLevel := ""
 	thinkingValue := ""
 	thinkingFormat := ""
@@ -238,6 +252,7 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 		return provider.Response{}, err
 	}
 	var resp provider.Response
+	contentBuffer := ""
 	for {
 		var ev provider.Event
 		var ok bool
@@ -254,8 +269,8 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 		}
 		if ev.Reasoning != "" {
 			resp.Reasoning += ev.Reasoning
-			if onDelta != nil {
-				onDelta(ev.Reasoning, true)
+			if obs.Delta != nil {
+				obs.Delta(ev.Reasoning, true)
 			}
 		}
 		if ev.Usage.InputTokens > 0 || ev.Usage.OutputTokens > 0 {
@@ -263,8 +278,11 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 		}
 		if ev.Delta != "" {
 			resp.Content += ev.Delta
-			if onDelta != nil {
-				onDelta(ev.Delta, false)
+			if obs.Delta != nil {
+				contentBuffer += ev.Delta
+				if obs.StepDone != nil {
+					obs.Delta(ev.Delta, false)
+				}
 			}
 		}
 		if ev.ToolCall != nil {
@@ -280,6 +298,9 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 			resp.Content = content
 			resp.ToolCalls = calls
 		}
+	}
+	if len(resp.ToolCalls) == 0 && obs.Delta != nil && obs.StepDone == nil && contentBuffer != "" {
+		obs.Delta(contentBuffer, false)
 	}
 	return resp, nil
 }

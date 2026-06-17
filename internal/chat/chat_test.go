@@ -432,28 +432,53 @@ func TestTaggedStreamRendererNativeReasoning(t *testing.T) {
 
 func TestTaggedStreamRendererSeparatesThinkingAndResponse(t *testing.T) {
 	r := &taggedStreamRenderer{}
-	var b strings.Builder
+	var out []responseSegment
 	for _, seg := range r.Push("<think>reasoning</think>answer", false) {
-		b.WriteString(seg.text)
+		out = append(out, seg)
 	}
 	for _, seg := range r.Flush() {
-		b.WriteString(seg.text)
+		out = append(out, seg)
 	}
-	if got := b.String(); got != "reasoning\n\nanswer" {
-		t.Fatalf("got %q", got)
+	if len(out) != 2 || !out[0].reasoning || out[0].text != "reasoning" || out[1].reasoning || out[1].text != "answer" {
+		t.Fatalf("segments = %#v", out)
 	}
 }
 
 func TestTaggedStreamRendererSeparatesNativeReasoningAndResponseAcrossChunks(t *testing.T) {
 	r := &taggedStreamRenderer{}
+	var blocks responseBlockWriter
 	var b strings.Builder
+	blocks.out = &b
 	for _, seg := range r.Push("reasoning\n", true) {
-		b.WriteString(seg.text)
+		blocks.Write(seg)
 	}
 	for _, seg := range r.Push("answer", false) {
-		b.WriteString(seg.text)
+		blocks.Write(seg)
 	}
-	if got := b.String(); got != "reasoning\n\nanswer" {
+	blocks.Finish()
+	if got := b.String(); got != "reasoning\n\nanswer\n\n" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResponseBlockWriterSeparatesThinkingAndResponse(t *testing.T) {
+	var b strings.Builder
+	blocks := responseBlockWriter{out: &b}
+	blocks.Write(responseSegment{text: "reasoning", reasoning: true})
+	blocks.Write(responseSegment{text: "answer"})
+	blocks.Finish()
+	if got := b.String(); got != "reasoning\n\nanswer\n\n" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResponseBlockWriterPreservesNewlinesInsideBlock(t *testing.T) {
+	var b strings.Builder
+	blocks := responseBlockWriter{out: &b}
+	blocks.Write(responseSegment{text: "first"})
+	blocks.Write(responseSegment{text: "\nsecond"})
+	blocks.Finish()
+	if got := b.String(); got != "first\nsecond\n\n" {
 		t.Fatalf("got %q", got)
 	}
 }
