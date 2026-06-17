@@ -61,19 +61,23 @@ func Save(dir string, s *Session) (string, error) {
 	if s.ID == "" {
 		s.ID = time.Now().UTC().Format("20060102-150405")
 	}
+	if !validID(s.ID) {
+		return "", fmt.Errorf("invalid session id")
+	}
 	s.UpdatedAt = time.Now().UTC()
 	if s.CreatedAt.IsZero() {
 		s.CreatedAt = s.UpdatedAt
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	_ = os.Chmod(dir, 0o700)
 	path := filepath.Join(dir, s.ID+".json")
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -89,7 +93,23 @@ func Load(path string) (*Session, error) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
 	}
+	if s.ID != "" && !validID(s.ID) {
+		return nil, fmt.Errorf("invalid session id")
+	}
 	return &s, nil
+}
+
+func validID(id string) bool {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\\`) {
+		return false
+	}
+	for _, r := range id {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // Info is a lightweight session listing record.

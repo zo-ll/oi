@@ -292,11 +292,6 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 			return false, rt, sel, streaming, autosave, tools, err
 		}
 		root := rt.Policy.Root
-		if loaded.CWD != "" {
-			if detected, detectErr := workspace.DetectRoot(loaded.CWD); detectErr == nil {
-				root = detected
-			}
-		}
 		*cfg = *cfg2
 		nextRT := buildRuntime(cfg, nextSel2, p, root, reader, out, rt.Logger)
 		loaded.Provider = nextSel2.Provider

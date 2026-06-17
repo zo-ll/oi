@@ -111,14 +111,17 @@ type responseSegment struct {
 }
 
 type taggedStreamRenderer struct {
-	pending string
-	inThink bool
+	pending       string
+	inThink       bool
+	emitted       bool
+	lastReasoning bool
+	trailingNL    int
 }
 
 func (r *taggedStreamRenderer) Push(delta string, reasoning bool) []responseSegment {
 	if reasoning {
 		var out []responseSegment
-		appendResponseSegment(&out, cleanDisplayText(delta), true)
+		r.appendResponseSegment(&out, cleanDisplayText(delta), true)
 		return out
 	}
 	r.pending += delta
@@ -128,11 +131,11 @@ func (r *taggedStreamRenderer) Push(delta string, reasoning bool) []responseSegm
 			idx := strings.Index(r.pending, "</think>")
 			if idx < 0 {
 				keep := partialTagSuffix(r.pending, "</think>")
-				appendResponseSegment(&out, cleanDisplayText(r.pending[:len(r.pending)-keep]), true)
+				r.appendResponseSegment(&out, cleanDisplayText(r.pending[:len(r.pending)-keep]), true)
 				r.pending = r.pending[len(r.pending)-keep:]
 				return out
 			}
-			appendResponseSegment(&out, cleanDisplayText(r.pending[:idx]), true)
+			r.appendResponseSegment(&out, cleanDisplayText(r.pending[:idx]), true)
 			r.pending = r.pending[idx+len("</think>"):]
 			r.inThink = false
 			continue
@@ -140,11 +143,11 @@ func (r *taggedStreamRenderer) Push(delta string, reasoning bool) []responseSegm
 		idx := strings.Index(r.pending, "<think>")
 		if idx < 0 {
 			keep := partialTagSuffix(r.pending, "<think>")
-			appendResponseSegment(&out, cleanDisplayText(r.pending[:len(r.pending)-keep]), false)
+			r.appendResponseSegment(&out, cleanDisplayText(r.pending[:len(r.pending)-keep]), false)
 			r.pending = r.pending[len(r.pending)-keep:]
 			return out
 		}
-		appendResponseSegment(&out, cleanDisplayText(r.pending[:idx]), false)
+		r.appendResponseSegment(&out, cleanDisplayText(r.pending[:idx]), false)
 		r.pending = r.pending[idx+len("<think>"):]
 		r.inThink = true
 	}
@@ -154,9 +157,9 @@ func (r *taggedStreamRenderer) Flush() []responseSegment {
 	var out []responseSegment
 	if r.pending != "" {
 		if r.inThink {
-			appendResponseSegment(&out, cleanDisplayText(r.pending), true)
+			r.appendResponseSegment(&out, cleanDisplayText(r.pending), true)
 		} else {
-			appendResponseSegment(&out, cleanDisplayText(r.pending), false)
+			r.appendResponseSegment(&out, cleanDisplayText(r.pending), false)
 		}
 		r.pending = ""
 	}
@@ -176,15 +179,42 @@ func partialTagSuffix(s, tag string) int {
 	return 0
 }
 
-func appendResponseSegment(out *[]responseSegment, text string, reasoning bool) {
+func (r *taggedStreamRenderer) appendResponseSegment(out *[]responseSegment, text string, reasoning bool) {
 	if text == "" {
 		return
 	}
+	if r.emitted && r.lastReasoning && !reasoning {
+		if need := 2 - r.trailingNL - leadingNewlines(text); need > 0 {
+			text = strings.Repeat("\n", need) + text
+		}
+	}
 	if n := len(*out); n > 0 && (*out)[n-1].reasoning == reasoning {
 		(*out)[n-1].text += text
-		return
+	} else {
+		*out = append(*out, responseSegment{text: text, reasoning: reasoning})
 	}
-	*out = append(*out, responseSegment{text: text, reasoning: reasoning})
+	r.emitted = true
+	r.lastReasoning = reasoning
+	r.trailingNL = trailingNewlines(text)
+}
+
+func leadingNewlines(text string) int {
+	n := 0
+	for _, r := range text {
+		if r != '\n' {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+func trailingNewlines(text string) int {
+	n := 0
+	for i := len(text) - 1; i >= 0 && text[i] == '\n'; i-- {
+		n++
+	}
+	return n
 }
 
 func writeResponseSegment(out io.Writer, seg responseSegment) {

@@ -246,7 +246,7 @@ func TestParseToolVerbosity(t *testing.T) {
 }
 
 func TestCleanDisplayText(t *testing.T) {
-	got := cleanDisplayText("IÔÇÖm **oi**\n## Title\n`code`")
+	got := cleanDisplayText("IÔÇÖm **oi**\n## Title\n`code`\x1b[2J\x1b]52;c;secret\a")
 	want := "I’m oi\nTitle\ncode"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
@@ -427,6 +427,34 @@ func TestTaggedStreamRendererNativeReasoning(t *testing.T) {
 	segs := r.Push("think this through", true)
 	if len(segs) != 1 || !segs[0].reasoning || segs[0].text != "think this through" {
 		t.Fatalf("segments = %#v", segs)
+	}
+}
+
+func TestTaggedStreamRendererSeparatesThinkingAndResponse(t *testing.T) {
+	r := &taggedStreamRenderer{}
+	var b strings.Builder
+	for _, seg := range r.Push("<think>reasoning</think>answer", false) {
+		b.WriteString(seg.text)
+	}
+	for _, seg := range r.Flush() {
+		b.WriteString(seg.text)
+	}
+	if got := b.String(); got != "reasoning\n\nanswer" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestTaggedStreamRendererSeparatesNativeReasoningAndResponseAcrossChunks(t *testing.T) {
+	r := &taggedStreamRenderer{}
+	var b strings.Builder
+	for _, seg := range r.Push("reasoning\n", true) {
+		b.WriteString(seg.text)
+	}
+	for _, seg := range r.Push("answer", false) {
+		b.WriteString(seg.text)
+	}
+	if got := b.String(); got != "reasoning\n\nanswer" {
+		t.Fatalf("got %q", got)
 	}
 }
 

@@ -398,6 +398,7 @@ func (f *outputFormatter) Flush() string {
 }
 
 func cleanDisplayText(text string) string {
+	text = stripTerminalEscapes(text)
 	text = displayReplacer.Replace(text)
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
@@ -414,6 +415,44 @@ func cleanDisplayText(text string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func stripTerminalEscapes(text string) string {
+	out := make([]rune, 0, len(text))
+	runes := []rune(text)
+	for i := 0; i < len(runes); i++ {
+		if runes[i] != 0x1b {
+			out = append(out, runes[i])
+			continue
+		}
+		if i+1 >= len(runes) {
+			break
+		}
+		i++
+		switch runes[i] {
+		case '[':
+			for i+1 < len(runes) {
+				i++
+				if runes[i] >= 0x40 && runes[i] <= 0x7e {
+					break
+				}
+			}
+		case ']':
+			for i+1 < len(runes) {
+				i++
+				if runes[i] == '\a' {
+					break
+				}
+				if runes[i] == 0x1b && i+1 < len(runes) && runes[i+1] == '\\' {
+					i++
+					break
+				}
+			}
+		default:
+			// Drop one-character escape sequences as well.
+		}
+	}
+	return string(out)
 }
 
 func parseToolVerbosity(arg string) (toolVerbosity, error) {

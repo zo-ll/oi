@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"unicode/utf8"
-
-	"github.com/mattn/go-runewidth"
-	"golang.org/x/term"
 )
 
 type Completion struct {
@@ -32,7 +31,7 @@ type Editor struct {
 	history      []string
 	historyIndex int
 	historyDraft string
-	rawState     *term.State
+	rawState     string
 	raw          bool
 	renderedRows int
 	hint         []string
@@ -168,7 +167,7 @@ func (e *Editor) writeWrappedLocked(s string) error {
 			if err := e.flushPendingWordLocked(); err != nil {
 				return err
 			}
-			w := runewidth.RuneWidth(r)
+			w := runeWidth(r)
 			if w <= 0 {
 				w = 1
 			}
@@ -827,11 +826,14 @@ func (e *Editor) enableRaw() error {
 	if e.raw {
 		return nil
 	}
-	state, err := term.MakeRaw(int(e.in.Fd()))
+	state, err := sttyCapture(e.in, "-g")
 	if err != nil {
 		return err
 	}
-	e.rawState = state
+	if err := sttyRun(e.in, "raw", "-echo"); err != nil {
+		return err
+	}
+	e.rawState = strings.TrimSpace(state)
 	e.raw = true
 	_, _ = io.WriteString(e.out, "\x1b[?2004h")
 	return nil
@@ -843,10 +845,10 @@ func (e *Editor) disableRaw() error {
 	}
 	_, _ = io.WriteString(e.out, "\x1b[?2004l")
 	e.raw = false
-	if e.rawState == nil {
+	if e.rawState == "" {
 		return nil
 	}
-	return term.Restore(int(e.in.Fd()), e.rawState)
+	return sttyRun(e.in, e.rawState)
 }
 
 func readByte(f *os.File) (byte, error) {
@@ -995,7 +997,7 @@ func wrapLineFromRunes(runes []rune, width int) []string {
 		cut := 0
 		lastSpace := -1
 		for cut < len(runes) {
-			rw := runewidth.RuneWidth(runes[cut])
+			rw := runeWidth(runes[cut])
 			if rw < 0 {
 				rw = 0
 			}
@@ -1047,7 +1049,58 @@ func trimRightSpaces(runes []rune) []rune {
 }
 
 func displayWidth(s string) int {
-	return runewidth.StringWidth(s)
+	w := 0
+	for _, r := range s {
+		w += runeWidth(r)
+	}
+	return w
+}
+
+func runeWidth(r rune) int {
+	switch {
+	case r == 0:
+		return 0
+	case r < 32 || (r >= 0x7f && r < 0xa0):
+		return 0
+	case isCombining(r):
+		return 0
+	case isWideRune(r):
+		return 2
+	default:
+		return 1
+	}
+}
+
+func isCombining(r rune) bool {
+	switch {
+	case r >= 0x0300 && r <= 0x036f:
+	case r >= 0x1ab0 && r <= 0x1aff:
+	case r >= 0x1dc0 && r <= 0x1dff:
+	case r >= 0x20d0 && r <= 0x20ff:
+	case r >= 0xfe20 && r <= 0xfe2f:
+	default:
+		return false
+	}
+	return true
+}
+
+func isWideRune(r rune) bool {
+	switch {
+	case r >= 0x1100 && r <= 0x115f:
+	case r >= 0x2329 && r <= 0x232a:
+	case r >= 0x2e80 && r <= 0xa4cf:
+	case r >= 0xac00 && r <= 0xd7a3:
+	case r >= 0xf900 && r <= 0xfaff:
+	case r >= 0xfe10 && r <= 0xfe19:
+	case r >= 0xfe30 && r <= 0xfe6f:
+	case r >= 0xff00 && r <= 0xff60:
+	case r >= 0xffe0 && r <= 0xffe6:
+	case r >= 0x1f300 && r <= 0x1faff:
+	case r >= 0x20000 && r <= 0x3fffd:
+	default:
+		return false
+	}
+	return true
 }
 
 func wordLeft(buf []rune, cursor int) int {
@@ -1120,10 +1173,55 @@ func promptCursorPosition(prompt, text string, width, cursor int) (int, int) {
 }
 
 func terminalWidth(f *os.File) int {
-	if f != nil {
-		if width, _, err := term.GetSize(int(f.Fd())); err == nil && width > 0 {
-			return width
+	out, err := sttyCapture(f, "size")
+	if err == nil {
+		parts := strings.Fields(strings.TrimSpace(out))
+		if len(parts) == 2 {
+			if width, convErr := strconv.Atoi(parts[1]); convErr == nil && width > 0 {
+				return width
+			}
 		}
 	}
 	return 80
+}
+
+func sttyCapture(f *os.File, args ...string) (string, error) {
+	if f == nil {
+		return "", fmt.Errorf("nil terminal")
+	}
+	name := f.Name()
+	for _, flag := range []string{"-F", "-f"} {
+		cmdArgs := append([]string{flag, name}, args...)
+		cmd := exec.Command("stty", cmdArgs...)
+		cmd.Stdin = f
+		data, err := cmd.Output()
+		if err == nil {
+			return string(data), nil
+		}
+	}
+	cmd := exec.Command("stty", args...)
+	cmd.Stdin = f
+	data, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func sttyRun(f *os.File, args ...string) error {
+	if f == nil {
+		return fmt.Errorf("nil terminal")
+	}
+	name := f.Name()
+	for _, flag := range []string{"-F", "-f"} {
+		cmdArgs := append([]string{flag, name}, args...)
+		cmd := exec.Command("stty", cmdArgs...)
+		cmd.Stdin = f
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+	cmd := exec.Command("stty", args...)
+	cmd.Stdin = f
+	return cmd.Run()
 }

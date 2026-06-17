@@ -1,6 +1,7 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -28,5 +29,34 @@ func TestListSessionsSortedByUpdatedAt(t *testing.T) {
 	}
 	if items[0].Path != filepath.Join(dir, "second.json") {
 		t.Fatalf("path = %q", items[0].Path)
+	}
+}
+
+func TestSaveRejectsPathTraversalID(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Save(dir, &Session{ID: "../../escape"}); err == nil {
+		t.Fatal("expected invalid session id")
+	}
+}
+
+func TestSaveUsesPrivatePermissions(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sessions")
+	path, err := Save(dir, &Session{ID: "private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("dir mode = %o", got)
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("file mode = %o", got)
 	}
 }

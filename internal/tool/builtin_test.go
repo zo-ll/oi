@@ -96,6 +96,18 @@ func TestRunCommandToolApprovalAndExecution(t *testing.T) {
 	}
 }
 
+func TestRunCommandToolAutoRejectsMutatingCommands(t *testing.T) {
+	root := t.TempDir()
+	tool := runCommandTool{opts: Options{Policy: workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalAuto}}}
+	for _, cmd := range []string{"echo hi > x", "rm -r -f /", "rm -rf -- /", "cat go.mod\nrm file", `cat $HOME/.ssh/id_rsa`, `cat /etc/passwd`, `cat "$(rm file)"`, `find . -exec rm {} ;`, "sed -i s/a/b/ file", "go test ./..."} {
+		args, _ := json.Marshal(runCommandArgs{Command: cmd})
+		res := tool.Run(context.Background(), Call{Name: tool.Name(), Args: args})
+		if res.OK || !(strings.Contains(res.Error, "approval required") || strings.Contains(res.Error, "blocked command")) {
+			t.Fatalf("cmd=%q result=%+v", cmd, res)
+		}
+	}
+}
+
 func TestRunCommandToolSkipsApprovalForReadOnlyCommands(t *testing.T) {
 	root := t.TempDir()
 	tool := runCommandTool{opts: Options{Policy: workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalNever}}}

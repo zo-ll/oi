@@ -17,6 +17,7 @@ import (
 )
 
 const defaultMaxOutputBytes = 64 * 1024
+const maxInputFileBytes = 4 * 1024 * 1024
 
 // Options configures built-in tools.
 type Options struct {
@@ -79,6 +80,20 @@ func (o Options) approve(action, target string) error {
 	default:
 		return fmt.Errorf("unknown approval mode: %s", mode)
 	}
+}
+
+func (o Options) approveCommand(cmd string) error {
+	mode := o.Policy.ApprovalMode
+	if mode == "" {
+		mode = workspace.ApprovalPrompt
+	}
+	if workspace.IsReadOnlyCommand(cmd) {
+		return nil
+	}
+	if mode == workspace.ApprovalAuto {
+		return fmt.Errorf("approval required for mutating command")
+	}
+	return o.approve("run command", cmd)
 }
 
 func truncateOutput(s string, max int) (string, bool) {
@@ -152,7 +167,7 @@ func (t readFileTool) Spec() Spec {
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset_line":{"type":"integer","minimum":1},"limit_lines":{"type":"integer","minimum":1}},"required":["path"]}`),
 	}
 }
-func (t readFileTool) Run(_ context.Context, call Call) Result {
+func (t readFileTool) Run(ctx context.Context, call Call) Result {
 	var args readFileArgs
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return jsonError(t.Name(), err)
@@ -170,6 +185,12 @@ func (t readFileTool) Run(_ context.Context, call Call) Result {
 	}
 	if info.IsDir() {
 		return jsonError(t.Name(), fmt.Errorf("path is a directory"))
+	}
+	if info.Size() > maxInputFileBytes {
+		return jsonError(t.Name(), fmt.Errorf("file too large"))
+	}
+	if err := ctx.Err(); err != nil {
+		return jsonError(t.Name(), err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -264,7 +285,7 @@ func (t findFilesTool) Spec() Spec {
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"]}`),
 	}
 }
-func (t findFilesTool) Run(_ context.Context, call Call) Result {
+func (t findFilesTool) Run(ctx context.Context, call Call) Result {
 	var args findFilesArgs
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return jsonError(t.Name(), err)
@@ -281,6 +302,9 @@ func (t findFilesTool) Run(_ context.Context, call Call) Result {
 	}
 	matches := []string{}
 	walkErr := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return err
 		}
@@ -334,7 +358,7 @@ func (t grepTool) Spec() Spec {
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"max_matches":{"type":"integer","minimum":1}},"required":["pattern"]}`),
 	}
 }
-func (t grepTool) Run(_ context.Context, call Call) Result {
+func (t grepTool) Run(ctx context.Context, call Call) Result {
 	var args grepArgs
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return jsonError(t.Name(), err)
@@ -358,6 +382,16 @@ func (t grepTool) Run(_ context.Context, call Call) Result {
 	}
 	var matches []string
 	appendFileMatches := func(path string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if info.Size() > maxInputFileBytes {
+			return nil
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -381,6 +415,9 @@ func (t grepTool) Run(_ context.Context, call Call) Result {
 	}
 	if info.IsDir() {
 		err = filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			if err != nil {
 				return err
 			}
@@ -437,10 +474,8 @@ func (t runCommandTool) Run(ctx context.Context, call Call) Result {
 	if err != nil {
 		return jsonError(t.Name(), err)
 	}
-	if !workspace.IsReadOnlyCommand(args.Command) {
-		if err := t.opts.approve("run command", args.Command); err != nil {
-			return jsonError(t.Name(), err)
-		}
+	if err := t.opts.approveCommand(args.Command); err != nil {
+		return jsonError(t.Name(), err)
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-lc", args.Command)
 	cmd.Dir = root
