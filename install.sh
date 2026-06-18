@@ -15,7 +15,13 @@ if ! command -v go >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$INSTALL_DIR"
+# Some environments do not export GOPATH/GOMODCACHE. Module builds fail there
+# with: "module cache not found: neither GOMODCACHE nor GOPATH is set".
+# Keep caller overrides, otherwise fall back to the standard per-user paths.
+export GOMODCACHE="${GOMODCACHE:-$HOME/go/pkg/mod}"
+export GOCACHE="${GOCACHE:-$HOME/.cache/go-build}"
+
+mkdir -p "$INSTALL_DIR" "$GOMODCACHE" "$GOCACHE"
 
 tmp="$(mktemp "$INSTALL_DIR/.oi-build-XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
