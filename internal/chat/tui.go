@@ -91,6 +91,7 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 		events:    make(chan func(), 1024),
 		approvals: make(chan approvalRequest, 8),
 	}
+	defer term.WatchResize(func() { app.post(func() { app.render() }) })()
 	go app.readInputLoop()
 	state, startupNotice, err := loadChatRuntime(args, root, app.reader, app)
 	if err != nil {

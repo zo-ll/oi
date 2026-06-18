@@ -40,6 +40,9 @@ func (a *tuiApp) handleApprovalInput(b byte) bool {
 	case 'n', 'N', 3, 27:
 		a.approval.resp <- false
 		a.approval = nil
+		if b == 27 {
+			a.drainEscapeSequence()
+		}
 		a.render()
 	default:
 		a.renderApprovalOverlay(a.approval.action, a.approval.target)
@@ -267,4 +270,27 @@ func readTUIByte(f *os.File) (byte, error) {
 	var buf [1]byte
 	_, err := f.Read(buf[:])
 	return buf[0], err
+}
+
+// drainEscapeSequence consumes the bytes following an ESC that the caller has
+// already read, so that an xterm/SGR sequence (mouse, cursor key) does not leak
+// into the typed-input buffer. Best-effort: if the next byte is not '[' or 'O'
+// it returns; otherwise it reads until a terminator.
+func (a *tuiApp) drainEscapeSequence() {
+	first, err := a.nextByte()
+	if err != nil {
+		return
+	}
+	if first != '[' && first != 'O' {
+		return
+	}
+	for i := 0; i < 64; i++ {
+		b, err := a.nextByte()
+		if err != nil {
+			return
+		}
+		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '~' {
+			return
+		}
+	}
 }
