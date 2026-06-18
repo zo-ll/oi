@@ -39,6 +39,18 @@ func Open(in *os.File, out io.Writer) (*Terminal, error) {
 	return t, nil
 }
 
+// IsTerminal reports whether f refers to a terminal device.
+func IsTerminal(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
 func (t *Terminal) Close() error {
 	var err error
 	if t.mouse {
