@@ -3,8 +3,9 @@ package chat
 import (
 	"io"
 	"os"
-	"strconv"
 	"strings"
+
+	"github.com/zo-ll/tide"
 )
 
 func (a *tuiApp) nextByte() (byte, error) {
@@ -41,7 +42,9 @@ func (a *tuiApp) handleApprovalInput(b byte) bool {
 		a.approval.resp <- false
 		a.approval = nil
 		if b == 27 {
-			a.drainEscapeSequence()
+			// ESC cancels the approval; drain the rest of the escape/mouse
+			// sequence so its bytes do not leak into the typed input buffer.
+			_, _, _ = tide.ReadEscape(a.nextByte)
 		}
 		a.render()
 	default:
@@ -99,39 +102,21 @@ func (a *tuiApp) historyNext() {
 	a.hintIdx = 0
 }
 
+// handleEscape dispatches an escape/cursor-key/mouse sequence using tide's
+// normalized ReadEscape. Arrow keys dual-purpose: when slash-command hints are
+// visible they navigate hints, otherwise up/down walk prompt history and the
+// mouse wheel scrolls the transcript.
 func (a *tuiApp) handleEscape() {
-	first, err := a.nextByte()
+	kind, _, err := tide.ReadEscape(a.nextByte)
 	if err != nil {
 		return
 	}
-	if first == 'b' {
+	switch kind {
+	case tide.EscPageUp:
 		a.scrollPage(1)
-		return
-	}
-	if first == 'f' {
+	case tide.EscPageDown:
 		a.scrollPage(-1)
-		return
-	}
-	if first != '[' && first != 'O' {
-		return
-	}
-	seq := []byte{first}
-	for len(seq) < 64 {
-		b, err := a.nextByte()
-		if err != nil {
-			return
-		}
-		seq = append(seq, b)
-		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '~' {
-			break
-		}
-	}
-	if strings.HasPrefix(string(seq), "[<") {
-		a.handleSGRMouse(string(seq))
-		return
-	}
-	switch string(seq) {
-	case "[A", "OA":
+	case tide.EscUp:
 		if hints := a.commandHints(); len(hints) > 0 {
 			if a.hintIdx > 0 {
 				a.hintIdx--
@@ -139,7 +124,7 @@ func (a *tuiApp) handleEscape() {
 		} else {
 			a.historyPrev()
 		}
-	case "[B", "OB":
+	case tide.EscDown:
 		if hints := a.commandHints(); len(hints) > 0 {
 			if a.hintIdx+1 < len(hints) {
 				a.hintIdx++
@@ -147,44 +132,24 @@ func (a *tuiApp) handleEscape() {
 		} else {
 			a.historyNext()
 		}
-	case "[5~":
-		a.scrollPage(1)
-	case "[6~":
-		a.scrollPage(-1)
-	case "[C", "OC":
+	case tide.EscScrollUp:
+		a.scrollLines(3)
+	case tide.EscScrollDn:
+		a.scrollLines(-3)
+	case tide.EscRight:
 		if a.cursor < len(a.input) {
 			a.cursor++
 		}
-	case "[D", "OD":
+	case tide.EscLeft:
 		if a.cursor > 0 {
 			a.cursor--
 		}
-	case "[H", "OH", "[1~":
+	case tide.EscHome:
 		a.cursor = 0
-	case "[F", "OF", "[4~":
+	case tide.EscEnd:
 		a.cursor = len(a.input)
-	}
-}
-
-func (a *tuiApp) handleSGRMouse(seq string) {
-	if !strings.HasSuffix(seq, "M") && !strings.HasSuffix(seq, "m") {
-		return
-	}
-	body := strings.TrimPrefix(seq, "[<")
-	body = strings.TrimSuffix(strings.TrimSuffix(body, "M"), "m")
-	parts := strings.Split(body, ";")
-	if len(parts) != 3 {
-		return
-	}
-	button, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return
-	}
-	switch button {
-	case 64:
-		a.scrollLines(3)
-	case 65:
-		a.scrollLines(-3)
+	case tide.EscMouse, tide.EscCancel:
+		// no-op: a plain click or bare ESC during input
 	}
 }
 
@@ -225,72 +190,8 @@ func (a *tuiApp) tabComplete() {
 	a.cursor = len(a.input)
 }
 
-func (a *tuiApp) readOverlayEscape() string {
-	first, err := a.nextByte()
-	if err != nil {
-		return "cancel"
-	}
-	if first != '[' && first != 'O' {
-		return "cancel"
-	}
-	seq := []byte{first}
-	for len(seq) < 16 {
-		b, err := a.nextByte()
-		if err != nil {
-			return "cancel"
-		}
-		seq = append(seq, b)
-		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '~' {
-			break
-		}
-	}
-	switch string(seq) {
-	case "[A", "OA":
-		return "up"
-	case "[B", "OB":
-		return "down"
-	case "[C", "OC":
-		return "right"
-	case "[D", "OD":
-		return "left"
-	case "[H", "OH", "[1~":
-		return "home"
-	case "[F", "OF", "[4~":
-		return "end"
-	case "[5~":
-		return "page-up"
-	case "[6~":
-		return "page-down"
-	default:
-		return "cancel"
-	}
-}
-
 func readTUIByte(f *os.File) (byte, error) {
 	var buf [1]byte
 	_, err := f.Read(buf[:])
 	return buf[0], err
-}
-
-// drainEscapeSequence consumes the bytes following an ESC that the caller has
-// already read, so that an xterm/SGR sequence (mouse, cursor key) does not leak
-// into the typed-input buffer. Best-effort: if the next byte is not '[' or 'O'
-// it returns; otherwise it reads until a terminator.
-func (a *tuiApp) drainEscapeSequence() {
-	first, err := a.nextByte()
-	if err != nil {
-		return
-	}
-	if first != '[' && first != 'O' {
-		return
-	}
-	for i := 0; i < 64; i++ {
-		b, err := a.nextByte()
-		if err != nil {
-			return
-		}
-		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '~' {
-			return
-		}
-	}
 }

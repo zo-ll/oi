@@ -29,8 +29,8 @@ func (a *tuiApp) render() {
 	tide.HideCursor(&frame)
 	frame.WriteString("\x1b[H\x1b[J")
 	header := fmt.Sprintf("oi  %s/%s  %s", valueOr(a.state.sel.Provider, "none"), valueOr(a.state.sel.Model, "none"), valueOr(a.state.rt.Policy.Root, "."))
-	writeClipped(&frame, 1, 1, size.Cols, tide.Command(header))
-	writeClipped(&frame, 2, 1, size.Cols, strings.Repeat("-", size.Cols))
+	tide.WriteClipped(&frame, 1, 1, size.Cols, tide.Command(header))
+	tide.WriteClipped(&frame, 2, 1, size.Cols, strings.Repeat("-", size.Cols))
 
 	hints := a.commandHints()
 	hintCount := 0
@@ -107,13 +107,13 @@ func (a *tuiApp) render() {
 		end = len(lines)
 	}
 	for ri, line := range lines[start:end] {
-		writeClipped(&frame, 3+ri, 1, size.Cols, line)
+		tide.WriteClipped(&frame, 3+ri, 1, size.Cols, line)
 	}
 
 	nextRow := 3 + viewHeight
 	status := a.status
 	if status != "" {
-		writeClipped(&frame, nextRow, 1, size.Cols, tide.Dim(status))
+		tide.WriteClipped(&frame, nextRow, 1, size.Cols, tide.Dim(status))
 		nextRow++
 	}
 
@@ -134,14 +134,14 @@ func (a *tuiApp) render() {
 			if i == a.hintIdx {
 				marker = "> "
 			}
-			writeClipped(&frame, nextRow+r, 1, size.Cols, tide.Dim(marker+hints[i]))
+			tide.WriteClipped(&frame, nextRow+r, 1, size.Cols, tide.Dim(marker+hints[i]))
 		}
 		nextRow += hintCount
 	}
 
-	writeClipped(&frame, nextRow, 1, size.Cols, strings.Repeat("-", size.Cols))
+	tide.WriteClipped(&frame, nextRow, 1, size.Cols, strings.Repeat("-", size.Cols))
 	for i, line := range inputLines {
-		writeClipped(&frame, nextRow+1+i, 1, size.Cols, line.text)
+		tide.WriteClipped(&frame, nextRow+1+i, 1, size.Cols, line.text)
 	}
 	cursorRow := nextRow + 1 + cursorLine
 	cursorCol := 1
@@ -234,7 +234,7 @@ func (a *tuiApp) renderTranscript(width int) []string {
 			style = tide.Dim
 		}
 		if block.wrapWidth != bodyWidth || block.wrapped == nil {
-			block.wrapped = wrapPlain(block.text, bodyWidth)
+			block.wrapped = tide.WrapPlain(block.text, bodyWidth)
 			block.wrapWidth = bodyWidth
 			if len(block.wrapped) == 0 {
 				block.wrapped = []string{""}
@@ -246,27 +246,4 @@ func (a *tuiApp) renderTranscript(width int) []string {
 		lines = append(lines, "")
 	}
 	return lines
-}
-
-func wrapPlain(text string, width int) []string {
-	var out []string
-	for _, para := range strings.Split(text, "\n") {
-		wrapped := tide.Wrap(para, width)
-		if len(wrapped) == 0 {
-			out = append(out, "")
-			continue
-		}
-		out = append(out, wrapped...)
-	}
-	return out
-}
-
-func writeClipped(w io.Writer, row, col, width int, text string) {
-	tide.MoveTo(w, row, col)
-	tide.ClearLine(w)
-	runes := []rune(text)
-	for len(runes) > 0 && tide.DisplayWidth(string(runes)) > width {
-		runes = runes[:len(runes)-1]
-	}
-	_, _ = io.WriteString(w, string(runes))
 }
