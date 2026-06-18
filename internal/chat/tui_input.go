@@ -2,7 +2,6 @@ package chat
 
 import (
 	"io"
-	"os"
 	"strings"
 
 	"github.com/zo-ll/tide"
@@ -188,10 +187,4 @@ func (a *tuiApp) tabComplete() {
 	}
 	a.input = []rune(hints[a.hintIdx])
 	a.cursor = len(a.input)
-}
-
-func readTUIByte(f *os.File) (byte, error) {
-	var buf [1]byte
-	_, err := f.Read(buf[:])
-	return buf[0], err
 }

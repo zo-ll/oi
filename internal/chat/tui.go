@@ -92,7 +92,7 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 		approvals: make(chan approvalRequest, 8),
 	}
 	defer term.WatchResize(func() { app.post(func() { app.render() }) })()
-	go app.readInputLoop()
+	app.startInput(tide.NewInput(term.In))
 	state, startupNotice, err := loadChatRuntime(args, root, app.reader, app)
 	if err != nil {
 		return err
@@ -107,15 +107,17 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 	return app.loop()
 }
 
-func (a *tuiApp) readInputLoop() {
-	for {
-		b, err := readTUIByte(a.term.In)
-		if err != nil {
-			a.errCh <- err
-			return
+func (a *tuiApp) startInput(in *tide.Input) {
+	go func() {
+		for {
+			b, err := in.Next()
+			if err != nil {
+				a.errCh <- err
+				return
+			}
+			a.inputCh <- b
 		}
-		a.inputCh <- b
-	}
+	}()
 }
 
 func (a *tuiApp) loop() error {
