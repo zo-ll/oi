@@ -477,9 +477,21 @@ func (a *tuiApp) handleEscape() {
 	}
 	switch string(seq) {
 	case "[A", "OA":
-		a.scrollLines(1)
+		if hints := a.commandHints(); len(hints) > 0 {
+			if a.hintIdx > 0 {
+				a.hintIdx--
+			}
+		} else {
+			a.scrollLines(1)
+		}
 	case "[B", "OB":
-		a.scrollLines(-1)
+		if hints := a.commandHints(); len(hints) > 0 {
+			if a.hintIdx+1 < len(hints) {
+				a.hintIdx++
+			}
+		} else {
+			a.scrollLines(-1)
+		}
 	case "[5~":
 		a.scrollPage(1)
 	case "[6~":
@@ -547,7 +559,6 @@ func (a *tuiApp) tabComplete() {
 	}
 	a.input = []rune(hints[a.hintIdx])
 	a.cursor = len(a.input)
-	a.hintIdx++
 }
 
 func (a *tuiApp) scrollPage(delta int) {
@@ -582,8 +593,34 @@ func (a *tuiApp) render() {
 	writeClipped(&frame, 1, 1, size.Cols, tide.Command(header))
 	writeClipped(&frame, 2, 1, size.Cols, strings.Repeat("-", size.Cols))
 
-	viewTop := 3
-	viewHeight := size.Rows - 5
+	hints := a.commandHints()
+	hintCount := 0
+	if len(hints) > 0 {
+		if a.hintIdx >= len(hints) {
+			a.hintIdx = 0
+		}
+		hintCount = 5
+		if hintCount > len(hints) {
+			hintCount = len(hints)
+		}
+		maxHint := size.Rows - 6
+		if maxHint < 1 {
+			maxHint = 1
+		}
+		if hintCount > maxHint {
+			hintCount = maxHint
+		}
+	}
+
+	bottomRows := 2 // separator + input
+	if hintCount > 0 {
+		bottomRows += hintCount
+	}
+	viewHeight := size.Rows - 2 - bottomRows // 2 = header + separator
+	if viewHeight < 1 {
+		viewHeight = 1
+	}
+
 	lines := a.renderTranscript(size.Cols)
 	maxScroll := len(lines) - viewHeight
 	if maxScroll < 0 {
@@ -600,33 +637,47 @@ func (a *tuiApp) render() {
 	if end > len(lines) {
 		end = len(lines)
 	}
-	row := viewTop
-	for _, line := range lines[start:end] {
-		writeClipped(&frame, row, 1, size.Cols, line)
-		row++
+	for ri, line := range lines[start:end] {
+		writeClipped(&frame, 3+ri, 1, size.Cols, line)
 	}
+
+	nextRow := 3 + viewHeight
 	status := a.status
 	if status != "" {
-		writeClipped(&frame, size.Rows-2, 1, size.Cols, tide.Dim(status))
+		writeClipped(&frame, nextRow, 1, size.Cols, tide.Dim(status))
+		nextRow++
 	}
-	hints := a.commandHints()
-	hintRow := size.Rows - 1
-	if len(hints) > 0 {
-		if len(hints) > maxCompletionMatchesShown {
-			hints = hints[:maxCompletionMatchesShown]
+
+	if hintCount > 0 {
+		hintStart := 0
+		if a.hintIdx >= hintCount {
+			hintStart = a.hintIdx - hintCount + 1
 		}
-		hintLine := strings.Join(hints, "  ")
-		writeClipped(&frame, size.Rows-1, 1, size.Cols, tide.Dim(hintLine))
-		hintRow = size.Rows
+		if hintStart+hintCount > len(hints) {
+			hintStart = len(hints) - hintCount
+			if hintStart < 0 {
+				hintStart = 0
+			}
+		}
+		for r := 0; r < hintCount && hintStart+r < len(hints); r++ {
+			i := hintStart + r
+			marker := "  "
+			if i == a.hintIdx {
+				marker = "> "
+			}
+			writeClipped(&frame, nextRow+r, 1, size.Cols, tide.Dim(marker+hints[i]))
+		}
+		nextRow += hintCount
 	}
-	writeClipped(&frame, hintRow, 1, size.Cols, strings.Repeat("-", size.Cols))
-	input := "> " + string(a.input)
-	writeClipped(&frame, hintRow+1, 1, size.Cols, input)
-	col := 3 + tide.DisplayWidth(string(a.input[:a.cursor]))
+
+	writeClipped(&frame, nextRow, 1, size.Cols, strings.Repeat("-", size.Cols))
+	input := string(a.input)
+	writeClipped(&frame, nextRow+1, 1, size.Cols, input)
+	col := 1 + tide.DisplayWidth(string(a.input[:a.cursor]))
 	if col > size.Cols {
 		col = size.Cols
 	}
-	tide.MoveTo(&frame, hintRow+1, col)
+	tide.MoveTo(&frame, nextRow+1, col)
 	tide.ShowCursor(&frame)
 	_, _ = io.WriteString(a.term.Out, frame.String())
 }
