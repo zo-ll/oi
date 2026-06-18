@@ -6,10 +6,11 @@
 - OpenAI-compatible providers
 - local tool execution
 - stdio RPC for Telegram/bot integration
-- zero external dependencies
-- standard library only
+- one first-party dependency (`tide`) for terminal primitives; stdlib-only core
 
 It should be minimal in code size, but strong in architecture, safety, and functionality. Go is an implementation choice here: the product goal is a small protocol-first agent runtime, not a Go-only ecosystem.
+
+> Note: the runtime originally targeted stdlib-only. It now depends on one small first-party package, [`tide`](https://github.com/zo-ll/tide), for terminal primitives (raw mode, alt screen, mouse, wrapping). The core packages (`agent`, `provider`, `tool`, `workspace`, `session`, `rpc`, `config`) remain stdlib-only. `tide` is the only dependency and isvendored via a `replace` directive in `go.mod`.
 
 ---
 
@@ -60,8 +61,9 @@ oi doctor
    - approval for writes and shell commands
    - explicit `--unsafe` to relax policy
 
-5. Stdlib only
-   - `net/http`, `encoding/json`, `os/exec`, `path/filepath`, `bufio`, `context`
+5. Minimal dependencies
+   - core packages (`agent`, `provider`, `tool`, `workspace`, `session`, `rpc`, `config`) are stdlib-only
+   - one first-party dependency: `tide` for terminal primitives used by the interactive TUI
    - no YAML/TOML, no third-party readline, no RPC framework
 
 6. Protocol first
@@ -72,7 +74,6 @@ oi doctor
 ## Non-goals for v1
 
 Do not build these first:
-- fullscreen TUI framework
 - RAG
 - vision/image support
 - heavyweight clipboard abstractions
@@ -80,6 +81,8 @@ Do not build these first:
 - background autonomous daemons
 - multi-agent orchestration
 - local llama.cpp backend unless core cloud agent is already solid
+
+> The interactive mode shipped a fullscreen TUI (alt screen, mouse wheel scroll, overlays) built on `tide`. This was an intentional product pivot from the original "plain terminal flow" design.
 
 ---
 
@@ -89,9 +92,10 @@ Do not build these first:
 cmd/oi/
 internal/config/
 internal/provider/
+internal/oauth/
+internal/retrieval/
 internal/agent/
 internal/chat/
-internal/lineedit/
 internal/tool/
 internal/workspace/
 internal/rpc/
@@ -123,17 +127,19 @@ internal/log/
 - final answer handling
 
 #### `internal/chat`
-- interactive chat loop
+- interactive chat loop (fullscreen TUI on a TTY, line-mode fallback otherwise)
 - slash command handling
-- streaming output to terminal
-- tool activity display
-- model/thinking configuration
+- streaming output, tool activity display, approval prompts
+- model/thinking configuration, session and model pickers, login flow
+- prompt history, steering queue, auto-compaction wiring
 
-#### `internal/lineedit`
-- shell-style prompt editing (raw mode, cursor movement, history, paste)
-- slash command picker with arrow-key navigation
-- reusable selector for model/session/choice pickers
-- line-mode fallback outside a TTY
+> The interactive TUI is implemented in `internal/chat/tui*.go` and uses `tide` for terminal primitives. The package is split by concern:
+> - `tui.go` — app struct, main loop, turn execution, runtime wiring
+> - `tui_render.go` — frame render, transcript, input line wrap
+> - `tui_input.go` — byte reader, prompt history, escape/mouse, scroll, tab complete
+> - `tui_overlay.go` — picker/approval/input modal overlays
+>
+> There is no separate `lineedit` package; the line editor lives in `tide` and the TUI overlays live in `chat`.
 
 #### `internal/tool`
 - tool registry
@@ -223,7 +229,8 @@ Fallbacks:
     "max_tool_output_bytes": 65536,
     "tool_timeout_seconds": 20,
     "request_timeout_seconds": 600,
-    "approval_mode": "auto"
+    "approval_mode": "auto",
+    "auto_compact_threshold": 90
   }
 }
 ```
@@ -246,6 +253,14 @@ Resolution order:
 2. env vars
 3. auth.json
 4. config selection (`selected_provider` / `selected_model`)
+
+### `agent` options
+
+- `max_tool_output_bytes`: truncate tool output beyond this (default 65536)
+- `tool_timeout_seconds`: per-tool timeout (default 20)
+- `request_timeout_seconds`: per-provider-request timeout (default 600)
+- `approval_mode`: `auto` | `prompt` | `never` (default `auto`)
+- `auto_compact_threshold`: auto-compact the session before a model call when usage reaches this percent of the context window. `0` means the default (90%), a negative value disables auto-compaction. Compaction target is 70% of the window.
 
 ---
 
@@ -403,13 +418,16 @@ The loop should be simple and explicit.
 
 ### Flow
 
-1. build request from session history
-2. send to provider
-3. if provider returns final content, finish
-4. if provider returns tool calls, validate them
-5. execute tools one by one
-6. append tool results to history
-7. repeat until final answer or limit reached
+1. drain any queued steering messages into history (before the next model call)
+2. auto-compact history if usage exceeds the configured threshold
+3. build request from session history
+4. send to provider
+5. if provider returns final content, finish (unless steering was drained, then continue)
+6. if provider returns tool calls, validate them
+7. execute tools one by one
+8. append tool results to history
+9. drain steering messages again (after tool results, before next model call)
+10. repeat until final answer or limit reached
 
 ### Limits
 
@@ -417,6 +435,7 @@ The loop should be simple and explicit.
 - max tool output bytes
 - per-tool timeout
 - per-provider-request timeout
+- auto-compaction at a configurable context-window threshold (default 90%, target 70%)
 
 ### Failure behavior
 
@@ -496,13 +515,18 @@ Events:
 
 ### `oi`
 - interactive terminal loop
-- shell-style line editor when attached to a TTY (`internal/lineedit`)
-- plain streaming output in the terminal flow — no fullscreen takeover
+- fullscreen TUI when attached to a TTY (alt screen, mouse-wheel scroll, overlays), built on `tide`
+- plain line-mode fallback outside a TTY
 - streaming by default
-- `/status` shows model, context, thinking, and session info on demand
+- `/status` shows model, context, thinking, session, and auto-compact info on demand
 - commands: `/help`, `/status`, `/login`, `/model`, `/stream`, `/think`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/exit`
-- arrow-key pickers for model, thinking level, and other choices
-- slash command picker: type `/` to browse commands
+- arrow-key overlay pickers for model, thinking level, session, and other choices
+- slash command hints: type `/` to browse commands, arrows to navigate, tab to fill
+- prompt history: up/down arrows recall previous inputs
+- steering: typing + enter while a turn is running queues a follow-up; it is injected at the next safe boundary (after current turn/tool results, before the next model call) rather than hard-aborting
+- mouse wheel scrolls the transcript; shift-drag (terminal-native) selects text
+- approval modal: when `approval_mode` is `prompt`, mutating actions pause and show a `y`/`n` overlay
+- auto-compaction: by default the session compacts at 90% of the context window before the next model call
 - provider switching is implicit via model selection
 - `/login` only stores auth; `/model` performs selection
 - `/compact` manually collapses the current session into a summary

@@ -11,7 +11,6 @@ Implemented and working in the new Go codebase:
   - `internal/config`
   - `internal/provider`
   - `internal/agent`
-  - `internal/lineedit`
   - `internal/chat`
   - `internal/tool`
   - `internal/workspace`
@@ -20,6 +19,7 @@ Implemented and working in the new Go codebase:
   - `internal/log`
   - `internal/oauth`
   - `internal/retrieval`
+  - `tide` (first-party terminal primitives dependency)
 - Config/auth:
   - XDG config/state paths
   - `config.json` and private `auth.json`
@@ -58,18 +58,21 @@ Implemented and working in the new Go codebase:
   - NDJSON stdio framing
   - prompt/state/provider/model commands
   - events for streaming, tools, errors, done
-- Line editor (`internal/lineedit`):
-  - shell-style prompt editing: cursor movement, home/end, backspace, delete
-  - history prev/next
-  - bracketed paste
-  - slash command picker: type `/` to browse, arrows to navigate, enter/tab to pick
-  - reusable arrow-key selector for `/model`, `/think`, `/stream`, `/tools`, `/autosave`, `/login`, `/session`
-  - dim styling for picker overlays
-  - line-mode fallback outside a TTY
+- Interactive TUI (`internal/chat/tui*.go`, built on `tide`):
+  - fullscreen alt-screen UI on a TTY, line-mode fallback otherwise
+  - editable prompt with cursor movement, home/end, backspace, multiline
+  - prompt history: up/down arrows recall previous inputs
+  - slash command hints: type `/` to browse, arrows to navigate, tab to fill
+  - arrow-key overlay pickers for `/model`, `/think`, `/stream`, `/tools`, `/autosave`, `/login`, `/session`
+  - mouse wheel scrolls the transcript; shift-drag selects text
+  - steering: type + enter while a turn is running queues a follow-up, injected at the next safe boundary (no hard abort)
+  - approval modal for mutating actions when `approval_mode` is `prompt`
+  - auto-compaction at 90% of the context window by default (configurable, can disable)
+  - render caching for streaming output; cached terminal size refreshed on SIGWINCH
 - Chat:
   - default `oi` mode
-  - plain streaming output in terminal flow — no fullscreen takeover
-  - `/status` command for model/context/thinking/session info on demand
+  - fullscreen TUI on a TTY (alt screen, overlays, mouse wheel), line-mode fallback otherwise
+  - `/status` command for model/context/thinking/auto-compact/session info on demand
   - `/help`, `/status`, `/login`, `/model`, `/stream`, `/think`, `/tools`, `/autosave`, `/new`, `/save`, `/session`, `/compact`, `/clear`, `/exit`
   - `/login` flow: choose `sub` or `api`, then provider
   - `/model` interactive arrow-key picker
@@ -155,9 +158,9 @@ The following plans came from open `oi-old` issues and should be considered post
 
 ### Status
 
-Implemented in `internal/lineedit`. The line editor provides:
-- arrow-key selector with filter typing
-- slash command picker (type `/` to browse)
+Implemented as overlay pickers in `internal/chat/tui_overlay.go` (built on `tide`). The TUI provides:
+- arrow-key selector with filter typing and scrolling
+- slash command hints (type `/` to browse)
 - reused by `/model`, `/think`, `/stream`, `/tools`, `/autosave`, `/login`, `/session`
 - dim styling for overlay text
 - line-mode numbered fallback outside a TTY
@@ -172,11 +175,11 @@ Partially done: `@` file completion exists through the completion hook. Fuzzy fi
 
 ### Status
 
-Built and removed. A fullscreen TUI was implemented and then reverted in favor of a shell-style line editor (`internal/lineedit`). The project does not want a fullscreen takeover app; plain terminal output with a small editable prompt layer is the intended model.
+Built and shipped. The interactive mode is now a fullscreen TUI (alt screen, mouse-wheel scroll, overlay pickers, approval modal) implemented in `internal/chat/tui*.go` on top of `tide`. This supersedes the earlier shell-style line editor. The `internal/lineedit` package no longer exists; line-editing primitives live in `tide`.
 
 ### Future
 
-If a richer terminal interface is ever needed, it should build on `internal/lineedit` rather than replace it. The non-goals remain: no panes, no transcript renderer, no custom viewport/scrollback system, no alternate-screen UI.
+Keep the TUI split by concern (`tui.go`, `tui_render.go`, `tui_input.go`, `tui_overlay.go`) and avoid growing `tui.go` back into a monolith. Heavier widgets, if ever needed, stay in `oi` rather than `tide` to keep `tide` minimal.
 
 ---
 

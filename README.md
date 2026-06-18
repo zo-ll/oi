@@ -2,7 +2,7 @@
 
 Tiny agent runtime for local workflows.
 
-`oi` is a small command-line agent built around simple protocols, safe local tools, and OpenAI-compatible providers. It is written in Go and intentionally avoids external runtime dependencies.
+`oi` is a small command-line agent built around simple protocols, safe local tools, and OpenAI-compatible providers. It is written in Go and has one first-party dependency, [`tide`](https://github.com/zo-ll/tide), for terminal primitives used by the interactive TUI. The core runtime packages are standard-library only.
 
 ## What it does
 
@@ -23,7 +23,7 @@ Tiny agent runtime for local workflows.
 - protocol-first interfaces
 - safe local tool execution
 - simple install/uninstall
-- no framework dependency
+- one first-party dependency (`tide`), stdlib-only core
 - useful from terminal, scripts, and external bridges
 
 ## Install
@@ -122,16 +122,18 @@ oi rpc                  # NDJSON stdio protocol
 
 ## Interactive mode
 
-When attached to a TTY, `oi` uses a small shell-style line editor (`internal/lineedit`):
+When attached to a TTY, `oi` runs a fullscreen TUI (alt screen, mouse-wheel scroll, overlay pickers) built on [`tide`](https://github.com/zo-ll/tide):
 
-- editable prompt with left/right cursor movement, home/end, backspace, delete
-- history prev/next
-- bracketed paste support
-- slash command picker: type `/` to see available commands, arrow keys to navigate, enter/tab to pick
-- arrow-key pickers for `/model`, `/think`, `/stream`, `/tools`, `/autosave`, `/login`, `/session`
-- plain streaming output in the terminal flow — no fullscreen takeover
-- shell scrollback remains usable
-- `/status` shows model, context usage, thinking level, and session info on demand
+- editable prompt with cursor movement, home/end, backspace, multiline
+- prompt history: up/down arrows recall previous inputs
+- slash command hints: type `/` to browse commands, arrows to navigate, tab to fill
+- arrow-key overlay pickers for `/model`, `/think`, `/stream`, `/tools`, `/autosave`, `/login`, `/session`
+- streaming output in the transcript area; mouse wheel scrolls
+- shift-drag selects text (terminal-native select, bypasses mouse capture)
+- steering: type + enter while a turn is running to queue a follow-up; it is injected at the next safe boundary, not a hard abort
+- approval modal: with `approval_mode: prompt`, mutating actions pause for a `y`/`n` overlay
+- auto-compaction: session compacts at 90% of the context window by default before the next model call
+- `/status` shows model, context usage, thinking level, auto-compact threshold, and session info
 - line-mode fallback outside a TTY
 
 Slash commands:
@@ -153,7 +155,7 @@ Slash commands:
 /exit
 ```
 
-Sessions autosave after successful turns and save on exit by default. Use `/compact` to collapse the current session into a summary.
+Sessions autosave after successful turns and save on exit by default. Use `/compact` to collapse the current session into a summary. Auto-compaction runs automatically at 90% of the context window; configure it with `agent.auto_compact_threshold` in `config.json` (set to `-1` to disable).
 
 ## Provider login
 
@@ -201,10 +203,12 @@ High-level shape:
 
 ```text
 cmd/oi            CLI commands
-internal/lineedit shell-style line editor and picker
-internal/chat     interactive chat loop and commands
+tide              terminal primitives (raw mode, alt screen, mouse, wrapping)
+internal/chat     interactive TUI, chat loop, commands, pickers, login
 internal/agent    agent loop and tool-call handling
 internal/provider OpenAI-compatible providers
+internal/oauth    ChatGPT/Codex OAuth login
+internal/retrieval lightweight code retrieval for file questions
 internal/tool     local tool registry
 internal/workspace workspace policy/safety
 internal/rpc      NDJSON stdio protocol
