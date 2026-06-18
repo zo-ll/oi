@@ -1,8 +1,11 @@
 package chat
 
 import (
+	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/zo-ll/tide"
 )
@@ -166,6 +169,166 @@ func (a *tuiApp) scrollPage(delta int) {
 		step = 1
 	}
 	a.scrollLines(delta * step)
+}
+
+var chatCommandList = []string{
+	"/help", "/login", "/model", "/stream", "/think", "/tools", "/autosave",
+	"/status", "/new", "/save", "/session", "/compact", "/clear", "/exit",
+}
+
+func chatCommands() []string {
+	return append([]string(nil), chatCommandList...)
+}
+
+func filterByPrefix(items []string, prefix string) []string {
+	prefix = strings.ToLower(prefix)
+	var out []string
+	for _, item := range items {
+		if strings.HasPrefix(strings.ToLower(item), "/") && strings.HasPrefix(strings.ToLower(strings.TrimPrefix(item, "/")), prefix) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func exactMatch(current string, matches []string) string {
+	if len(matches) == 0 {
+		return ""
+	}
+	_, _, token, ok := trailingToken(current)
+	if !ok {
+		return ""
+	}
+	query := strings.TrimSpace(strings.TrimPrefix(token, strings.ToLower(string(token[:1]))))
+	query = strings.ToLower(query)
+	if query == "" {
+		return ""
+	}
+	var exact string
+	count := 0
+	for _, match := range matches {
+		lower := strings.ToLower(match)
+		if !strings.HasPrefix(token, "@") {
+			if lower == strings.ToLower(token) {
+				exact = match
+				count++
+			}
+		} else {
+			slashed := strings.ToLower(filepath.ToSlash(match))
+			if slashed == query {
+				exact = match
+				count++
+			}
+			if strings.ToLower(filepath.Base(slashed)) == query {
+				if exact == "" {
+					exact = match
+				}
+			}
+		}
+	}
+	if count == 1 && exact != "" {
+		return exact
+	}
+	return ""
+}
+
+func replaceTrailingToken(current, replacement string) string {
+	start, end, _, ok := trailingToken(current)
+	if !ok {
+		return current
+	}
+	return current[:start] + replacement + current[end:]
+}
+
+func liveHint(matches []string) string {
+	if len(matches) == 0 {
+		return ""
+	}
+	if len(matches) == 1 {
+		return "tab → " + matches[0]
+	}
+	return fmt.Sprintf("%d matches  tab→pick", len(matches))
+}
+
+func pickerHint(matches []string, index int) string {
+	if len(matches) == 0 {
+		return ""
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(matches) {
+		index = len(matches) - 1
+	}
+	shown := matches
+	if len(shown) > maxCompletionMatchesShown {
+		start := index - maxCompletionMatchesShown/2
+		if start < 0 {
+			start = 0
+		}
+		if start+maxCompletionMatchesShown > len(matches) {
+			start = len(matches) - maxCompletionMatchesShown
+		}
+		if start < 0 {
+			start = 0
+		}
+		shown = shown[start : start+maxCompletionMatchesShown]
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%d matches", len(matches)))
+	b.WriteString("  up/down nav  enter pick\n")
+	for _, match := range shown {
+		marker := "  "
+		if strings.EqualFold(match, matches[index]) {
+			marker = "> "
+		}
+		fmt.Fprintf(&b, "%s%s\n", marker, match)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func filterPickerItems(items []string, query string) []string {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return append([]string(nil), items...)
+	}
+	var out []string
+	for _, item := range items {
+		if strings.Contains(strings.ToLower(item), query) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func formatCompletionMatches(matches []string) string {
+	if len(matches) == 0 {
+		return ""
+	}
+	shown := matches
+	if len(shown) > maxCompletionMatchesShown {
+		shown = shown[:maxCompletionMatchesShown]
+	}
+	var b strings.Builder
+	b.WriteString("matches:")
+	for i, match := range shown {
+		fmt.Fprintf(&b, "\n %d. %s", i+1, match)
+	}
+	return b.String()
+}
+
+func trailingToken(s string) (start, end int, token string, ok bool) {
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return 0, 0, "", false
+	}
+	end = len(runes)
+	start = end
+	for start > 0 && !unicode.IsSpace(runes[start-1]) {
+		start--
+	}
+	token = string(runes[start:end])
+	return start, end, token, token != ""
 }
 
 func (a *tuiApp) commandHints() []string {

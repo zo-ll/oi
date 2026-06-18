@@ -110,6 +110,136 @@ func runNonStreamingTurnLine(out io.Writer, state *chatState, line string) {
 	state.autosaveSession(out, func(msg string) { fmt.Fprintln(out, msg) })
 }
 
+func (a *tuiApp) runTurn(line string) {
+	if a.running {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.cancel = cancel
+	a.running = true
+	a.status = "thinking"
+	a.render()
+	streaming := a.state.streaming
+	go func() {
+		var err error
+		if streaming {
+			err = a.runStreamingTurn(ctx, line)
+		} else {
+			err = a.runNonStreamingTurn(ctx, line)
+		}
+		a.post(func() { a.finishTurn(line, err) })
+	}()
+}
+
+func (a *tuiApp) finishTurn(line string, runErr error) {
+	_ = line
+	if a.cancel != nil {
+		a.cancel()
+	}
+	a.cancel = nil
+	a.running = false
+	a.status = ""
+	if runErr != nil && runErr != context.Canceled {
+		a.addBlock("error", runErr.Error())
+	}
+	if len(a.steerQueue) > 0 {
+		next := a.steerQueue[0]
+		a.steerQueue = a.steerQueue[1:]
+		a.runTurn(next)
+		return
+	}
+	a.render()
+}
+
+func (a *tuiApp) runStreamingTurn(ctx context.Context, line string) error {
+	currentIdx := -1
+	var stepDraft []int
+	renderer := &taggedStreamRenderer{}
+	_, runErr := a.state.rt.RunOnceStreamObserved(ctx, line, agent.StreamObserver{Delta: func(delta string, reasoning bool) {
+		a.post(func() {
+			if reasoning {
+				a.appendStreamBlock("thinking", cleanDisplayText(delta), &currentIdx, &stepDraft)
+				a.renderSoon()
+				return
+			}
+			for _, seg := range renderer.Push(delta, false) {
+				if seg.reasoning {
+					a.appendStreamBlock("thinking", seg.text, &currentIdx, &stepDraft)
+					continue
+				}
+				a.appendStreamBlock("assistant", seg.text, &currentIdx, &stepDraft)
+			}
+			a.renderSoon()
+		})
+	}, StepDone: func(toolCalls bool) {
+		_ = toolCalls
+		a.post(func() {
+			currentIdx = -1
+			stepDraft = nil
+			renderer = &taggedStreamRenderer{}
+			a.render()
+		})
+	}})
+	a.post(func() {
+		for _, seg := range renderer.Flush() {
+			if seg.reasoning {
+				a.appendStreamBlock("thinking", seg.text, &currentIdx, &stepDraft)
+			} else {
+				a.appendStreamBlock("assistant", seg.text, &currentIdx, &stepDraft)
+			}
+		}
+	})
+	if runErr != nil {
+		return runErr
+	}
+	a.state.autosaveSession(a, func(msg string) { a.post(func() { a.addBlock("error", msg) }) })
+	return nil
+}
+
+func (a *tuiApp) appendStreamBlock(kind, text string, currentIdx *int, stepDraft *[]int) {
+	if text == "" {
+		return
+	}
+	if *currentIdx >= 0 && *currentIdx < len(a.blocks) && a.blocks[*currentIdx].kind == kind {
+		a.blocks[*currentIdx].text += text
+		a.blocks[*currentIdx].wrapWidth = 0
+		a.blocks[*currentIdx].wrapped = nil
+		return
+	}
+	idx := a.addBlock(kind, text)
+	*currentIdx = idx
+	*stepDraft = append(*stepDraft, idx)
+}
+
+func (a *tuiApp) runNonStreamingTurn(ctx context.Context, line string) error {
+	resp, runErr := a.state.rt.RunOnce(ctx, line)
+	if runErr != nil {
+		return runErr
+	}
+	a.post(func() {
+		if last := lastAssistantMessage(a.state.rt); last != nil && strings.TrimSpace(last.Reasoning) != "" {
+			a.addBlock("thinking", cleanDisplayText(last.Reasoning))
+		}
+		a.addBlock("assistant", cleanDisplayText(resp))
+	})
+	a.state.autosaveSession(a, func(msg string) { a.post(func() { a.addBlock("error", msg) }) })
+	return nil
+}
+
+func (a *tuiApp) drainSteering() []string {
+	ch := make(chan []string, 1)
+	a.post(func() {
+		out := append([]string(nil), a.steerQueue...)
+		a.steerQueue = nil
+		if len(out) > 0 {
+			a.status = "thinking"
+			a.render()
+		}
+		ch <- out
+	})
+	return <-ch
+}
+
 type responseSegment struct {
 	text      string
 	reasoning bool

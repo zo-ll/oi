@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/config"
@@ -217,4 +220,184 @@ func exitChat(out io.Writer, rt *agent.Runtime, sel config.Selection, autosave b
 		fmt.Fprintln(out, "session saved")
 	}
 	return nil
+}
+
+func (c *completionContext) workspaceFiles() ([]string, error) {
+	if c == nil {
+		return nil, nil
+	}
+	if c.fileList != nil {
+		return c.fileList, nil
+	}
+	root := c.workspaceRoot
+	if root == "" {
+		return nil, nil
+	}
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if path == root {
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if shouldSkipPickerDir(name) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if shouldSkipPickerFile(name) {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		out = append(out, rel)
+		if len(out) >= 5000 {
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if err != nil && err != fs.SkipAll {
+		return nil, err
+	}
+	sort.Strings(out)
+	c.fileList = out
+	return out, nil
+}
+
+func shouldSkipPickerDir(name string) bool {
+	switch name {
+	case ".git", ".hg", ".svn", "node_modules", "dist", "build", "tmp", "vendor", ".next", "coverage":
+		return true
+	default:
+		return strings.HasPrefix(name, ".cache")
+	}
+}
+
+func shouldSkipPickerFile(name string) bool {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, ".png"), strings.HasSuffix(lower, ".jpg"), strings.HasSuffix(lower, ".jpeg"), strings.HasSuffix(lower, ".gif"), strings.HasSuffix(lower, ".webp"), strings.HasSuffix(lower, ".pdf"), strings.HasSuffix(lower, ".zip"), strings.HasSuffix(lower, ".gz"), strings.HasSuffix(lower, ".tar"), strings.HasSuffix(lower, ".ico"), strings.HasSuffix(lower, ".woff"), strings.HasSuffix(lower, ".woff2"), strings.HasSuffix(lower, ".ttf"), strings.HasSuffix(lower, ".bin"):
+		return true
+	default:
+		return false
+	}
+}
+
+func fuzzyFileMatches(query string, files []string, limit int) []string {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return nil
+	}
+	type scored struct {
+		path  string
+		score int
+	}
+	var scoredFiles []scored
+	for _, path := range files {
+		score := scoreFileMatch(query, path)
+		if score > 0 {
+			scoredFiles = append(scoredFiles, scored{path: path, score: score})
+		}
+	}
+	sort.SliceStable(scoredFiles, func(i, j int) bool {
+		if scoredFiles[i].score != scoredFiles[j].score {
+			return scoredFiles[i].score > scoredFiles[j].score
+		}
+		return scoredFiles[i].path < scoredFiles[j].path
+	})
+	if limit > 0 && len(scoredFiles) > limit {
+		scoredFiles = scoredFiles[:limit]
+	}
+	out := make([]string, 0, len(scoredFiles))
+	for _, item := range scoredFiles {
+		out = append(out, item.path)
+	}
+	return out
+}
+
+func scoreFileMatch(query, path string) int {
+	pathLower := strings.ToLower(filepath.ToSlash(path))
+	baseLower := strings.ToLower(filepath.Base(pathLower))
+	score := 0
+	switch {
+	case baseLower == query:
+		score += 200
+	case strings.Contains(baseLower, query):
+		score += 140
+	case strings.Contains(pathLower, query):
+		score += 100
+	}
+	if subseq := subsequenceScore(query, baseLower); subseq > 0 {
+		score += subseq + 40
+	}
+	if subseq := subsequenceScore(query, pathLower); subseq > 0 {
+		score += subseq
+	}
+	for _, token := range splitQueryTokens(query) {
+		switch {
+		case token == "":
+		case baseLower == token:
+			score += 40
+		case strings.Contains(baseLower, token):
+			score += 24
+		case strings.Contains(pathLower, token):
+			score += 16
+		}
+	}
+	if strings.Count(pathLower, "/") == 0 {
+		score += 5
+	}
+	return score
+}
+
+func subsequenceScore(query, target string) int {
+	if query == "" || target == "" {
+		return 0
+	}
+	qi := 0
+	gaps := 0
+	prev := -1
+	for i, r := range target {
+		if qi >= len(query) {
+			break
+		}
+		if byte(r) != query[qi] {
+			continue
+		}
+		if prev >= 0 {
+			gaps += i - prev - 1
+		}
+		prev = i
+		qi++
+	}
+	if qi != len(query) {
+		return 0
+	}
+	score := len(query)*6 - gaps
+	if score < 1 {
+		return 1
+	}
+	return score
+}
+
+func splitQueryTokens(query string) []string {
+	parts := strings.FieldsFunc(query, func(r rune) bool {
+		return r == '/' || r == '-' || r == '_' || r == '.' || unicode.IsSpace(r)
+	})
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range parts {
+		part = strings.TrimSpace(strings.ToLower(part))
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	return out
 }

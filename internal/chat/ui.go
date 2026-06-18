@@ -11,9 +11,11 @@ import (
 
 	"github.com/zo-ll/oi/internal/agent"
 	"github.com/zo-ll/oi/internal/provider"
-	"github.com/zo-ll/oi/internal/retrieval"
 	"github.com/zo-ll/oi/internal/tool"
 )
+
+// UI wiring: tool-verbosity policy, runtime callback hooks, tool-call summary
+// lines, thinking-level helpers, model lookup, and the activity spinner.
 
 type toolVerbosity string
 
@@ -223,47 +225,24 @@ func formatToolResultLine(call tool.Call, result tool.Result) string {
 	return line
 }
 
-type styledWriter interface {
-	Styled(kind, text string) string
-}
-
-type clearer interface {
-	ClearScreen()
-}
-
-type statusWriter interface {
-	ShowStatus(text string)
-	ClearStatus()
-}
-
-func styleText(out io.Writer, kind, text string) string {
-	if sw, ok := out.(styledWriter); ok {
-		return sw.Styled(kind, text)
+func parseToolVerbosity(arg string) (toolVerbosity, error) {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "", "errors":
+		return toolVerbosityErrors, nil
+	case "off":
+		return toolVerbosityOff, nil
+	case "on":
+		return toolVerbosityOn, nil
+	default:
+		return "", fmt.Errorf("usage: /tools [off|errors|on]")
 	}
-	return text
 }
 
-func printHelpLine(out io.Writer, left, right string) {
-	fmt.Fprintf(out, "%-22s %s\n", styleText(out, "command", left), right)
-}
-
-func clearScreen(out io.Writer) {
-	if c, ok := out.(clearer); ok {
-		c.ClearScreen()
-		return
+func onOff(v bool) string {
+	if v {
+		return "on"
 	}
-	fmt.Fprint(out, "\x1b[2J\x1b[H")
-}
-
-func formatStatusContextUsage(window int, usage provider.Usage) string {
-	if window <= 0 {
-		return ""
-	}
-	if usage.InputTokens <= 0 {
-		return "0 / " + formatCount(window) + " (0%)"
-	}
-	pct := usage.InputTokens * 100 / window
-	return fmt.Sprintf("%s / %s (%d%%)", formatCount(usage.InputTokens), formatCount(window), pct)
+	return "off"
 }
 
 func supportedThinkingLevels(model provider.Model) []string {
@@ -333,146 +312,6 @@ func lookupModelInfo(p provider.Provider, model string) provider.Model {
 		}
 	}
 	return provider.Model{}
-}
-
-func formatRetrievalNotice(notice retrieval.Notice) string {
-	if notice.SnippetCount <= 0 {
-		return ""
-	}
-	files := "files"
-	if notice.FileCount == 1 {
-		files = "file"
-	}
-	return fmt.Sprintf("retrieved %d snippets from %d %s", notice.SnippetCount, notice.FileCount, files)
-}
-
-func formatCount(n int) string {
-	switch {
-	case n >= 1000000:
-		return fmt.Sprintf("%.1fM", float64(n)/1000000)
-	case n >= 1000:
-		return fmt.Sprintf("%.1fk", float64(n)/1000)
-	default:
-		return fmt.Sprintf("%d", n)
-	}
-}
-
-var displayReplacer = strings.NewReplacer(
-	"**", "",
-	"__", "",
-	"`", "",
-	"\u00a0", " ",
-	"â€™", "’",
-	"â€œ", "“",
-	"â€", "”",
-	"â€˜", "‘",
-	"â€”", "—",
-	"â€“", "–",
-	"â€¦", "…",
-	"ÔÇÖ", "’",
-	"ÔÇ£", "“",
-	"ÔÇ¥", "”",
-	"ÔÇö", "—",
-	"ÔÇô", "–",
-)
-
-type outputFormatter struct {
-	tail string
-}
-
-func (f *outputFormatter) Push(text string) string {
-	f.tail += text
-	runes := []rune(f.tail)
-	if len(runes) <= 6 {
-		return ""
-	}
-	flush := string(runes[:len(runes)-6])
-	f.tail = string(runes[len(runes)-6:])
-	return cleanDisplayText(flush)
-}
-
-func (f *outputFormatter) Flush() string {
-	out := cleanDisplayText(f.tail)
-	f.tail = ""
-	return out
-}
-
-func cleanDisplayText(text string) string {
-	text = stripTerminalEscapes(text)
-	text = displayReplacer.Replace(text)
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "# "):
-			lines[i] = strings.Replace(line, "# ", "", 1)
-		case strings.HasPrefix(trimmed, "## "):
-			lines[i] = strings.Replace(line, "## ", "", 1)
-		case strings.HasPrefix(trimmed, "### "):
-			lines[i] = strings.Replace(line, "### ", "", 1)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-func stripTerminalEscapes(text string) string {
-	out := make([]rune, 0, len(text))
-	runes := []rune(text)
-	for i := 0; i < len(runes); i++ {
-		if runes[i] != 0x1b {
-			out = append(out, runes[i])
-			continue
-		}
-		if i+1 >= len(runes) {
-			break
-		}
-		i++
-		switch runes[i] {
-		case '[':
-			for i+1 < len(runes) {
-				i++
-				if runes[i] >= 0x40 && runes[i] <= 0x7e {
-					break
-				}
-			}
-		case ']':
-			for i+1 < len(runes) {
-				i++
-				if runes[i] == '\a' {
-					break
-				}
-				if runes[i] == 0x1b && i+1 < len(runes) && runes[i+1] == '\\' {
-					i++
-					break
-				}
-			}
-		default:
-			// Drop one-character escape sequences as well.
-		}
-	}
-	return string(out)
-}
-
-func parseToolVerbosity(arg string) (toolVerbosity, error) {
-	switch strings.ToLower(strings.TrimSpace(arg)) {
-	case "", "errors":
-		return toolVerbosityErrors, nil
-	case "off":
-		return toolVerbosityOff, nil
-	case "on":
-		return toolVerbosityOn, nil
-	default:
-		return "", fmt.Errorf("usage: /tools [off|errors|on]")
-	}
-}
-
-func onOff(v bool) string {
-	if v {
-		return "on"
-	}
-	return "off"
 }
 
 type activityIndicator struct {
