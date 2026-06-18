@@ -317,6 +317,16 @@ func handleChatCommand(deps Dependencies, cfg *config.Config, sel config.Selecti
 	}
 }
 
+func autoCompactLabel(threshold int) string {
+	if threshold < 0 {
+		return "off"
+	}
+	if threshold == 0 {
+		return "90% (default)"
+	}
+	return fmt.Sprintf("%d%%", threshold)
+}
+
 func printStatus(out io.Writer, sel config.Selection, rt *agent.Runtime, streaming bool, autosave bool, tools toolVerbosity) {
 	root := ""
 	model := sel.Model
@@ -326,12 +336,14 @@ func printStatus(out io.Writer, sel config.Selection, rt *agent.Runtime, streami
 	thinking := "off"
 	thinkingSupported := false
 	sessionMessages := 0
+	autoCompact := "90%"
 	if rt != nil {
 		root = rt.Policy.Root
 		contextWindow = rt.ContextWindow
 		usage = rt.LastUsage
 		thinking = valueOr(rt.ThinkingLevel, "off")
 		thinkingSupported = rt.ThinkingSupported
+		autoCompact = autoCompactLabel(rt.AutoCompactThreshold)
 		if rt.Provider != nil && rt.Provider.Model() != "" {
 			model = rt.Provider.Model()
 		}
@@ -352,6 +364,7 @@ func printStatus(out io.Writer, sel config.Selection, rt *agent.Runtime, streami
 	fmt.Fprintf(out, "streaming: %s\n", onOff(streaming))
 	fmt.Fprintf(out, "autosave: %s\n", onOff(autosave))
 	fmt.Fprintf(out, "tools: %s\n", tools)
+	fmt.Fprintf(out, "auto-compact: %s\n", autoCompact)
 	fmt.Fprintf(out, "session messages: %d\n", sessionMessages)
 }
 

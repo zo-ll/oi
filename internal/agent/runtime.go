@@ -34,6 +34,7 @@ type Runtime struct {
 	ThinkingSupported       bool
 	SupportedThinkingLevels []string
 	ThinkingLevelValues     map[string]string
+	AutoCompactThreshold    int
 	LastUsage               provider.Usage
 	RecentRetrievedPaths    []string
 	SystemPrompt            string
@@ -42,6 +43,8 @@ type Runtime struct {
 	OnModelStop             func()
 	OnToolStart             func(tool.Call)
 	OnToolResult            func(tool.Call, tool.Result)
+	OnCompact               func()
+	DrainSteering           func() []string
 	Logger                  *ilog.Logger
 }
 
@@ -99,6 +102,9 @@ func (r *Runtime) run(ctx context.Context, input string, obs StreamObserver, str
 	repeatedToolErr := 0
 
 	for step := 0; step < r.MaxSteps; step++ {
+		if r.maybeAutoCompact() {
+			retrievalContext = ""
+		}
 		history := r.providerHistory(retrievalContext)
 		r.logEvent("provider_request", map[string]any{"step": step + 1, "streaming": streaming, "message_count": len(history)})
 		if r.OnModelStart != nil {
@@ -129,6 +135,9 @@ func (r *Runtime) run(ctx context.Context, input string, obs StreamObserver, str
 			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning, Kind: "talk"})
 			r.Session.UpdatedAt = time.Now().UTC()
 			r.logEvent("assistant_final", map[string]any{"step": step + 1, "content": resp.Content})
+			if r.appendSteeringMessages() {
+				continue
+			}
 			return resp.Content, nil
 		}
 		if obs.StepDone != nil {
@@ -196,11 +205,33 @@ func (r *Runtime) run(ctx context.Context, input string, obs StreamObserver, str
 			}
 			r.Session.Messages = append(r.Session.Messages, session.Message{Role: "tool", ToolCallID: tc.ID, Content: string(payload), Kind: "tool_result"})
 		}
+		r.appendSteeringMessages()
 	}
 
 	err := fmt.Errorf("max steps exceeded (%d)", r.MaxSteps)
 	r.logEvent("agent_error", map[string]any{"error": err.Error()})
 	return "", err
+}
+
+func (r *Runtime) appendSteeringMessages() bool {
+	if r == nil || r.DrainSteering == nil {
+		return false
+	}
+	messages := r.DrainSteering()
+	if len(messages) == 0 {
+		return false
+	}
+	appended := false
+	for _, text := range messages {
+		text = stringsTrim(text)
+		if text == "" {
+			continue
+		}
+		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: text, Kind: "talk"})
+		r.logEvent("user_steer", map[string]any{"input": text})
+		appended = true
+	}
+	return appended
 }
 
 func (r *Runtime) logEvent(kind string, fields map[string]any) {
@@ -434,13 +465,63 @@ func (r *Runtime) CompactSession() (bool, int) {
 		return false, 0
 	}
 	budget := r.compactionBudget()
-	compacted, changed := session.CompactMessages(r.Session.Messages, budget)
+	compacted, changed := session.CompactMessages(r.Session.Messages, r.estimatedContextUsage(), budget)
 	if !changed {
 		return false, budget
 	}
 	r.Session.Messages = compacted
 	r.logEvent("session_compacted", map[string]any{"message_count": len(compacted), "budget_tokens": budget})
 	return true, budget
+}
+
+func (r *Runtime) maybeAutoCompact() bool {
+	if r == nil || r.Session == nil {
+		return false
+	}
+	threshold := r.autoCompactThreshold()
+	if threshold <= 0 {
+		return false
+	}
+	window := r.contextWindow()
+	if window <= 0 {
+		return false
+	}
+	used := r.estimatedContextUsage()
+	if used <= 0 {
+		return false
+	}
+	if used*100 < window*threshold {
+		return false
+	}
+	if r.OnCompact != nil {
+		r.OnCompact()
+	}
+	changed, _ := r.CompactSession()
+	r.logEvent("auto_compact", map[string]any{"threshold_pct": threshold, "window": window, "used": used, "changed": changed})
+	if changed {
+		r.LastUsage = provider.Usage{InputTokens: session.EstimateTokens(r.Session.Messages)}
+	}
+	return changed
+}
+
+func (r *Runtime) autoCompactThreshold() int {
+	if r.AutoCompactThreshold != 0 {
+		return r.AutoCompactThreshold
+	}
+	return 90
+}
+
+func (r *Runtime) estimatedContextUsage() int {
+	if r == nil {
+		return 0
+	}
+	if r.LastUsage.InputTokens > 0 {
+		return r.LastUsage.InputTokens
+	}
+	if r.Session != nil {
+		return session.EstimateTokens(r.Session.Messages)
+	}
+	return 0
 }
 
 func (r *Runtime) compactionBudget() int {

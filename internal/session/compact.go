@@ -43,14 +43,17 @@ func ForceCompactMessages(messages []Message) ([]Message, bool) {
 	return []Message{{Role: "system", Kind: "summary", Content: summary}}, true
 }
 
-func CompactMessages(messages []Message, budgetTokens int) ([]Message, bool) {
+func CompactMessages(messages []Message, currentUsage, budgetTokens int) ([]Message, bool) {
 	if len(messages) <= minCompactTailMessages {
 		return messages, false
 	}
 	if budgetTokens <= 0 {
 		budgetTokens = defaultCompactBudgetTokens
 	}
-	if EstimateTokens(messages) <= budgetTokens {
+	if currentUsage <= 0 {
+		currentUsage = EstimateTokens(messages)
+	}
+	if currentUsage <= budgetTokens {
 		return messages, false
 	}
 

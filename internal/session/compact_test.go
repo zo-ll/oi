@@ -16,7 +16,7 @@ func TestCompactMessagesCreatesSummaryAndKeepsRecentTail(t *testing.T) {
 		{Role: "user", Kind: "talk", Content: "latest user"},
 		{Role: "assistant", Kind: "talk", Content: "latest assistant"},
 	}
-	compacted, changed := CompactMessages(messages, 10)
+	compacted, changed := CompactMessages(messages, 0, 10)
 	if !changed {
 		t.Fatal("expected compaction")
 	}
@@ -36,7 +36,7 @@ func TestCompactMessagesCreatesSummaryAndKeepsRecentTail(t *testing.T) {
 
 func TestCompactMessagesNoopWhenWithinBudget(t *testing.T) {
 	messages := []Message{{Role: "user", Content: "hi"}, {Role: "assistant", Content: "hello"}}
-	compacted, changed := CompactMessages(messages, 1000)
+	compacted, changed := CompactMessages(messages, 0, 1000)
 	if changed {
 		t.Fatal("unexpected compaction")
 	}

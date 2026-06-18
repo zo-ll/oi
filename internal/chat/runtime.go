@@ -31,14 +31,22 @@ type commonOptions struct {
 	rest     []string
 }
 
+type approvalPrompter interface {
+	Approve(action, target string) (bool, error)
+}
+
 func buildRuntime(cfg *config.Config, sel config.Selection, p provider.Provider, root string, in io.Reader, out io.Writer, logger *ilog.Logger) *agent.Runtime {
 	policy := workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalMode(cfg.Agent.ApprovalMode)}
-	tools := tool.NewBuiltinRegistry(tool.Options{
+	toolOpts := tool.Options{
 		Policy:         policy,
 		MaxOutputBytes: cfg.Agent.MaxToolOutputBytes,
 		PromptInput:    in,
 		PromptOutput:   out,
-	})
+	}
+	if prompter, ok := out.(approvalPrompter); ok {
+		toolOpts.Approve = prompter.Approve
+	}
+	tools := tool.NewBuiltinRegistry(toolOpts)
 	model := sel.Model
 	if p != nil && p.Model() != "" {
 		model = p.Model()
@@ -59,6 +67,7 @@ func buildRuntime(cfg *config.Config, sel config.Selection, p provider.Provider,
 		ThinkingSupported:       info.SupportsThinking,
 		SupportedThinkingLevels: supportedThinkingLevels(info),
 		ThinkingLevelValues:     info.ThinkingLevelValues,
+		AutoCompactThreshold:    cfg.Agent.AutoCompactThreshold,
 		Logger:                  logger,
 	}
 }

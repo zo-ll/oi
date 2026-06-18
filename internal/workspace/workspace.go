@@ -119,8 +119,7 @@ func CheckCommand(cmd string) error {
 
 func IsReadOnlyCommand(cmd string) bool {
 	trimmed := strings.TrimSpace(cmd)
-	trimmed = strings.ReplaceAll(trimmed, "2>&1", "")
-	trimmed = strings.ReplaceAll(trimmed, "1>&2", "")
+	trimmed = stripReadOnlyRedirections(trimmed)
 	if trimmed == "" || strings.Contains(trimmed, ">") || strings.Contains(trimmed, "<") || hasShellExpansion(trimmed) {
 		return false
 	}
@@ -162,6 +161,21 @@ func IsReadOnlyCommand(cmd string) bool {
 	return true
 }
 
+func stripReadOnlyRedirections(cmd string) string {
+	replacer := strings.NewReplacer(
+		"2>/dev/null", "",
+		"2> /dev/null", "",
+		"1>/dev/null", "",
+		"1> /dev/null", "",
+		">/dev/null", "",
+		"> /dev/null", "",
+		"2>&1", "",
+		"1>&2", "",
+		"<&0", "",
+	)
+	return strings.TrimSpace(replacer.Replace(cmd))
+}
+
 func hasShellExpansion(cmd string) bool {
 	return strings.ContainsAny(cmd, "`$~")
 }
@@ -189,15 +203,7 @@ func unsafeReadOnlyArg(arg string) bool {
 	if arg == "" {
 		return false
 	}
-	if filepath.IsAbs(arg) || strings.HasPrefix(arg, "~") || strings.Contains(arg, "$") {
-		return true
-	}
-	for _, part := range strings.FieldsFunc(arg, func(r rune) bool { return r == '/' || r == '\\' }) {
-		if part == ".." {
-			return true
-		}
-	}
-	return false
+	return strings.ContainsAny(arg, "`$~><")
 }
 
 func rmForceRecursiveRoot(args []string) bool {

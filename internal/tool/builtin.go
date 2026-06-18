@@ -25,6 +25,7 @@ type Options struct {
 	MaxOutputBytes int
 	PromptInput    io.Reader
 	PromptOutput   io.Writer
+	Approve        func(action, target string) (bool, error)
 }
 
 // NewBuiltinRegistry returns the built-in oi toolset.
@@ -62,6 +63,16 @@ func (o Options) approve(action, target string) error {
 	case workspace.ApprovalNever:
 		return fmt.Errorf("approval mode forbids %s", action)
 	case workspace.ApprovalPrompt:
+		if o.Approve != nil {
+			ok, err := o.Approve(action, target)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("approval denied for %s", action)
+			}
+			return nil
+		}
 		if o.PromptInput == nil || o.PromptOutput == nil {
 			return fmt.Errorf("approval required for %s", action)
 		}

@@ -116,6 +116,82 @@ func TestRunOnceFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestRunOnceDrainsSteeringBeforeNextModelCall(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "first"}, {Content: "steered"}}}
+	drained := false
+	r := &Runtime{
+		Provider: p,
+		Tools:    tool.NewRegistry(),
+		Policy:   workspace.Policy{Root: "."},
+		MaxSteps: 3,
+		DrainSteering: func() []string {
+			if drained {
+				return nil
+			}
+			drained = true
+			return []string{"change course"}
+		},
+	}
+	out, err := r.RunOnce(context.Background(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "steered" {
+		t.Fatalf("out = %q", out)
+	}
+	if len(p.requests) != 2 {
+		t.Fatalf("requests = %d", len(p.requests))
+	}
+	last := p.requests[1].Messages[len(p.requests[1].Messages)-1]
+	if last.Role != "user" || last.Content != "change course" {
+		t.Fatalf("last message = %+v", last)
+	}
+}
+
+func TestMaybeAutoCompactTriggersAtThreshold(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m"}
+	r := &Runtime{
+		Provider:             p,
+		Tools:                tool.NewRegistry(),
+		Policy:               workspace.Policy{Root: "."},
+		Session:              session.New("fake", "m", "."),
+		ContextWindow:        100000,
+		AutoCompactThreshold: 90,
+		LastUsage:            provider.Usage{InputTokens: 95000},
+	}
+	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: strings.Repeat("x", 5000)})
+	r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: strings.Repeat("y", 5000)})
+	for i := 0; i < 6; i++ {
+		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "user", Content: "more " + strings.Repeat("z", 800)})
+		r.Session.Messages = append(r.Session.Messages, session.Message{Role: "assistant", Content: "ok " + strings.Repeat("w", 800)})
+	}
+	if !r.maybeAutoCompact() {
+		t.Fatal("expected auto-compact to trigger")
+	}
+	if len(r.Session.Messages) == 0 || r.Session.Messages[0].Kind != "summary" {
+		t.Fatalf("expected compacted summary at head: %+v", r.Session.Messages)
+	}
+	if session.EstimateTokens(r.Session.Messages) >= 95000 {
+		t.Fatalf("estimated tokens not reduced: %d", session.EstimateTokens(r.Session.Messages))
+	}
+}
+
+func TestMaybeAutoCompactSkipsBelowThreshold(t *testing.T) {
+	p := &fakeProvider{name: "fake", model: "m"}
+	r := &Runtime{
+		Provider:             p,
+		Tools:                tool.NewRegistry(),
+		Policy:               workspace.Policy{Root: "."},
+		Session:              session.New("fake", "m", "."),
+		ContextWindow:        100000,
+		AutoCompactThreshold: 90,
+		LastUsage:            provider.Usage{InputTokens: 1000},
+	}
+	if r.maybeAutoCompact() {
+		t.Fatal("expected no auto-compact below threshold")
+	}
+}
+
 func TestRunOnceStreamSuppressesContentFromToolPlanningStep(t *testing.T) {
 	callArgs := json.RawMessage(`{"text":"ok"}`)
 	p := &fakeProvider{name: "fake", model: "m", streamResponses: [][]provider.Event{
@@ -301,7 +377,7 @@ func TestRunOnceSkipsRetrievalForChitChat(t *testing.T) {
 
 func TestRunOnceDoesNotCompactAutomatically(t *testing.T) {
 	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "done"}}}
-	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, MaxSteps: 2, ContextWindow: 100}
+	r := &Runtime{Provider: p, Tools: tool.NewRegistry(), Policy: workspace.Policy{Root: "."}, MaxSteps: 2, ContextWindow: 100, AutoCompactThreshold: -1}
 	r.Session = session.New("fake", "m", ".")
 	for i := 0; i < 10; i++ {
 		r.Session.Messages = append(r.Session.Messages,

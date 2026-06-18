@@ -25,6 +25,7 @@ type AgentConfig struct {
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds,omitempty"`
 	ApprovalMode          string `json:"approval_mode,omitempty"`
 	ReasoningEffort       string `json:"reasoning_effort,omitempty"`
+	AutoCompactThreshold  int    `json:"auto_compact_threshold,omitempty"`
 }
 
 // Config is the top-level user configuration document.
