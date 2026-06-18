@@ -194,10 +194,6 @@ func (t *Terminal) Size() Size {
 	return t.size
 }
 
-func (t *Terminal) NewEditor(prompt string, complete Completer) *Editor {
-	return New(t.In, t.Out, prompt, complete)
-}
-
 // WatchResize refreshes the cached terminal size on SIGWINCH and calls redraw
 // (which may be nil) after each update. Returns a stop function. This keeps
 // Size() cheap (no per-render stty subprocess) while staying correct on resize.
