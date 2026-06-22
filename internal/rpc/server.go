@@ -167,7 +167,12 @@ func (s *Server) prompt(req Request) error {
 }
 
 func (s *Server) runPrompt(ctx context.Context, id, message string, runtime *agent.Runtime) {
-	out, err := runtime.RunOnce(ctx, message)
+	out, err := runtime.RunOnceStreamObserved(ctx, message, agent.StreamObserver{Delta: func(delta string, reasoning bool) {
+		if reasoning || strings.TrimSpace(delta) == "" {
+			return
+		}
+		_ = s.emit(Event{Type: "assistant_delta", ID: id, Delta: delta})
+	}, StepDone: func(bool) {}})
 
 	s.mu.Lock()
 	s.busy = false
@@ -181,7 +186,6 @@ func (s *Server) runPrompt(ctx context.Context, id, message string, runtime *age
 		_ = s.emit(Event{Type: "done", ID: id})
 		return
 	}
-	_ = s.emit(Event{Type: "assistant_delta", ID: id, Delta: out})
 	_ = s.emit(Event{Type: "assistant_done", ID: id, Message: out})
 	_ = s.emit(Event{Type: "done", ID: id})
 }

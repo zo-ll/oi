@@ -18,6 +18,13 @@ func newModelsServer(t *testing.T, modelsJSON string) *httptest.Server {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, modelsJSON)
 		case "/v1/chat/completions":
+			if r.Header.Get("Accept") == "text/event-stream" {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n")
+				fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n")
+				fmt.Fprint(w, "data: [DONE]\n\n")
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"choices":[{"message":{"content":"hello"}}]}`)
 		default:
@@ -104,6 +111,79 @@ func TestRunInteractiveStartsWithoutProviderIntegration(t *testing.T) {
 	}
 	if got := out.String(); got == "" || !containsAll(got, "No provider configured.", "Use /login") {
 		t.Fatalf("out = %q", got)
+	}
+}
+
+func TestRunJSONOutputIntegration(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	ts := newModelsServer(t, `{"data":[{"id":"m1"}]}`)
+	defer ts.Close()
+
+	cfg := config.Default()
+	cfg.SelectedProvider = "demo"
+	cfg.SelectedModel = "m1"
+	cfg.Providers["demo"] = config.ProviderConfig{BaseURL: ts.URL + "/v1", APIKeyEnv: "DEMO_KEY"}
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEMO_KEY", "secret")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"run", "--json", "say hi"}, bytes.NewBuffer(nil), &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if got := stdout.String(); !containsAll(got, `"ok":true`, `"message":"hello"`, `"provider":"demo"`, `"model":"m1"`) {
+		t.Fatalf("stdout = %q", got)
+	}
+}
+
+func TestRunNDJSONOutputIntegration(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	ts := newModelsServer(t, `{"data":[{"id":"m1"}]}`)
+	defer ts.Close()
+
+	cfg := config.Default()
+	cfg.SelectedProvider = "demo"
+	cfg.SelectedModel = "m1"
+	cfg.Providers["demo"] = config.ProviderConfig{BaseURL: ts.URL + "/v1", APIKeyEnv: "DEMO_KEY"}
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEMO_KEY", "secret")
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"run", "--ndjson", "say hi"}, bytes.NewBuffer(nil), &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if got := stdout.String(); !containsAll(got, `"type":"started"`, `"type":"assistant_delta","delta":"hel"`, `"type":"assistant_delta","delta":"lo"`, `"type":"assistant_done","message":"hello"`, `"type":"done"`) {
+		t.Fatalf("stdout = %q", got)
+	}
+}
+
+func TestRunJSONErrorSuppressesHumanStderr(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if err := config.Save(config.Default()); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"run", "--json", "say hi"}, bytes.NewBuffer(nil), &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if got := stdout.String(); !containsAll(got, `"ok":false`, `"error":`) {
+		t.Fatalf("stdout = %q", got)
 	}
 }
 

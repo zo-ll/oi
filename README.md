@@ -115,6 +115,13 @@ Run one task:
 oi run "inspect this repository and summarize the architecture"
 ```
 
+Machine-readable one-shot output:
+
+```bash
+oi run --json "say hi"
+oi run --ndjson "say hi"
+```
+
 Start RPC mode:
 
 ```bash
@@ -135,6 +142,8 @@ oi login opencode-go    # OpenCode Go provider
 oi logout openai-codex
 oi version
 oi run "task"            # one-shot agent task
+oi run --json "task"     # one-shot JSON result
+oi run --ndjson "task"   # one-shot NDJSON event stream
 oi rpc                  # NDJSON stdio protocol
 ```
 
@@ -195,7 +204,7 @@ Notes:
 
 ## RPC mode
 
-`oi rpc` speaks newline-delimited JSON over stdio, useful for bridges and external tools.
+`oi rpc` speaks newline-delimited JSON over stdio, useful for bridges and external tools. It is the machine-facing embedding surface for long-lived callers; `oi run --json/--ndjson` is the one-shot machine-facing path.
 
 Example:
 

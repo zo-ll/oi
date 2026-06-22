@@ -135,6 +135,18 @@ Current active phase: **Phase 10 — hardening, cleanup, and harness-shape work*
 - No core file is doing too many unrelated jobs.
 - Browser-login OpenAI subscription path is clearly separate from OpenAI Platform API keys.
 
+### VPS hardening checklist
+
+Use this as the current harness-hardening bar:
+
+- long-lived session can save/load/compact repeatedly
+- auto-compaction threshold behavior is covered by tests
+- tool-heavy turns do not wedge the runtime
+- provider/tool timeouts are bounded independently
+- RPC prompt/abort/state transitions are tested
+- `oi run --json` / `oi run --ndjson` are machine-readable and do not emit human noise on stderr
+- mutating actions still respect workspace policy/approval semantics in headless modes
+
 ---
 
 ## Phase 11 — optional local backend — deferred

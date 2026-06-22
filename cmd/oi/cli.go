@@ -51,7 +51,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  oi login [provider]")
 	fmt.Fprintln(w, "  oi logout [provider]")
 	fmt.Fprintln(w, "  oi version")
-	fmt.Fprintln(w, "  oi run \"task\"")
+	fmt.Fprintln(w, "  oi run [--json|--ndjson] \"task\"")
 	fmt.Fprintln(w, "  oi rpc")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Current status: interactive mode is the default; doctor, models, login, logout, version, run, and rpc are available.")

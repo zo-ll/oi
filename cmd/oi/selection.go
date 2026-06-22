@@ -16,6 +16,8 @@ type commonOptions struct {
 	model    string
 	apiKey   string
 	debug    bool
+	jsonOut  bool
+	ndjson   bool
 	rest     []string
 }
 
@@ -27,6 +29,8 @@ func parseCommonOptions(name string, args []string) (commonOptions, error) {
 	fs.StringVar(&opts.model, "model", "", "model name")
 	fs.StringVar(&opts.apiKey, "api-key", "", "API key override")
 	fs.BoolVar(&opts.debug, "debug", false, "enable debug logging")
+	fs.BoolVar(&opts.jsonOut, "json", false, "machine-readable JSON output")
+	fs.BoolVar(&opts.ndjson, "ndjson", false, "machine-readable NDJSON event output")
 	if err := fs.Parse(args); err != nil {
 		return commonOptions{}, err
 	}

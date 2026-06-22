@@ -19,10 +19,11 @@ import (
 )
 
 type fakeProvider struct {
-	name      string
-	model     string
-	responses []provider.Response
-	chatFn    func(context.Context, provider.Request) (provider.Response, error)
+	name            string
+	model           string
+	responses       []provider.Response
+	streamResponses [][]provider.Event
+	chatFn          func(context.Context, provider.Request) (provider.Response, error)
 }
 
 func (f *fakeProvider) Name() string  { return f.name }
@@ -34,7 +35,17 @@ func (f *fakeProvider) ListModels(context.Context) ([]provider.Model, error) {
 	return []provider.Model{{ID: "a"}, {ID: "b"}}, nil
 }
 func (f *fakeProvider) ChatStream(context.Context, provider.Request) (<-chan provider.Event, error) {
-	return nil, nil
+	events := []provider.Event{{Done: true}}
+	if len(f.streamResponses) > 0 {
+		events = f.streamResponses[0]
+		f.streamResponses = f.streamResponses[1:]
+	}
+	ch := make(chan provider.Event, len(events))
+	for _, ev := range events {
+		ch <- ev
+	}
+	close(ch)
+	return ch, nil
 }
 func (f *fakeProvider) Chat(ctx context.Context, req provider.Request) (provider.Response, error) {
 	if f.chatFn != nil {
@@ -78,7 +89,11 @@ func TestHandlePing(t *testing.T) {
 
 func TestPromptEmitsCompletionEvents(t *testing.T) {
 	buf := &syncBuffer{}
-	p := &fakeProvider{name: "fake", model: "m", responses: []provider.Response{{Content: "hello"}}}
+	p := &fakeProvider{name: "fake", model: "m", streamResponses: [][]provider.Event{{
+		{Delta: "hel"},
+		{Delta: "lo"},
+		{Done: true},
+	}}}
 	s := &Server{
 		cfg:       config.Default(),
 		selection: config.Selection{Provider: "fake", Model: "m"},
@@ -93,7 +108,7 @@ func TestPromptEmitsCompletionEvents(t *testing.T) {
 	}
 	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1"`) })
 	out := buf.String()
-	for _, want := range []string{`"type":"started","id":"1"`, `"type":"assistant_delta","id":"1","delta":"hello"`, `"type":"assistant_done","id":"1","message":"hello"`, `"type":"done","id":"1"`} {
+	for _, want := range []string{`"type":"started","id":"1"`, `"type":"assistant_delta","id":"1","delta":"hel"`, `"type":"assistant_delta","id":"1","delta":"lo"`, `"type":"assistant_done","id":"1","message":"hello"`, `"type":"done","id":"1"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %s in %s", want, out)
 		}
