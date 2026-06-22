@@ -77,7 +77,12 @@ func loginAndSwitchChatProvider(deps Dependencies, cfg *config.Config, sel confi
 
 func refreshChatRuntimeAfterLogin(cfg *config.Config, sel config.Selection, rt *agent.Runtime, providerName string) (*agent.Runtime, config.Selection, bool, error) {
 	providerName = canonicalProviderName(providerName)
-	if rt == nil || strings.TrimSpace(sel.Provider) == "" || providerName == "" || canonicalProviderName(sel.Provider) != providerName {
+	if rt == nil || providerName == "" {
+		return rt, sel, false, nil
+	}
+	if strings.TrimSpace(sel.Provider) == "" {
+		sel.Provider = providerName
+	} else if canonicalProviderName(sel.Provider) != providerName {
 		return rt, sel, false, nil
 	}
 	root := rt.Policy.Root
@@ -89,6 +94,12 @@ func refreshChatRuntimeAfterLogin(cfg *config.Config, sel config.Selection, rt *
 	cfg2, nextSel, err := loadSelection(commonOptions{provider: sel.Provider, model: sel.Model})
 	if err != nil {
 		return nil, sel, false, err
+	}
+	if cfg2.SelectedProvider == "" {
+		cfg2.SelectedProvider = providerName
+		if err := config.Save(cfg2); err != nil {
+			return nil, sel, false, err
+		}
 	}
 	p, err := requireProvider(nextSel)
 	if err != nil {

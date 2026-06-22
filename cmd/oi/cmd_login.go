@@ -16,6 +16,24 @@ import (
 	"github.com/zo-ll/oi/internal/oauth"
 )
 
+type loginPromptUI interface {
+	// LoginPrompt asks the TUI for a single-line input.
+	// required=true re-opens the prompt on empty input.
+	LoginPrompt(prompt string, required bool) (string, bool)
+}
+
+func promptForLogin(in io.Reader, w io.Writer, prompt string) (string, error) {
+	if p, ok := w.(loginPromptUI); ok {
+		s, ok := p.LoginPrompt(prompt, true)
+		if !ok {
+			return "", fmt.Errorf("login canceled")
+		}
+		return strings.TrimSpace(s), nil
+	}
+	fmt.Fprint(w, prompt)
+	return promptLine(in)
+}
+
 func runLogin(args []string, in io.Reader, w io.Writer) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -73,8 +91,8 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 
 	key := normalizeAPIKey(opts.apiKey)
 	if key == "" {
-		fmt.Fprintf(w, "Provider: %s\nPaste API key (input will be visible): ", providerName)
-		line, err := promptLine(in)
+		fmt.Fprintf(w, "Provider: %s\n", providerName)
+		line, err := promptForLogin(in, w, "Paste API key (input will be visible): ")
 		if err != nil {
 			return err
 		}
@@ -127,6 +145,13 @@ func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *co
 			fmt.Fprintf(w, "warning: could not open browser automatically: %v\n", err)
 		}
 	}, func(message string) (string, error) {
+		if p, ok := w.(loginPromptUI); ok {
+			s, ok := p.LoginPrompt(message, false)
+			if !ok {
+				return "", nil
+			}
+			return strings.TrimSpace(s), nil
+		}
 		fmt.Fprint(w, message)
 		return promptLine(in)
 	})

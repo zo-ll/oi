@@ -1,6 +1,9 @@
 package chat
 
 import (
+	"io"
+	"strings"
+
 	"github.com/zo-ll/tide"
 )
 
@@ -12,16 +15,71 @@ func (a *tuiApp) overlaySurface() tide.Overlay {
 		Out:  a.term.Out,
 		Size: a.term.Size,
 		Base: a.render,
-		Next: a.nextByte,
+		Next: a.nextByteWithQuit,
 	}
 }
 
+// nextByteWithQuit feeds bytes to overlay widgets, but turns Ctrl-C (3) and
+// Ctrl-D (4) into an application-exit request instead of a simple cancel.
+func (a *tuiApp) nextByteWithQuit() (byte, error) {
+	b, err := a.nextByte()
+	if err != nil {
+		return b, err
+	}
+	if b == 3 || b == 4 {
+		a.quitRequested = true
+		return 0, io.EOF
+	}
+	return b, nil
+}
+
 func (a *tuiApp) overlayPicker(title string, items []string) (string, bool) {
+	a.drainEvents()
+	a.term.DisableMouse()
+	defer a.term.EnableMouse()
 	return tide.NewPicker(a.overlaySurface()).Open(title, items)
 }
 
+// overlayInput opens a single-line prompt modal. Pending app events are
+// drained first so that queued renders (e.g. from runLogin writing "Provider:
+// X") do not clobber the overlay immediately after it is drawn. Mouse
+// tracking is disabled while the modal is open so that click events do not
+// generate escape sequences that the widget would interpret as cancel.
 func (a *tuiApp) overlayInput(title, prompt, initial string) (string, bool) {
+	a.drainEvents()
+	a.term.DisableMouse()
+	defer a.term.EnableMouse()
 	return tide.NewPrompt(a.overlaySurface()).Open(title, prompt, initial)
+}
+
+// drainEvents processes any pending events without blocking.
+func (a *tuiApp) drainEvents() {
+	for {
+		select {
+		case fn := <-a.events:
+			if fn != nil {
+				fn()
+			}
+		default:
+			return
+		}
+	}
+}
+
+// LoginPrompt collects a single line during /login. When required is true it
+// re-opens on empty input (e.g. a stray CRLF Enter) instead of returning.
+func (a *tuiApp) LoginPrompt(prompt string, required bool) (string, bool) {
+	for {
+		s, ok := a.overlayInput("oi login", prompt, "")
+		if !ok {
+			return "", false
+		}
+		if !required || strings.TrimSpace(s) != "" {
+			return s, true
+		}
+		a.status = "Input required. Press Esc to cancel."
+		a.render()
+	}
 }
 
 // renderApprovalOverlay draws the y/n approval modal. It is oi-specific (the

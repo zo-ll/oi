@@ -124,6 +124,9 @@ func runEditMode(args []string, in *os.File, out *os.File, deps Dependencies) (e
 	if err := term.EnterRaw(); err != nil {
 		return err
 	}
+	// The TUI does not handle bracketed-paste escape sequences, so disable
+	// the mode that terminals use to wrap pasted text.
+	_, _ = io.WriteString(out, "\x1b[?2004l")
 	if err := term.EnterAltScreen(); err != nil {
 		_ = term.Close()
 		return err
@@ -191,6 +194,9 @@ func (a *tuiApp) loop() error {
 			return exitChat(a.term.Out, a.state.rt, a.state.sel, a.state.autosave)
 		case b := <-a.inputCh:
 			if a.handleApprovalInput(b) {
+				if a.quitRequested {
+					return exitChat(a.term.Out, a.state.rt, a.state.sel, a.state.autosave)
+				}
 				continue
 			}
 			switch b {
@@ -277,6 +283,13 @@ func (a *tuiApp) loop() error {
 
 func (a *tuiApp) handleCommand(line string) (bool, error) {
 	exit, newRT, newSel, newStreaming, newAutosave, newTools, err := handleChatCommand(a.deps, a.state.cfg, a.state.sel, a.state.rt, a.reader, a, line, a.state.streaming, a.state.autosave, a.state.tools)
+	if a.quitRequested {
+		rt := newRT
+		if rt == nil {
+			rt = a.state.rt
+		}
+		return true, exitChat(a.term.Out, rt, newSel, newAutosave)
+	}
 	if err != nil {
 		return false, err
 	}

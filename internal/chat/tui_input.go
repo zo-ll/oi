@@ -12,6 +12,24 @@ import (
 
 func (a *tuiApp) nextByte() (byte, error) {
 	for {
+		b, err := a.readRawByte()
+		if err != nil {
+			return 0, err
+		}
+		// Collapse CRLF to a single CR so the LF does not leak into the
+		// next overlay as a spurious Enter.
+		if b == '\n' && a.lastByteCR {
+			a.lastByteCR = false
+			continue
+		}
+		a.lastByteCR = b == '\r'
+		return b, nil
+	}
+}
+
+// readRawByte is the raw channel pump behind nextByte.
+func (a *tuiApp) readRawByte() (byte, error) {
+	for {
 		select {
 		case fn := <-a.events:
 			if fn != nil {
@@ -40,7 +58,13 @@ func (a *tuiApp) handleApprovalInput(b byte) bool {
 		a.approval.resp <- true
 		a.approval = nil
 		a.render()
-	case 'n', 'N', 3, 27:
+	case 3, 4:
+		// Ctrl-C / Ctrl-D deny and request full app exit.
+		a.approval.resp <- false
+		a.approval = nil
+		a.quitRequested = true
+		a.render()
+	case 'n', 'N', 27:
 		a.approval.resp <- false
 		a.approval = nil
 		if b == 27 {

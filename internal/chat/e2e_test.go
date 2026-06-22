@@ -188,7 +188,7 @@ func TestChatRunLineModeLoginThenSwitchAcrossOpenCodeBackends(t *testing.T) {
 	}
 	text := out.String()
 	for _, want := range []string{
-		"login saved; use /model",
+		"login saved; active provider reloaded",
 		"model set to deepseek-v4-flash",
 		"hello from deepseek",
 		"model set to minimax-m3",

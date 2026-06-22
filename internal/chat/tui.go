@@ -33,28 +33,30 @@ type approvalRequest struct {
 }
 
 type tuiApp struct {
-	term         *tide.Terminal
-	state        *chatState
-	deps         Dependencies
-	reader       *bufio.Reader
-	blocks       []tuiBlock
-	status       string
-	input        []rune
-	cursor       int
-	scroll       int
-	lastRender   time.Time
-	hintIdx      int
-	inputCh      chan byte
-	errCh        chan error
-	events       chan func()
-	approvals    chan approvalRequest
-	approval     *approvalRequest
-	running      bool
-	cancel       context.CancelFunc
-	steerQueue   []string
-	history      []string
-	historyIndex int
-	historyDraft []rune
+	term          *tide.Terminal
+	state         *chatState
+	deps          Dependencies
+	reader        *bufio.Reader
+	blocks        []tuiBlock
+	status        string
+	input         []rune
+	cursor        int
+	scroll        int
+	lastRender    time.Time
+	hintIdx       int
+	inputCh       chan byte
+	errCh         chan error
+	events        chan func()
+	approvals     chan approvalRequest
+	approval      *approvalRequest
+	running       bool
+	cancel        context.CancelFunc
+	steerQueue    []string
+	history       []string
+	historyIndex  int
+	historyDraft  []rune
+	quitRequested bool
+	lastByteCR    bool
 }
 
 func (a *tuiApp) Write(p []byte) (int, error) {
