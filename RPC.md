@@ -18,7 +18,7 @@ one-shot machine use, prefer:
 
 ## Session model
 
-`oi rpc` is now **multi-session**.
+`oi rpc` is **multi-session**.
 
 One server process can host multiple independent in-memory sessions at once.
 Each session has its own:
@@ -75,7 +75,7 @@ session list and current `active_session_id`.
 ```
 
 ### `list_sessions`
-List all in-memory sessions.
+List all live in-memory sessions.
 
 ```json
 {"id":"1","type":"list_sessions"}
@@ -107,7 +107,7 @@ Make a session the active default target.
 ```
 
 ### `close_session`
-Close one in-memory session.
+Close one live in-memory session.
 
 ```json
 {"id":"1","type":"close_session","session_id":"repo-a"}
@@ -117,6 +117,43 @@ Rules:
 - rejected if the target session is busy
 - if the closed session was active, another session becomes active
 - if the last session is closed, oi creates a fresh replacement session
+
+### `save_session`
+Persist one live session to the configured sessions directory.
+
+```json
+{"id":"1","type":"save_session","session_id":"repo-a"}
+```
+
+Optional custom saved id:
+
+```json
+{"id":"1","type":"save_session","session_id":"repo-a","name":"tg-snapshot"}
+```
+
+Notes:
+- saves only into oi's normal sessions directory
+- does not accept arbitrary filesystem paths
+- rejected if the target session is busy
+
+### `list_saved_sessions`
+List persisted saved sessions from the configured sessions directory.
+
+```json
+{"id":"1","type":"list_saved_sessions"}
+```
+
+### `load_session`
+Replace one live session with a persisted saved session.
+
+```json
+{"id":"1","type":"load_session","session_id":"repo-a","saved_id":"tg-snapshot"}
+```
+
+Notes:
+- loads only by saved session id, not by arbitrary path
+- rejected if the target session is busy
+- updates the target session provider/model/runtime to match the loaded session
 
 ## Existing requests
 
@@ -174,6 +211,15 @@ Abort the active prompt for the target session.
 {"id":"1","type":"abort","session_id":"repo-a"}
 ```
 
+### `approval_response`
+Answer an approval request for a mutating action.
+
+```json
+{"id":"1","type":"approval_response","session_id":"repo-a","approval_id":"ap-repo-a-1","approved":true}
+```
+
+This is the headless approval round-trip used by bots/UIs to keep mutating actions safe.
+
 ### `prompt`
 Run one agent turn in the target session.
 
@@ -187,6 +233,7 @@ Rules:
 - emits `started`
 - emits streaming `assistant_delta` events as visible answer text arrives
 - emits `tool_start` / `tool_result`
+- emits `approval_request` if a mutating action needs approval
 - emits `assistant_done`
 - emits `done` as the terminal event for that `(id, session_id)` pair
 - on failure emits `error` then `done`
@@ -202,11 +249,15 @@ Common event types:
 - `state`
 - `sessions`
 - `session`
+- `saved_sessions`
+- `saved_session`
 - `providers`
 - `models`
 - `started`
 - `tool_start`
 - `tool_result`
+- `approval_request`
+- `approval_ack`
 - `assistant_delta`
 - `assistant_done`
 - `done`
@@ -246,10 +297,20 @@ Emitted once when the server starts.
 Current state view for one target session plus the full session list.
 
 ### `sessions`
-Session list snapshot.
+Live session list snapshot.
 
 ### `session`
-Returned after `create_session` or `new_session`.
+Returned after `create_session`, `new_session`, or `load_session`.
+
+### `saved_sessions`
+Saved-session listing from disk.
+
+### `saved_session`
+Acknowledges a saved session write.
+
+```json
+{"type":"saved_session","id":"1","session_id":"repo-a","data":{"saved_id":"tg-snapshot","path":"/home/user/.local/state/oi/sessions/tg-snapshot.json"}}
+```
 
 ### `tool_start`
 Tool call started.
@@ -284,6 +345,31 @@ Tool call finished.
     }
   }
 }
+```
+
+### `approval_request`
+Headless approval request for a mutating action.
+
+```json
+{
+  "type":"approval_request",
+  "id":"req-1",
+  "session_id":"repo-a",
+  "data":{
+    "approval_id":"ap-repo-a-1",
+    "action":"write file",
+    "target":"x.txt"
+  }
+}
+```
+
+Clients should answer with `approval_response`.
+
+### `approval_ack`
+Acknowledges a received approval response.
+
+```json
+{"type":"approval_ack","id":"req-2","session_id":"repo-a","data":{"approval_id":"ap-repo-a-1","approved":true}}
 ```
 
 ### `assistant_delta`
@@ -334,14 +420,15 @@ Successful prompt shape:
 
 1. `started`
 2. zero or more `tool_start` / `tool_result`
-3. zero or more `assistant_delta`
-4. `assistant_done`
-5. `done`
+3. zero or more `approval_request` / `approval_ack`
+4. zero or more `assistant_delta`
+5. `assistant_done`
+6. `done`
 
 Failed prompt shape:
 
 1. `started`
-2. optional tool / delta events before failure
+2. optional tool / approval / delta events before failure
 3. `error`
 4. `done`
 
@@ -353,14 +440,13 @@ Aborted prompt shape:
 
 ## Approval / policy semantics
 
-RPC mode is **headless**. There is no interactive approval round-trip on the
-RPC wire today.
+RPC mode is **headless**. Workspace policy still applies.
 
 That means:
 - read-only actions allowed by policy proceed normally
 - if policy allows a mutating action automatically, it proceeds
-- if policy requires interactive approval and no approval callback exists, the
-  tool fails and that failure is surfaced through `tool_result` / `error`
+- if policy requires approval, oi emits `approval_request` and waits for `approval_response`
+- if the request is aborted while waiting, the action fails
 
 RPC does **not** bypass workspace policy.
 

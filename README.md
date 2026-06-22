@@ -213,6 +213,8 @@ Current shape:
 - explicit `session_id` targeting
 - prompts are single-flight per session, but different sessions can run concurrently
 - `abort` applies to one target session
+- saved-session commands over RPC (`save_session`, `load_session`, `list_saved_sessions`)
+- headless approval round-trip for mutating actions (`approval_request` / `approval_response`)
 
 Example:
 

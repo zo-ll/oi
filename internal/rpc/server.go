@@ -26,6 +26,7 @@ type Server struct {
 	tools  *tool.Registry
 
 	newProvider func(config.Selection) (provider.Provider, error)
+	toolFactory func(*rpcSession) *tool.Registry
 
 	enc   *Encoder
 	encMu sync.Mutex
@@ -34,6 +35,10 @@ type Server struct {
 	sessions        map[string]*rpcSession
 	activeSessionID string
 	selection       config.Selection // default/fallback selection template
+
+	approvalMu      sync.Mutex
+	pendingApproval map[string]chan bool
+	approvalSeq     int
 }
 
 type rpcSession struct {
@@ -42,9 +47,11 @@ type rpcSession struct {
 	provider  provider.Provider
 	runtime   *agent.Runtime
 
-	mu     sync.Mutex
-	busy   bool
-	cancel context.CancelFunc
+	mu               sync.Mutex
+	busy             bool
+	cancel           context.CancelFunc
+	currentRequestID string
+	promptCtx        context.Context
 }
 
 // NewServer constructs an RPC server from on-disk config.
@@ -70,11 +77,12 @@ func NewServer() (*Server, error) {
 	}
 	policy := workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalMode(cfg.Agent.ApprovalMode)}
 	s := &Server{
-		cfg:       cfg,
-		auth:      auth,
-		selection: sel,
-		policy:    policy,
-		sessions:  map[string]*rpcSession{},
+		cfg:             cfg,
+		auth:            auth,
+		selection:       sel,
+		policy:          policy,
+		sessions:        map[string]*rpcSession{},
+		pendingApproval: map[string]chan bool{},
 		newProvider: func(sel config.Selection) (provider.Provider, error) {
 			if sel.Provider == "" {
 				return nil, nil
@@ -82,12 +90,18 @@ func NewServer() (*Server, error) {
 			return provider.NewForSelection(sel)
 		},
 	}
-	s.tools = tool.NewBuiltinRegistry(tool.Options{
-		Policy:         policy,
-		MaxOutputBytes: cfg.Agent.MaxToolOutputBytes,
-		PromptInput:    nil,
-		PromptOutput:   nil,
-	})
+	s.toolFactory = func(rpcSess *rpcSession) *tool.Registry {
+		return tool.NewBuiltinRegistry(tool.Options{
+			Policy:         policy,
+			MaxOutputBytes: cfg.Agent.MaxToolOutputBytes,
+			PromptInput:    nil,
+			PromptOutput:   nil,
+			Approve: func(action, target string) (bool, error) {
+				return s.requestApproval(rpcSess, action, target)
+			},
+		})
+	}
+	s.tools = tool.NewRegistry()
 	rpcSess, err := s.newRPCSession("", sel)
 	if err != nil {
 		return nil, err
@@ -135,12 +149,18 @@ func (s *Server) handle(req Request) error {
 		return s.emit(Event{Type: "state", ID: req.ID, SessionID: rpcSess.id, Data: s.stateData(rpcSess)})
 	case "list_sessions":
 		return s.emit(Event{Type: "sessions", ID: req.ID, Data: s.sessionsSnapshot()})
+	case "list_saved_sessions":
+		return s.listSavedSessions(req)
 	case "create_session":
 		return s.createSession(req)
 	case "use_session":
 		return s.useSession(req)
 	case "close_session":
 		return s.closeSession(req)
+	case "save_session":
+		return s.saveSession(req)
+	case "load_session":
+		return s.loadSession(req)
 	case "list_providers":
 		return s.emit(Event{Type: "providers", ID: req.ID, Data: config.ProviderNames(s.cfg)})
 	case "list_models":
@@ -161,6 +181,8 @@ func (s *Server) handle(req Request) error {
 		return s.resetSession(req)
 	case "abort":
 		return s.abort(req)
+	case "approval_response":
+		return s.approvalResponse(req)
 	case "prompt":
 		return s.prompt(req)
 	default:
@@ -263,6 +285,8 @@ func (s *Server) prompt(req Request) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	rpcSess.busy = true
 	rpcSess.cancel = cancel
+	rpcSess.promptCtx = ctx
+	rpcSess.currentRequestID = req.ID
 	runtime := rpcSess.runtime
 	runtime.OnToolStart = func(call tool.Call) {
 		_ = s.emit(Event{Type: "tool_start", ID: req.ID, SessionID: rpcSess.id, Data: map[string]any{"name": call.Name, "args": jsonRaw(call.Args)}})
@@ -287,6 +311,8 @@ func (s *Server) runPrompt(ctx context.Context, id, message string, rpcSess *rpc
 	rpcSess.mu.Lock()
 	rpcSess.busy = false
 	rpcSess.cancel = nil
+	rpcSess.promptCtx = nil
+	rpcSess.currentRequestID = ""
 	runtime.OnToolStart = nil
 	runtime.OnToolResult = nil
 	rpcSess.mu.Unlock()
@@ -433,16 +459,22 @@ func (s *Server) newRPCSession(id string, sel config.Selection) (*rpcSession, er
 	if p != nil {
 		model = p.Model()
 	}
+	rpcSess := &rpcSession{id: id, selection: sel, provider: p}
+	tools := s.tools
+	if s.toolFactory != nil {
+		tools = s.toolFactory(rpcSess)
+	}
 	rt := &agent.Runtime{
 		Provider:       p,
-		Tools:          s.tools,
+		Tools:          tools,
 		Policy:         s.policy,
 		Session:        session.New(sel.Provider, model, s.policy.Root),
 		ToolTimeout:    time.Duration(s.cfg.Agent.ToolTimeoutSeconds) * time.Second,
 		RequestTimeout: time.Duration(s.cfg.Agent.RequestTimeoutSeconds) * time.Second,
 	}
 	rt.Session.ID = id
-	return &rpcSession{id: id, selection: sel, provider: p, runtime: rt}, nil
+	rpcSess.runtime = rt
+	return rpcSess, nil
 }
 
 func (s *Server) uniqueSessionID() string {
@@ -549,6 +581,163 @@ func (s *Server) sessionsData() []map[string]any {
 		out = append(out, item)
 	}
 	return out
+}
+
+func (s *Server) listSavedSessions(req Request) error {
+	infos, err := session.List(config.SessionsDir())
+	if err != nil {
+		return err
+	}
+	return s.emit(Event{Type: "saved_sessions", ID: req.ID, Data: infos})
+}
+
+func (s *Server) saveSession(req Request) error {
+	rpcSess, err := s.sessionForRequest(req.SessionID)
+	if err != nil {
+		return err
+	}
+	rpcSess.mu.Lock()
+	if rpcSess.busy {
+		rpcSess.mu.Unlock()
+		return fmt.Errorf("cannot save session while a request is running")
+	}
+	if rpcSess.runtime == nil || rpcSess.runtime.Session == nil {
+		rpcSess.mu.Unlock()
+		return fmt.Errorf("no session to save")
+	}
+	target := rpcSess.runtime.Session
+	clone := *target
+	if strings.TrimSpace(req.Name) != "" {
+		if err := validateRPCSessionID(req.Name); err != nil {
+			rpcSess.mu.Unlock()
+			return err
+		}
+		clone.ID = req.Name
+		target = &clone
+	}
+	rpcSess.mu.Unlock()
+	path, err := session.Save(config.SessionsDir(), target)
+	if err != nil {
+		return err
+	}
+	return s.emit(Event{Type: "saved_session", ID: req.ID, SessionID: rpcSess.id, Data: map[string]any{"saved_id": target.ID, "path": path}})
+}
+
+func (s *Server) loadSession(req Request) error {
+	rpcSess, err := s.sessionForRequest(req.SessionID)
+	if err != nil {
+		return err
+	}
+	rpcSess.mu.Lock()
+	busy := rpcSess.busy
+	rpcSess.mu.Unlock()
+	if busy {
+		return fmt.Errorf("cannot load session while a request is running")
+	}
+	info, err := s.findSavedSession(req.SavedID)
+	if err != nil {
+		return err
+	}
+	loaded, err := session.Load(info.Path)
+	if err != nil {
+		return err
+	}
+	sel, err := config.ResolveSelection(s.cfg, s.auth, loaded.Provider, loaded.Model, "")
+	if err != nil {
+		return err
+	}
+	fresh, err := s.newRPCSession(rpcSess.id, sel)
+	if err != nil {
+		return err
+	}
+	fresh.runtime.Session = loaded
+	fresh.runtime.Session.ID = rpcSess.id
+	fresh.selection = sel
+	s.mu.Lock()
+	s.sessions[rpcSess.id] = fresh
+	if s.activeSessionID == rpcSess.id {
+		s.selection = sel
+	}
+	s.mu.Unlock()
+	return s.emit(Event{Type: "session", ID: req.ID, SessionID: fresh.id, Data: s.stateData(fresh)})
+}
+
+func (s *Server) findSavedSession(savedID string) (session.Info, error) {
+	savedID = strings.TrimSpace(savedID)
+	if savedID == "" {
+		return session.Info{}, fmt.Errorf("saved_id is required")
+	}
+	if err := validateRPCSessionID(savedID); err != nil {
+		return session.Info{}, err
+	}
+	infos, err := session.List(config.SessionsDir())
+	if err != nil {
+		return session.Info{}, err
+	}
+	for _, info := range infos {
+		if info.ID == savedID {
+			return info, nil
+		}
+	}
+	return session.Info{}, fmt.Errorf("unknown saved session: %s", savedID)
+}
+
+func (s *Server) approvalResponse(req Request) error {
+	if strings.TrimSpace(req.ApprovalID) == "" {
+		return fmt.Errorf("approval_id is required")
+	}
+	s.approvalMu.Lock()
+	ch := s.pendingApproval[req.ApprovalID]
+	if ch != nil {
+		delete(s.pendingApproval, req.ApprovalID)
+	}
+	s.approvalMu.Unlock()
+	if ch == nil {
+		return fmt.Errorf("unknown approval_id")
+	}
+	ch <- req.Approved
+	close(ch)
+	return s.emit(Event{Type: "approval_ack", ID: req.ID, SessionID: req.SessionID, Data: map[string]any{"approval_id": req.ApprovalID, "approved": req.Approved}})
+}
+
+func (s *Server) requestApproval(rpcSess *rpcSession, action, target string) (bool, error) {
+	if rpcSess == nil {
+		return false, fmt.Errorf("approval unavailable")
+	}
+	rpcSess.mu.Lock()
+	ctx := rpcSess.promptCtx
+	requestID := rpcSess.currentRequestID
+	sessionID := rpcSess.id
+	rpcSess.mu.Unlock()
+	if ctx == nil {
+		return false, fmt.Errorf("approval unavailable")
+	}
+	s.approvalMu.Lock()
+	if s.pendingApproval == nil {
+		s.pendingApproval = map[string]chan bool{}
+	}
+	s.approvalSeq++
+	approvalID := fmt.Sprintf("ap-%s-%d", sessionID, s.approvalSeq)
+	ch := make(chan bool, 1)
+	s.pendingApproval[approvalID] = ch
+	s.approvalMu.Unlock()
+	defer func() {
+		s.approvalMu.Lock()
+		delete(s.pendingApproval, approvalID)
+		s.approvalMu.Unlock()
+	}()
+	if err := s.emit(Event{Type: "approval_request", ID: requestID, SessionID: sessionID, Data: map[string]any{"approval_id": approvalID, "action": action, "target": target}}); err != nil {
+		return false, err
+	}
+	select {
+	case ok, ok2 := <-ch:
+		if !ok2 {
+			return false, fmt.Errorf("approval cancelled")
+		}
+		return ok, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
 }
 
 func (s *Server) emit(ev Event) error {

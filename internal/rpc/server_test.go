@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -84,13 +86,14 @@ func newTestServer() *Server {
 	cfg := config.Default()
 	cfg.Providers = map[string]config.ProviderConfig{"fake": {BaseURL: "https://example.invalid/v1"}}
 	s := &Server{
-		cfg:       cfg,
-		auth:      &config.Auth{Keys: map[string]string{"fake": "k"}},
-		selection: config.Selection{Provider: "fake", Model: "m"},
-		policy:    workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
-		sessions:  map[string]*rpcSession{},
-		tools:     tool.NewRegistry(),
-		enc:       NewEncoder(&syncBuffer{}),
+		cfg:             cfg,
+		auth:            &config.Auth{Keys: map[string]string{"fake": "k"}},
+		selection:       config.Selection{Provider: "fake", Model: "m"},
+		policy:          workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
+		sessions:        map[string]*rpcSession{},
+		pendingApproval: map[string]chan bool{},
+		tools:           tool.NewRegistry(),
+		enc:             NewEncoder(&syncBuffer{}),
 		newProvider: func(sel config.Selection) (provider.Provider, error) {
 			return &fakeProvider{name: valueOr(sel.Provider, "fake"), model: valueOr(sel.Model, "m")}, nil
 		},
@@ -329,6 +332,97 @@ func TestServeEmitsReadyAndErrorFrames(t *testing.T) {
 	text := out.String()
 	if !strings.Contains(text, `"type":"ready"`) || !strings.Contains(text, `"type":"error","id":"1","error":"unknown command: unknown"`) {
 		t.Fatalf("output = %s", text)
+	}
+}
+
+func TestSaveLoadAndListSavedSessions(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	buf := &syncBuffer{}
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
+	rpcSess, _ := s.sessionByID("s1")
+	rpcSess.runtime.Session.Messages = append(rpcSess.runtime.Session.Messages, session.Message{Role: "user", Content: "hello"})
+	if err := s.handle(Request{ID: "1", Type: "save_session", SessionID: "s1", Name: "snap"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(config.SessionsDir(), "snap.json")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("saved file missing: %v", err)
+	}
+	rpcSess.runtime.Session.Messages = nil
+	if err := s.handle(Request{ID: "2", Type: "load_session", SessionID: "s1", SavedID: "snap"}); err != nil {
+		t.Fatal(err)
+	}
+	// load_session replaces the session runtime in the server map; refresh handle
+	rpcSess, _ = s.sessionByID("s1")
+	if len(rpcSess.runtime.Session.Messages) != 1 || rpcSess.runtime.Session.Messages[0].Content != "hello" {
+		t.Fatalf("loaded messages = %+v", rpcSess.runtime.Session.Messages)
+	}
+	if err := s.handle(Request{ID: "3", Type: "list_saved_sessions"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"type":"saved_session"`) || !strings.Contains(out, `"saved_id":"snap"`) || !strings.Contains(out, `"type":"saved_sessions"`) {
+		t.Fatalf("output = %s", out)
+	}
+	if err := s.handle(Request{ID: "4", Type: "load_session", SessionID: "s1", SavedID: "bad/id"}); err == nil || err.Error() != "invalid session_id" {
+		t.Fatalf("invalid saved id err = %v", err)
+	}
+}
+
+func TestApprovalRequestAndResponse(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	buf := &syncBuffer{}
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
+	s.policy = workspace.Policy{Root: root, ApprovalMode: workspace.ApprovalPrompt}
+	rpcSess, _ := s.sessionByID("s1")
+	rpcSess.runtime.Policy = s.policy
+	rpcSess.runtime.Tools = tool.NewBuiltinRegistry(tool.Options{
+		Policy:         s.policy,
+		MaxOutputBytes: 65536,
+		Approve: func(action, target string) (bool, error) {
+			return s.requestApproval(rpcSess, action, target)
+		},
+	})
+	p := &fakeProvider{name: "fake", model: "m", streamResponses: [][]provider.Event{{
+		{ToolCall: &provider.ToolCall{ID: "c1", Name: "write_file", Args: json.RawMessage(`{"path":"x.txt","content":"ok"}`)}},
+		{Done: true},
+	}, {
+		{Delta: "done"},
+		{Done: true},
+	}}}
+	rpcSess.provider = p
+	rpcSess.runtime.Provider = p
+	if err := s.handle(Request{ID: "1", Type: "prompt", SessionID: "s1", Message: "write it"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"approval_request"`) })
+	text := buf.String()
+	needle := `"approval_id":"`
+	idx := strings.Index(text, needle)
+	if idx < 0 {
+		t.Fatalf("no approval id in %s", text)
+	}
+	rest := text[idx+len(needle):]
+	approvalID := rest[:strings.Index(rest, `"`)]
+	if err := s.handle(Request{ID: "2", Type: "approval_response", SessionID: "s1", ApprovalID: approvalID, Approved: true}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1","session_id":"s1"`) })
+	data, err := os.ReadFile(filepath.Join(root, "x.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "ok" {
+		t.Fatalf("file = %q", string(data))
+	}
+	if !strings.Contains(buf.String(), `"type":"approval_ack","id":"2","session_id":"s1"`) {
+		t.Fatalf("output = %s", buf.String())
+	}
+	if err := s.handle(Request{ID: "3", Type: "approval_response", SessionID: "s1", ApprovalID: "missing", Approved: true}); err == nil || err.Error() != "unknown approval_id" {
+		t.Fatalf("unknown approval err = %v", err)
 	}
 }
 

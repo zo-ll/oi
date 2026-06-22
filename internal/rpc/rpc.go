@@ -8,12 +8,16 @@ import (
 
 // Request is a minimal inbound RPC frame.
 type Request struct {
-	ID        string `json:"id,omitempty"`
-	Type      string `json:"type"`
-	SessionID string `json:"session_id,omitempty"`
-	Message   string `json:"message,omitempty"`
-	Provider  string `json:"provider,omitempty"`
-	Model     string `json:"model,omitempty"`
+	ID         string `json:"id,omitempty"`
+	Type       string `json:"type"`
+	SessionID  string `json:"session_id,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	Model      string `json:"model,omitempty"`
+	ApprovalID string `json:"approval_id,omitempty"`
+	Approved   bool   `json:"approved,omitempty"`
+	Name       string `json:"name,omitempty"`
+	SavedID    string `json:"saved_id,omitempty"`
 }
 
 // Event is a minimal outbound RPC frame.
