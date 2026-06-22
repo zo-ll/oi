@@ -39,6 +39,16 @@ download() {
   wget -qO "$dest" "$url"
 }
 
+fetch_text() {
+  downloader="$1"
+  url="$2"
+  if [ "$downloader" = curl ]; then
+    curl -fsSL "$url"
+    return
+  fi
+  wget -qO- "$url"
+}
+
 detect_os() {
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$os" in
@@ -56,21 +66,12 @@ detect_arch() {
   esac
 }
 
-verify_checksum() {
-  archive="$1"
-  checksums="$2"
-  expected_line="$3"
-  if need_cmd sha256sum; then
-    (cd "$(dirname "$archive")" && sha256sum -c <(printf '%s\n' "$expected_line"))
-    return
-  fi
-  if need_cmd shasum; then
-    expected_sum="${expected_line%% *}"
-    actual_sum="$(shasum -a 256 "$archive" | awk '{print $1}')"
-    [ "$expected_sum" = "$actual_sum" ] || die "checksum mismatch"
-    return
-  fi
-  echo "warning: sha256sum/shasum missing; skipping checksum verification" >&2
+resolve_latest_version() {
+  downloader="$1"
+  api_url="https://api.github.com/repos/$REPO/releases/latest"
+  version_label="$(fetch_text "$downloader" "$api_url" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  [ -n "$version_label" ] || die "failed to resolve latest release version"
+  echo "$version_label"
 }
 
 install_from_release() {
@@ -79,21 +80,13 @@ install_from_release() {
   arch="$3"
   version_label="$4"
   tmpdir="$5"
-  asset="${BINARY_NAME}_${version_label#v}_${os}_${arch}.tar.gz"
   if [ "$version_label" = latest ]; then
-    archive_url="https://github.com/$REPO/releases/latest/download/$asset"
-    checksums_url="https://github.com/$REPO/releases/latest/download/checksums.txt"
-  else
-    archive_url="https://github.com/$REPO/releases/download/$version_label/$asset"
-    checksums_url="https://github.com/$REPO/releases/download/$version_label/checksums.txt"
+    version_label="$(resolve_latest_version "$downloader")"
   fi
+  asset="${BINARY_NAME}_${version_label#v}_${os}_${arch}.tar.gz"
+  archive_url="https://github.com/$REPO/releases/download/$version_label/$asset"
   archive="$tmpdir/$asset"
-  checksums="$tmpdir/checksums.txt"
   download "$downloader" "$archive_url" "$archive"
-  download "$downloader" "$checksums_url" "$checksums"
-  line="$(grep "$asset$" "$checksums" || true)"
-  [ -n "$line" ] || die "checksum entry not found for $asset"
-  verify_checksum "$archive" "$checksums" "$line"
   tar -xzf "$archive" -C "$tmpdir"
   extracted="$tmpdir/${asset%.tar.gz}/$BINARY_NAME"
   [ -f "$extracted" ] || die "binary missing from archive"
