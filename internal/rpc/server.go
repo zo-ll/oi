@@ -121,6 +121,9 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 }
 
 func (s *Server) handle(req Request) error {
+	if err := validateRPCSessionID(req.SessionID); err != nil {
+		return err
+	}
 	switch req.Type {
 	case "ping":
 		return s.emit(Event{Type: "pong", ID: req.ID})
@@ -131,7 +134,7 @@ func (s *Server) handle(req Request) error {
 		}
 		return s.emit(Event{Type: "state", ID: req.ID, SessionID: rpcSess.id, Data: s.stateData(rpcSess)})
 	case "list_sessions":
-		return s.emit(Event{Type: "sessions", ID: req.ID, Data: s.sessionsData()})
+		return s.emit(Event{Type: "sessions", ID: req.ID, Data: s.sessionsSnapshot()})
 	case "create_session":
 		return s.createSession(req)
 	case "use_session":
@@ -237,7 +240,7 @@ func (s *Server) closeSession(req Request) error {
 	}
 	active := s.sessions[s.activeSessionID]
 	s.mu.Unlock()
-	return s.emit(Event{Type: "sessions", ID: req.ID, SessionID: active.id, Data: s.stateData(active)})
+	return s.emit(Event{Type: "sessions", ID: req.ID, SessionID: active.id, Data: s.sessionsSnapshot()})
 }
 
 func (s *Server) prompt(req Request) error {
@@ -486,7 +489,7 @@ func (s *Server) activeSession() *rpcSession {
 
 func (s *Server) stateData(rpcSess *rpcSession) map[string]any {
 	data := map[string]any{
-		"active_session_id": s.activeSessionID,
+		"active_session_id": s.currentActiveSessionID(),
 		"sessions":          s.sessionsData(),
 	}
 	if rpcSess == nil {
@@ -503,6 +506,19 @@ func (s *Server) stateData(rpcSess *rpcSession) map[string]any {
 		data["message_count"] = len(rpcSess.runtime.Session.Messages)
 	}
 	return data
+}
+
+func (s *Server) sessionsSnapshot() map[string]any {
+	return map[string]any{
+		"active_session_id": s.currentActiveSessionID(),
+		"sessions":          s.sessionsData(),
+	}
+}
+
+func (s *Server) currentActiveSessionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeSessionID
 }
 
 func (s *Server) sessionsData() []map[string]any {
@@ -560,4 +576,20 @@ func valueOr(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func validateRPCSessionID(id string) error {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	if id == "." || id == ".." || strings.ContainsAny(id, `/\\`) {
+		return fmt.Errorf("invalid session_id")
+	}
+	for _, r := range id {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return fmt.Errorf("invalid session_id")
+	}
+	return nil
 }

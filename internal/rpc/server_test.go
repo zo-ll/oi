@@ -130,11 +130,21 @@ func TestCreateUseListCloseSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `"session_id":"work"`) || !strings.Contains(out, `"active_session_id":"work"`) {
+	if !strings.Contains(out, `"session_id":"work"`) || !strings.Contains(out, `"active_session_id":"work"`) || !strings.Contains(out, `"type":"sessions"`) {
 		t.Fatalf("output = %s", out)
 	}
 	if _, err := s.sessionByID("s1"); err == nil {
 		t.Fatal("expected s1 to be closed")
+	}
+}
+
+func TestCreateSessionRejectsInvalidOrDuplicateIDs(t *testing.T) {
+	s := newTestServer()
+	if err := s.handle(Request{ID: "1", Type: "create_session", SessionID: "bad/id"}); err == nil || err.Error() != "invalid session_id" {
+		t.Fatalf("invalid id err = %v", err)
+	}
+	if err := s.handle(Request{ID: "2", Type: "create_session", SessionID: "s1"}); err == nil || err.Error() != "session already exists: s1" {
+		t.Fatalf("duplicate id err = %v", err)
 	}
 }
 
@@ -213,6 +223,49 @@ func TestSetModelUpdatesTargetSessionAndState(t *testing.T) {
 	if !strings.Contains(buf.String(), `"type":"state","id":"1","session_id":"s1"`) || !strings.Contains(buf.String(), `"model":"b"`) {
 		t.Fatalf("output = %s", buf.String())
 	}
+}
+
+func TestBusyChecksArePerTargetSession(t *testing.T) {
+	buf := &syncBuffer{}
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
+	if err := s.handle(Request{ID: "c", Type: "create_session", SessionID: "s2"}); err != nil {
+		t.Fatal(err)
+	}
+	s1, _ := s.sessionByID("s1")
+	s2, _ := s.sessionByID("s2")
+	p1 := &fakeProvider{name: "fake", model: "m", streamFn: func(ctx context.Context, req provider.Request) (<-chan provider.Event, error) {
+		ch := make(chan provider.Event)
+		go func() {
+			<-ctx.Done()
+			close(ch)
+		}()
+		return ch, nil
+	}}
+	p2 := &fakeProvider{name: "fake", model: "m"}
+	s1.provider = p1
+	s1.runtime = &agent.Runtime{Provider: p1, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
+	s2.provider = p2
+	s2.runtime = &agent.Runtime{Provider: p2, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
+	if err := s.handle(Request{ID: "1", Type: "prompt", SessionID: "s1", Message: "wait"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.handle(Request{ID: "2", Type: "set_model", SessionID: "s1", Model: "x"}); err == nil || err.Error() != "cannot change model while a request is running" {
+		t.Fatalf("set_model busy err = %v", err)
+	}
+	if err := s.handle(Request{ID: "3", Type: "new_session", SessionID: "s1"}); err == nil || err.Error() != "cannot reset session while a request is running" {
+		t.Fatalf("new_session busy err = %v", err)
+	}
+	if err := s.handle(Request{ID: "4", Type: "close_session", SessionID: "s1"}); err == nil || err.Error() != "cannot close session while a request is running" {
+		t.Fatalf("close_session busy err = %v", err)
+	}
+	if err := s.handle(Request{ID: "5", Type: "set_model", SessionID: "s2", Model: "ok"}); err != nil {
+		t.Fatalf("other session should stay mutable: %v", err)
+	}
+	if err := s.handle(Request{ID: "6", Type: "abort", SessionID: "s1"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1","session_id":"s1"`) })
 }
 
 func TestConcurrentPromptsAcrossSessions(t *testing.T) {
