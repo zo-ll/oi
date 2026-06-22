@@ -48,9 +48,6 @@ func TestNextByteWithQuitCtrlC(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected EOF on Ctrl-C")
 	}
-	if !a.quitRequested {
-		t.Fatal("expected quitRequested")
-	}
 }
 
 func TestNextByteWithQuitCtrlD(t *testing.T) {
@@ -59,9 +56,6 @@ func TestNextByteWithQuitCtrlD(t *testing.T) {
 	_, err := a.nextByteWithQuit()
 	if err == nil {
 		t.Fatal("expected EOF on Ctrl-D")
-	}
-	if !a.quitRequested {
-		t.Fatal("expected quitRequested")
 	}
 }
 

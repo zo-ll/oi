@@ -283,13 +283,6 @@ func (a *tuiApp) loop() error {
 
 func (a *tuiApp) handleCommand(line string) (bool, error) {
 	exit, newRT, newSel, newStreaming, newAutosave, newTools, err := handleChatCommand(a.deps, a.state.cfg, a.state.sel, a.state.rt, a.reader, a, line, a.state.streaming, a.state.autosave, a.state.tools)
-	if a.quitRequested {
-		rt := newRT
-		if rt == nil {
-			rt = a.state.rt
-		}
-		return true, exitChat(a.term.Out, rt, newSel, newAutosave)
-	}
 	if err != nil {
 		return false, err
 	}
