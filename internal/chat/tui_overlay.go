@@ -19,15 +19,15 @@ func (a *tuiApp) overlaySurface() tide.Overlay {
 	}
 }
 
-// nextByteWithQuit feeds bytes to overlay widgets. Ctrl-C (3) and Ctrl-D
-// (4) cancel the overlay (return EOF) but do NOT request a full app exit —
-// that is handled by the main loop's own case 3,4 when no overlay is open.
+// nextByteWithQuit feeds bytes to overlay widgets, but turns Ctrl-C (3) and
+// Ctrl-D (4) into an application-exit request instead of a simple cancel.
 func (a *tuiApp) nextByteWithQuit() (byte, error) {
 	b, err := a.nextByte()
 	if err != nil {
 		return b, err
 	}
 	if b == 3 || b == 4 {
+		a.quitRequested = true
 		return 0, io.EOF
 	}
 	return b, nil
