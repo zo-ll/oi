@@ -49,19 +49,19 @@ The TUI is optional app shell, not the core product. Terminal UI lives in `inter
 Binary-first install to `~/.local/bin/oi`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | bash
 ```
 
 Override install directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | OI_INSTALL_DIR=/custom/bin sh
+curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | OI_INSTALL_DIR=/custom/bin bash
 ```
 
 Install a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | OI_VERSION=v0.1.1 sh
+curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | OI_VERSION=v0.1.2 bash
 ```
 
 Build from local source instead:
