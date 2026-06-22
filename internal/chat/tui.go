@@ -55,7 +55,6 @@ type tuiApp struct {
 	history       []string
 	historyIndex  int
 	historyDraft  []rune
-	quitRequested bool
 	lastByteCR    bool
 	overlayCancel chan struct{}
 }

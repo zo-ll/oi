@@ -48,9 +48,6 @@ func TestNextByteWithQuitCtrlC(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected EOF on Ctrl-C")
 	}
-	if !a.quitRequested {
-		t.Fatal("expected quitRequested")
-	}
 }
 
 func TestNextByteWithQuitCtrlD(t *testing.T) {
@@ -59,9 +56,6 @@ func TestNextByteWithQuitCtrlD(t *testing.T) {
 	_, err := a.nextByteWithQuit()
 	if err == nil {
 		t.Fatal("expected EOF on Ctrl-D")
-	}
-	if !a.quitRequested {
-		t.Fatal("expected quitRequested")
 	}
 }
 
@@ -72,9 +66,6 @@ func TestNextByteWithQuitPassesNormal(t *testing.T) {
 	if err != nil || b != 'z' {
 		t.Fatalf("got %q err %v", b, err)
 	}
-	if a.quitRequested {
-		t.Fatal("quitRequested should not be set")
-	}
 }
 
 func TestNextByteWithQuitPassesEOF(t *testing.T) {
@@ -83,8 +74,5 @@ func TestNextByteWithQuitPassesEOF(t *testing.T) {
 	_, err := a.nextByteWithQuit()
 	if err != io.EOF {
 		t.Fatalf("got %v want EOF", err)
-	}
-	if a.quitRequested {
-		t.Fatal("quitRequested should not be set for raw EOF")
 	}
 }

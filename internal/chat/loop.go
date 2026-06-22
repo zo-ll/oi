@@ -194,15 +194,19 @@ func (a *tuiApp) loop() error {
 			return exitChat(a.term.Out, a.state.rt, a.state.sel, a.state.autosave)
 		case b := <-a.inputCh:
 			if a.handleApprovalInput(b) {
-				if a.quitRequested {
-					return exitChat(a.term.Out, a.state.rt, a.state.sel, a.state.autosave)
-				}
 				continue
 			}
 			switch b {
 			case 3, 4:
-				if a.cancel != nil {
-					a.cancel()
+				if a.running {
+					if a.cancel != nil {
+						a.cancel()
+					}
+					a.running = false
+					a.status = ""
+					a.addBlock("system", "aborted")
+					a.render()
+					continue
 				}
 				return exitChat(a.term.Out, a.state.rt, a.state.sel, a.state.autosave)
 			case '\r', '\n':
@@ -283,13 +287,6 @@ func (a *tuiApp) loop() error {
 
 func (a *tuiApp) handleCommand(line string) (bool, error) {
 	exit, newRT, newSel, newStreaming, newAutosave, newTools, err := handleChatCommand(a.deps, a.state.cfg, a.state.sel, a.state.rt, a.reader, a, line, a.state.streaming, a.state.autosave, a.state.tools)
-	if a.quitRequested {
-		rt := newRT
-		if rt == nil {
-			rt = a.state.rt
-		}
-		return true, exitChat(a.term.Out, rt, newSel, newAutosave)
-	}
 	if err != nil {
 		return false, err
 	}

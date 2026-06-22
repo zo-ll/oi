@@ -61,13 +61,7 @@ func (a *tuiApp) handleApprovalInput(b byte) bool {
 		a.approval.resp <- true
 		a.approval = nil
 		a.render()
-	case 3, 4:
-		// Ctrl-C / Ctrl-D deny and request full app exit.
-		a.approval.resp <- false
-		a.approval = nil
-		a.quitRequested = true
-		a.render()
-	case 'n', 'N', 27:
+	case 'n', 'N', 3, 4, 27:
 		a.approval.resp <- false
 		a.approval = nil
 		if b == 27 {
