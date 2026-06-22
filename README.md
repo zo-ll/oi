@@ -46,16 +46,28 @@ The TUI is optional app shell, not the core product. Terminal UI lives in `inter
 
 ## Install
 
-Install to `~/.local/bin/oi`:
+Binary-first install to `~/.local/bin/oi`:
 
 ```bash
-bash install.sh
+curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | sh
 ```
 
 Override install directory:
 
 ```bash
-OI_INSTALL_DIR=/custom/bin bash install.sh
+curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | OI_INSTALL_DIR=/custom/bin sh
+```
+
+Install a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zo-ll/oi/master/install.sh | OI_VERSION=v0.1.1 sh
+```
+
+Build from local source instead:
+
+```bash
+OI_INSTALL_FROM_SOURCE=1 bash install.sh
 ```
 
 Uninstall:
@@ -64,7 +76,7 @@ Uninstall:
 bash uninstall.sh
 ```
 
-Build manually:
+Manual developer build:
 
 ```bash
 go test ./...
