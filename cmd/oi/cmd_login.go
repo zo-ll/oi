@@ -20,6 +20,8 @@ type loginPromptUI interface {
 	// LoginPrompt asks the TUI for a single-line input.
 	// required=true re-opens the prompt on empty input.
 	LoginPrompt(prompt string, required bool) (string, bool)
+	// CancelOverlay forces any open overlay to close.
+	CancelOverlay()
 }
 
 func promptForLogin(in io.Reader, w io.Writer, prompt string) (string, error) {
@@ -136,6 +138,8 @@ func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *co
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	done := make(chan struct{})
+	defer close(done)
 	cred, err := oauth.LoginOpenAICodex(ctx, func(info oauth.AuthInfo) {
 		fmt.Fprintf(w, "Open this URL to log in:\n%s\n", info.URL)
 		if info.Instructions != "" {
@@ -146,11 +150,26 @@ func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *co
 		}
 	}, func(message string) (string, error) {
 		if p, ok := w.(loginPromptUI); ok {
-			s, ok := p.LoginPrompt(message, false)
-			if !ok {
+			type promptResult struct {
+				s  string
+				ok bool
+			}
+			ch := make(chan promptResult, 1)
+			go func() {
+				s, ok := p.LoginPrompt(message, false)
+				ch <- promptResult{s, ok}
+			}()
+			select {
+			case r := <-ch:
+				if !r.ok {
+					return "", nil
+				}
+				return strings.TrimSpace(r.s), nil
+			case <-done:
+				p.CancelOverlay()
+				<-ch
 				return "", nil
 			}
-			return strings.TrimSpace(s), nil
 		}
 		fmt.Fprint(w, message)
 		return promptLine(in)

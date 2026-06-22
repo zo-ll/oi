@@ -69,6 +69,8 @@ func (f *fakeLoginPrompt) LoginPrompt(prompt string, required bool) (string, boo
 	return s, true
 }
 
+func (f *fakeLoginPrompt) CancelOverlay() {}
+
 func TestRunLoginFallsBackToStdin(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

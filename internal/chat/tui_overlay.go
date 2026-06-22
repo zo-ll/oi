@@ -35,6 +35,7 @@ func (a *tuiApp) nextByteWithQuit() (byte, error) {
 
 func (a *tuiApp) overlayPicker(title string, items []string) (string, bool) {
 	a.drainEvents()
+	a.overlayCancel = make(chan struct{})
 	a.term.DisableMouse()
 	defer a.term.EnableMouse()
 	return tide.NewPicker(a.overlaySurface()).Open(title, items)
@@ -47,6 +48,7 @@ func (a *tuiApp) overlayPicker(title string, items []string) (string, bool) {
 // generate escape sequences that the widget would interpret as cancel.
 func (a *tuiApp) overlayInput(title, prompt, initial string) (string, bool) {
 	a.drainEvents()
+	a.overlayCancel = make(chan struct{})
 	a.term.DisableMouse()
 	defer a.term.EnableMouse()
 	return tide.NewPrompt(a.overlaySurface()).Open(title, prompt, initial)
@@ -79,6 +81,14 @@ func (a *tuiApp) LoginPrompt(prompt string, required bool) (string, bool) {
 		}
 		a.status = "Input required. Press Esc to cancel."
 		a.render()
+	}
+}
+
+// CancelOverlay forces any open overlay to close by signalling the cancel
+// channel that readRawByte selects on.
+func (a *tuiApp) CancelOverlay() {
+	if a.overlayCancel != nil {
+		close(a.overlayCancel)
 	}
 }
 

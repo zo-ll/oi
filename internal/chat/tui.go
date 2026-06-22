@@ -57,6 +57,7 @@ type tuiApp struct {
 	historyDraft  []rune
 	quitRequested bool
 	lastByteCR    bool
+	overlayCancel chan struct{}
 }
 
 func (a *tuiApp) Write(p []byte) (int, error) {

@@ -31,6 +31,9 @@ func (a *tuiApp) nextByte() (byte, error) {
 func (a *tuiApp) readRawByte() (byte, error) {
 	for {
 		select {
+		case <-a.overlayCancel:
+			a.overlayCancel = nil
+			return 0, io.EOF
 		case fn := <-a.events:
 			if fn != nil {
 				fn()
