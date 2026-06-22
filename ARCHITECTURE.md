@@ -10,11 +10,19 @@
 
 It should be minimal in code size, but strong in architecture, safety, and functionality. Go is an implementation choice here: the product goal is a small protocol-first agent runtime, not a Go-only ecosystem.
 
-> Note: the runtime originally targeted stdlib-only. It now depends on one small first-party package, [`tide`](https://github.com/zo-ll/tide), for terminal primitives (raw mode, alt screen, mouse, wrapping). The core packages (`agent`, `provider`, `tool`, `workspace`, `session`, `rpc`, `config`) remain stdlib-only. `tide` is the only dependency and isvendored via a `replace` directive in `go.mod`.
+> Note: the runtime originally targeted stdlib-only. It now depends on one small first-party package, [`tide`](https://github.com/zo-ll/tide), for terminal primitives (raw mode, alt screen, mouse, wrapping). The core packages (`agent`, `provider`, `tool`, `workspace`, `session`, `rpc`, `config`) remain stdlib-only. `tide` is the only external dependency and is consumed as a normal Go module (`github.com/zo-ll/tide v0.1.0`).
 
 ---
 
 ## Product shape
+
+`oi` is both a small end-user CLI and an embeddable harness. The intended shape is:
+
+- **harness core**: runtime, provider abstraction, tool registry, workspace policy, session store, RPC protocol
+- **frontends**: `oi`, `oi run`, `oi rpc`
+- **optional UI shell**: fullscreen TUI in `internal/chat`, built on `tide`
+
+The core should remain useful without the TUI, and future integrations should build on the same runtime/protocol surface rather than re-implement agent behavior.
 
 `oi` v1 should focus on 3 modes:
 
@@ -133,13 +141,16 @@ internal/log/
 - model/thinking configuration, session and model pickers, login flow
 - prompt history, steering queue, auto-compaction wiring
 
-> The interactive TUI is implemented in `internal/chat/tui*.go` and uses `tide` for terminal primitives. The package is split by concern:
-> - `tui.go` — app struct, main loop, turn execution, runtime wiring
+> The interactive TUI is implemented in `internal/chat` and uses `tide` for terminal primitives. The package is split by concern:
+> - `tui.go` — app types, small UI bridge methods, runtime hook wiring
+> - `loop.go` — chat bootstrap, line mode, fullscreen app setup, main event loop
+> - `turns.go` — turn execution, streaming/non-streaming paths, stream renderer, steering drain
 > - `tui_render.go` — frame render, transcript, input line wrap
-> - `tui_input.go` — byte reader, prompt history, escape/mouse, scroll, tab complete
+> - `tui_input.go` — byte reader, prompt history, escape/mouse, command hints, completion display helpers
 > - `tui_overlay.go` — picker/approval/input modal overlays
+> - `completion.go` — completion orchestration only
 >
-> There is no separate `lineedit` package; the line editor lives in `tide` and the TUI overlays live in `chat`.
+> There is no separate `lineedit` package; the terminal/editor primitives live in `tide` and the TUI overlays/live chat shell live in `chat`.
 
 #### `internal/tool`
 - tool registry
@@ -173,13 +184,15 @@ internal/log/
 
 ## Runtime model
 
-A single `Runtime` owns:
+A single `Runtime` is the harness core. It owns:
 - current provider
 - current model
 - current workspace root
 - session history
 - tool registry
 - policy
+
+This is the layer that `oi`, `oi run`, and `oi rpc` should all share. If future embedding or daemon modes need agent behavior, they should reuse `Runtime` and the provider/tool/session/policy packages rather than depending on chat/TUI code.
 
 Suggested internal shape:
 

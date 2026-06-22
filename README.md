@@ -17,6 +17,24 @@ Tiny agent runtime for local workflows.
 - Session save/autosave/compact support
 - Debug JSONL logs
 
+## Harness shape
+
+`oi` is meant to be a **small embeddable agent harness** you can run directly on a VPS or drive from another process. The product has three frontends over the same core:
+
+- `oi` — human-facing interactive chat/TUI
+- `oi run` — one-shot non-interactive execution
+- `oi rpc` — machine-facing NDJSON stdio protocol
+
+The intended core underneath those frontends is:
+- `internal/agent` — agent loop / streaming / tool-call handling
+- `internal/provider` — provider abstraction + OpenAI-compatible backends
+- `internal/tool` — tool registry + execution
+- `internal/workspace` — policy / approvals / path safety
+- `internal/session` — persistence + compaction
+- `internal/rpc` — machine protocol surface
+
+The TUI is optional app shell, not the core product. Terminal UI lives in `internal/chat` and [`tide`](https://github.com/zo-ll/tide); the harness stays useful without either.
+
 ## Design goals
 
 - small core
@@ -219,4 +237,4 @@ internal/log      debug logs
 
 ## Project status
 
-Usable, still evolving. Current focus is keeping the runtime small, safe, scriptable, and protocol-friendly rather than adding a large plugin system or heavy UI.
+Usable, still evolving. Current focus is keeping the runtime small, safe, scriptable, protocol-friendly, and easier to embed headlessly rather than adding a large plugin system or heavier UI.

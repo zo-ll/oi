@@ -83,26 +83,27 @@ Implemented and working in the new Go codebase:
   - load/list/filter sessions
   - debug JSONL logs
 
-Current active phase: **Phase 10 — hardening, cleanup, and real-world smoke testing**.
+Current active phase: **Phase 10 — hardening, cleanup, and harness-shape work**.
 
 ---
 
 ## Immediate next steps
 
-1. **Commit current working changes** once the current behavior is accepted.
-2. **Real-world smoke test ChatGPT subscription flow**:
-   - `/login` → `sub` → `openai`
-   - `/model`
-   - one normal prompt
-   - one prompt requiring tools
-   - `/compact`
-   - reload session and continue
-3. **Fix only issues discovered by the smoke test**.
-4. **Improve `oi doctor`** for browser/subscription login:
-   - show OAuth token presence/expiry
-   - show ChatGPT account id presence
-   - distinguish `openai` API key from `openai-codex` subscription login
-7. Keep local backend/TUI/RAG/image work deferred until v1 is stable.
+1. **Define/document the embeddable harness surface**:
+   - make the core/runtime vs frontend boundary explicit
+   - document how `oi`, `oi run`, and `oi rpc` sit over the same harness
+2. **Make non-interactive / machine-readable execution first-class**:
+   - tighten headless behavior
+   - prefer deterministic output and exit behavior for scripts/services
+3. **Stabilize the stdio RPC contract**:
+   - document request/event semantics clearly
+   - treat RPC as a real embedding surface, not just a bridge convenience
+4. **Do a VPS hardening/soak pass**:
+   - long sessions
+   - repeated compaction
+   - provider failures/timeouts
+   - tool-heavy turns
+5. Keep local backend/TUI/RAG/image work deferred until the harness shape is solid.
 
 ---
 
@@ -114,16 +115,18 @@ Current active phase: **Phase 10 — hardening, cleanup, and real-world smoke te
 - Keep package boundaries clean.
 - Keep the CLI predictable and safe.
 - Make browser-login and API-key providers unambiguous.
+- Tighten oi's identity as a small embeddable harness for VPS/headless use.
 
 ### Tasks
 
 - Review package boundaries.
-- Split oversized chat command code.
+- Document the harness/core/frontend split.
+- Improve non-interactive behavior and machine-readable paths.
+- Stabilize/document stdio RPC semantics.
 - Improve error messages.
 - Add integration tests for key flows.
 - Improve `oi doctor`.
 - Keep docs current.
-- Make list/picker UX usable enough until a real picker/TUI lands.
 
 ### Done when
 
