@@ -8,7 +8,7 @@ Tiny agent runtime for local workflows.
 
 - Interactive terminal agent: `oi`
 - One-shot tasks: `oi run "..."`
-- NDJSON stdio RPC for bridges/bots/tools: `oi rpc`
+- Multi-session NDJSON stdio RPC for bridges/bots/tools: `oi rpc`
 - OpenAI-compatible provider support
 - ChatGPT subscription login through the Codex backend
 - OpenAI Platform API-key login
@@ -128,6 +128,8 @@ Start RPC mode:
 oi rpc
 ```
 
+The RPC server can host multiple independent in-memory sessions at once; see [RPC.md](RPC.md).
+
 ## Commands
 
 ```bash
@@ -205,6 +207,12 @@ Notes:
 ## RPC mode
 
 `oi rpc` speaks newline-delimited JSON over stdio, useful for bridges and external tools. It is the machine-facing embedding surface for long-lived callers; `oi run --json/--ndjson` is the one-shot machine-facing path.
+
+Current shape:
+- multiple live in-memory sessions per process
+- explicit `session_id` targeting
+- prompts are single-flight per session, but different sessions can run concurrently
+- `abort` applies to one target session
 
 Example:
 

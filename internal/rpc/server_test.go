@@ -23,6 +23,7 @@ type fakeProvider struct {
 	model           string
 	responses       []provider.Response
 	streamResponses [][]provider.Event
+	streamFn        func(context.Context, provider.Request) (<-chan provider.Event, error)
 	chatFn          func(context.Context, provider.Request) (provider.Response, error)
 }
 
@@ -34,7 +35,10 @@ func (f *fakeProvider) SetModel(model string) {
 func (f *fakeProvider) ListModels(context.Context) ([]provider.Model, error) {
 	return []provider.Model{{ID: "a"}, {ID: "b"}}, nil
 }
-func (f *fakeProvider) ChatStream(context.Context, provider.Request) (<-chan provider.Event, error) {
+func (f *fakeProvider) ChatStream(ctx context.Context, req provider.Request) (<-chan provider.Event, error) {
+	if f.streamFn != nil {
+		return f.streamFn(ctx, req)
+	}
 	events := []provider.Event{{Done: true}}
 	if len(f.streamResponses) > 0 {
 		events = f.streamResponses[0]
@@ -76,9 +80,31 @@ func (b *syncBuffer) String() string {
 	return b.b.String()
 }
 
+func newTestServer() *Server {
+	cfg := config.Default()
+	cfg.Providers = map[string]config.ProviderConfig{"fake": {BaseURL: "https://example.invalid/v1"}}
+	s := &Server{
+		cfg:       cfg,
+		auth:      &config.Auth{Keys: map[string]string{"fake": "k"}},
+		selection: config.Selection{Provider: "fake", Model: "m"},
+		policy:    workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
+		sessions:  map[string]*rpcSession{},
+		tools:     tool.NewRegistry(),
+		enc:       NewEncoder(&syncBuffer{}),
+		newProvider: func(sel config.Selection) (provider.Provider, error) {
+			return &fakeProvider{name: valueOr(sel.Provider, "fake"), model: valueOr(sel.Model, "m")}, nil
+		},
+	}
+	rpcSess, _ := s.newRPCSession("s1", s.selection)
+	s.sessions[rpcSess.id] = rpcSess
+	s.activeSessionID = rpcSess.id
+	return s
+}
+
 func TestHandlePing(t *testing.T) {
 	buf := &syncBuffer{}
-	s := &Server{cfg: config.Default(), enc: NewEncoder(buf)}
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
 	if err := s.handle(Request{ID: "1", Type: "ping"}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,186 +113,160 @@ func TestHandlePing(t *testing.T) {
 	}
 }
 
+func TestCreateUseListCloseSessions(t *testing.T) {
+	buf := &syncBuffer{}
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
+	if err := s.handle(Request{ID: "1", Type: "create_session", SessionID: "work"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.handle(Request{ID: "2", Type: "list_sessions"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.handle(Request{ID: "3", Type: "use_session", SessionID: "work"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.handle(Request{ID: "4", Type: "close_session", SessionID: "s1"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"session_id":"work"`) || !strings.Contains(out, `"active_session_id":"work"`) {
+		t.Fatalf("output = %s", out)
+	}
+	if _, err := s.sessionByID("s1"); err == nil {
+		t.Fatal("expected s1 to be closed")
+	}
+}
+
 func TestPromptEmitsCompletionEvents(t *testing.T) {
 	buf := &syncBuffer{}
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
 	p := &fakeProvider{name: "fake", model: "m", streamResponses: [][]provider.Event{{
 		{Delta: "hel"},
 		{Delta: "lo"},
 		{Done: true},
 	}}}
-	s := &Server{
-		cfg:       config.Default(),
-		selection: config.Selection{Provider: "fake", Model: "m"},
-		policy:    workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
-		provider:  p,
-		tools:     tool.NewRegistry(),
-		enc:       NewEncoder(buf),
-	}
-	s.runtime = &agent.Runtime{Provider: p, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
-	if err := s.handle(Request{ID: "1", Type: "prompt", Message: "hi"}); err != nil {
+	rpcSess, _ := s.sessionByID("s1")
+	rpcSess.provider = p
+	rpcSess.runtime = &agent.Runtime{Provider: p, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
+	if err := s.handle(Request{ID: "1", Type: "prompt", SessionID: "s1", Message: "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1"`) })
+	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1","session_id":"s1"`) })
 	out := buf.String()
-	for _, want := range []string{`"type":"started","id":"1"`, `"type":"assistant_delta","id":"1","delta":"hel"`, `"type":"assistant_delta","id":"1","delta":"lo"`, `"type":"assistant_done","id":"1","message":"hello"`, `"type":"done","id":"1"`} {
+	for _, want := range []string{`"type":"started","id":"1","session_id":"s1"`, `"type":"assistant_delta","id":"1","session_id":"s1","delta":"hel"`, `"type":"assistant_delta","id":"1","session_id":"s1","delta":"lo"`, `"type":"assistant_done","id":"1","session_id":"s1","message":"hello"`, `"type":"done","id":"1","session_id":"s1"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %s in %s", want, out)
 		}
 	}
 }
 
-func TestAbortCancelsActivePrompt(t *testing.T) {
+func TestAbortCancelsActivePromptInTargetSession(t *testing.T) {
 	buf := &syncBuffer{}
-	p := &fakeProvider{name: "fake", model: "m", chatFn: func(ctx context.Context, req provider.Request) (provider.Response, error) {
-		<-ctx.Done()
-		return provider.Response{}, ctx.Err()
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
+	p := &fakeProvider{name: "fake", model: "m", streamFn: func(ctx context.Context, req provider.Request) (<-chan provider.Event, error) {
+		ch := make(chan provider.Event)
+		go func() {
+			<-ctx.Done()
+			close(ch)
+		}()
+		return ch, nil
 	}}
-	s := &Server{
-		cfg:       config.Default(),
-		selection: config.Selection{Provider: "fake", Model: "m"},
-		policy:    workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
-		provider:  p,
-		tools:     tool.NewRegistry(),
-		enc:       NewEncoder(buf),
-	}
-	s.runtime = &agent.Runtime{Provider: p, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
-	if err := s.handle(Request{ID: "1", Type: "prompt", Message: "wait"}); err != nil {
+	rpcSess, _ := s.sessionByID("s1")
+	rpcSess.provider = p
+	rpcSess.runtime = &agent.Runtime{Provider: p, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
+	if err := s.handle(Request{ID: "1", Type: "prompt", SessionID: "s1", Message: "wait"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.handle(Request{ID: "2", Type: "abort"}); err != nil {
+	if err := s.handle(Request{ID: "2", Type: "abort", SessionID: "s1"}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1"`) })
+	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1","session_id":"s1"`) })
 	out := buf.String()
-	if !strings.Contains(out, `"type":"aborted","id":"2"`) {
+	if !strings.Contains(out, `"type":"aborted","id":"2","session_id":"s1"`) {
 		t.Fatalf("missing aborted event in %s", out)
 	}
-	if !strings.Contains(out, `"type":"error","id":"1"`) {
+	if !strings.Contains(out, `"type":"error","id":"1","session_id":"s1"`) {
 		t.Fatalf("missing prompt error in %s", out)
 	}
 }
 
-func TestSetModelUpdatesProviderRuntimeAndState(t *testing.T) {
+func TestSetModelUpdatesTargetSessionAndState(t *testing.T) {
 	buf := &syncBuffer{}
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
+	rpcSess, _ := s.sessionByID("s1")
 	p := &fakeProvider{name: "fake", model: "a"}
-	s := &Server{
-		cfg:       config.Default(),
-		selection: config.Selection{Provider: "fake", Model: "a"},
-		policy:    workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
-		provider:  p,
-		tools:     tool.NewRegistry(),
-		enc:       NewEncoder(buf),
-	}
-	s.runtime = &agent.Runtime{Provider: p, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "a", "."), MaxSteps: 2, ToolTimeout: time.Second}
-	if err := s.handle(Request{ID: "1", Type: "set_model", Model: "b"}); err != nil {
+	rpcSess.provider = p
+	rpcSess.runtime = &agent.Runtime{Provider: p, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "a", "."), MaxSteps: 2, ToolTimeout: time.Second}
+	if err := s.handle(Request{ID: "1", Type: "set_model", SessionID: "s1", Model: "b"}); err != nil {
 		t.Fatal(err)
 	}
 	if p.model != "b" {
 		t.Fatalf("provider model = %q", p.model)
 	}
-	if s.runtime.Session.Model != "b" {
-		t.Fatalf("session model = %q", s.runtime.Session.Model)
+	if rpcSess.runtime.Session.Model != "b" {
+		t.Fatalf("session model = %q", rpcSess.runtime.Session.Model)
 	}
-	if !strings.Contains(buf.String(), `"type":"state","id":"1"`) || !strings.Contains(buf.String(), `"model":"b"`) {
+	if !strings.Contains(buf.String(), `"type":"state","id":"1","session_id":"s1"`) || !strings.Contains(buf.String(), `"model":"b"`) {
 		t.Fatalf("output = %s", buf.String())
 	}
 }
 
-func TestSetProviderResetsRuntimeAndState(t *testing.T) {
+func TestConcurrentPromptsAcrossSessions(t *testing.T) {
 	buf := &syncBuffer{}
-	cfg := config.Default()
-	cfg.Providers = map[string]config.ProviderConfig{
-		"alpha": {BaseURL: "https://example.invalid/v1"},
-		"beta":  {BaseURL: "https://example.invalid/v1"},
-	}
-	s := &Server{
-		cfg:       cfg,
-		auth:      &config.Auth{Keys: map[string]string{"alpha": "ka", "beta": "kb"}},
-		selection: config.Selection{Provider: "alpha", Model: "m1"},
-		policy:    workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
-		tools:     tool.NewRegistry(),
-		enc:       NewEncoder(buf),
-		newProvider: func(sel config.Selection) (provider.Provider, error) {
-			return &fakeProvider{name: sel.Provider, model: sel.Model}, nil
-		},
-	}
-	if err := s.resetRuntime(); err != nil {
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
+	if err := s.handle(Request{ID: "c", Type: "create_session", SessionID: "s2"}); err != nil {
 		t.Fatal(err)
 	}
-	s.runtime.Session.Messages = append(s.runtime.Session.Messages, session.Message{Role: "user", Content: "old"})
-	if err := s.handle(Request{ID: "1", Type: "set_provider", Provider: "beta"}); err != nil {
-		t.Fatal(err)
-	}
-	if s.selection.Provider != "beta" {
-		t.Fatalf("selection = %+v", s.selection)
-	}
-	if s.runtime.Provider == nil || s.runtime.Provider.Name() != "beta" {
-		t.Fatalf("runtime provider = %+v", s.runtime.Provider)
-	}
-	if s.runtime.Session.Provider != "beta" {
-		t.Fatalf("session provider = %q", s.runtime.Session.Provider)
-	}
-	if len(s.runtime.Session.Messages) != 0 {
-		t.Fatalf("session was not reset: %+v", s.runtime.Session.Messages)
-	}
-	if !strings.Contains(buf.String(), `"type":"state","id":"1"`) || !strings.Contains(buf.String(), `"provider":"beta"`) {
-		t.Fatalf("output = %s", buf.String())
-	}
-}
-
-func TestBusyBlocksStateChanges(t *testing.T) {
-	buf := &syncBuffer{}
-	p := &fakeProvider{name: "fake", model: "m", chatFn: func(ctx context.Context, req provider.Request) (provider.Response, error) {
-		<-ctx.Done()
-		return provider.Response{}, ctx.Err()
+	s1, _ := s.sessionByID("s1")
+	s2, _ := s.sessionByID("s2")
+	p1 := &fakeProvider{name: "fake", model: "m", streamFn: func(ctx context.Context, req provider.Request) (<-chan provider.Event, error) {
+		ch := make(chan provider.Event)
+		go func() {
+			<-ctx.Done()
+			close(ch)
+		}()
+		return ch, nil
 	}}
-	s := &Server{
-		cfg:       config.Default(),
-		selection: config.Selection{Provider: "fake", Model: "m"},
-		policy:    workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
-		provider:  p,
-		tools:     tool.NewRegistry(),
-		enc:       NewEncoder(buf),
-	}
-	s.runtime = &agent.Runtime{Provider: p, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
-	if err := s.handle(Request{ID: "1", Type: "prompt", Message: "wait"}); err != nil {
+	p2 := &fakeProvider{name: "fake", model: "m", streamResponses: [][]provider.Event{{{Delta: "ok"}, {Done: true}}}}
+	s1.provider = p1
+	s1.runtime = &agent.Runtime{Provider: p1, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
+	s2.provider = p2
+	s2.runtime = &agent.Runtime{Provider: p2, Tools: s.tools, Policy: s.policy, Session: session.New("fake", "m", "."), MaxSteps: 2, ToolTimeout: time.Second}
+	if err := s.handle(Request{ID: "1", Type: "prompt", SessionID: "s1", Message: "wait"}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return s.isBusy() })
-	if err := s.handle(Request{ID: "2", Type: "set_model", Model: "x"}); err == nil || err.Error() != "cannot change model while a request is running" {
+	if err := s.handle(Request{ID: "2", Type: "prompt", SessionID: "s2", Message: "go"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"2","session_id":"s2"`) })
+	if err := s.handle(Request{ID: "3", Type: "set_model", SessionID: "s1", Model: "x"}); err == nil || err.Error() != "cannot change model while a request is running" {
 		t.Fatalf("set_model err = %v", err)
 	}
-	if err := s.handle(Request{ID: "3", Type: "set_provider", Provider: "demo"}); err == nil || err.Error() != "cannot change provider while a request is running" {
-		t.Fatalf("set_provider err = %v", err)
-	}
-	if err := s.handle(Request{ID: "4", Type: "new_session"}); err == nil || err.Error() != "cannot reset session while a request is running" {
-		t.Fatalf("new_session err = %v", err)
-	}
-	if err := s.handle(Request{ID: "5", Type: "abort"}); err != nil {
+	if err := s.handle(Request{ID: "4", Type: "abort", SessionID: "s1"}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1"`) })
+	waitFor(t, func() bool { return strings.Contains(buf.String(), `"type":"done","id":"1","session_id":"s1"`) })
 }
 
 func TestListModelsWithoutProviderConfigured(t *testing.T) {
 	buf := &syncBuffer{}
-	s := &Server{
-		cfg:         config.Default(),
-		auth:        &config.Auth{},
-		selection:   config.Selection{},
-		policy:      workspace.Policy{Root: ".", ApprovalMode: workspace.ApprovalAuto},
-		tools:       tool.NewRegistry(),
-		enc:         NewEncoder(buf),
-		newProvider: func(sel config.Selection) (provider.Provider, error) { return nil, nil },
-	}
-	if err := s.handle(Request{ID: "1", Type: "list_models"}); err == nil || err.Error() != "no provider configured" {
+	s := newTestServer()
+	s.enc = NewEncoder(buf)
+	rpcSess, _ := s.sessionByID("s1")
+	rpcSess.provider = nil
+	rpcSess.runtime.Provider = nil
+	if err := s.handle(Request{ID: "1", Type: "list_models", SessionID: "s1"}); err == nil || err.Error() != "no provider configured" {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestServeEmitsReadyAndErrorFrames(t *testing.T) {
-	cfg := config.Default()
-	s := &Server{cfg: cfg, auth: &config.Auth{}, selection: config.Selection{}, policy: workspace.Policy{Root: "."}, tools: tool.NewRegistry()}
+	s := newTestServer()
 	var in bytes.Buffer
 	in.WriteString("{\"id\":\"1\",\"type\":\"unknown\"}\n")
 	var out syncBuffer
@@ -279,23 +279,13 @@ func TestServeEmitsReadyAndErrorFrames(t *testing.T) {
 	}
 }
 
-func TestStateAndListProviders(t *testing.T) {
-	buf := &syncBuffer{}
-	cfg := config.Default()
-	cfg.Providers = map[string]config.ProviderConfig{"alpha": {BaseURL: "https://example.invalid/v1"}, "beta": {BaseURL: "https://example.invalid/v1"}}
-	s := &Server{cfg: cfg, selection: config.Selection{Provider: "alpha", Model: "m"}, policy: workspace.Policy{Root: "."}, enc: NewEncoder(buf)}
-	if err := s.handle(Request{ID: "1", Type: "list_providers"}); err != nil {
+func TestEventJSONDataField(t *testing.T) {
+	data, err := json.Marshal(Event{Type: "x", SessionID: "s1", Data: map[string]string{"a": "b"}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.handle(Request{ID: "2", Type: "get_state"}); err != nil {
-		t.Fatal(err)
-	}
-	out := buf.String()
-	if !strings.Contains(out, `"type":"providers"`) || !strings.Contains(out, `"alpha"`) || !strings.Contains(out, `"beta"`) {
-		t.Fatalf("output = %s", out)
-	}
-	if !strings.Contains(out, `"type":"state"`) || !strings.Contains(out, `"provider":"alpha"`) {
-		t.Fatalf("output = %s", out)
+	if !strings.Contains(string(data), `"data":{"a":"b"}`) || !strings.Contains(string(data), `"session_id":"s1"`) {
+		t.Fatalf("json = %s", string(data))
 	}
 }
 
@@ -309,14 +299,4 @@ func waitFor(t *testing.T, fn func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal(errors.New("timeout waiting for condition"))
-}
-
-func TestEventJSONDataField(t *testing.T) {
-	data, err := json.Marshal(Event{Type: "x", Data: map[string]string{"a": "b"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"data":{"a":"b"}`) {
-		t.Fatalf("json = %s", string(data))
-	}
 }

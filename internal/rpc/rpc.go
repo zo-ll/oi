@@ -8,21 +8,23 @@ import (
 
 // Request is a minimal inbound RPC frame.
 type Request struct {
-	ID       string `json:"id,omitempty"`
-	Type     string `json:"type"`
-	Message  string `json:"message,omitempty"`
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Type      string `json:"type"`
+	SessionID string `json:"session_id,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
 }
 
 // Event is a minimal outbound RPC frame.
 type Event struct {
-	Type    string `json:"type"`
-	ID      string `json:"id,omitempty"`
-	Delta   string `json:"delta,omitempty"`
-	Message string `json:"message,omitempty"`
-	Error   string `json:"error,omitempty"`
-	Data    any    `json:"data,omitempty"`
+	Type      string `json:"type"`
+	ID        string `json:"id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Delta     string `json:"delta,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Error     string `json:"error,omitempty"`
+	Data      any    `json:"data,omitempty"`
 }
 
 // Decoder reads newline-delimited JSON frames.
