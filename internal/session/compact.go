@@ -1,3 +1,6 @@
+// Package session (continued) — compaction logic. When a transcript approaches
+// the provider's context window, compactMessages collapses the history into a
+// summary while preserving the most recent turns.
 package session
 
 import (

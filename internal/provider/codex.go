@@ -1,3 +1,5 @@
+// Package provider (continued) — OpenAI ChatGPT subscription (codex) backend.
+// Uses OAuth credentials from auth.json instead of API keys.
 package provider
 
 import (

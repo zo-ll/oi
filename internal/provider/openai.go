@@ -1,3 +1,5 @@
+// Package provider (continued) — OpenAI-compatible HTTP provider implementing
+// the standard /v1/chat/completions contract with optional SSE streaming.
 package provider
 
 import (

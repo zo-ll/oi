@@ -1,3 +1,7 @@
+// Package retrieval provides on-disk context collection for tool-assisted
+// agents. BuildContext scans a workspace directory, collects relevant
+// snippets from source files, and returns them as a system-context block
+// that is injected before the conversation history.
 package retrieval
 
 import (

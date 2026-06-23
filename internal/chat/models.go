@@ -1,3 +1,6 @@
+// Package chat (continued) — model listing and selection through the
+// TUI picker overlay. Supports searching/filtering models, marking the
+// current selection, and persisting the choice.
 package chat
 
 import (

@@ -1,3 +1,5 @@
+// Package log provides a minimal JSONL event logger for debugging. Each
+// event is a JSON object on one line. Used when --debug is passed.
 package log
 
 import (

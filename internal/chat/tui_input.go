@@ -1,3 +1,7 @@
+// Package chat (continued) — input handling: key dispatch, history, tab
+// completion, escape-sequence parsing (arrows, mouse wheel), and the
+// approval overlay input filter. The approval modal consumes specific
+// keys so they don't leak into the chat input buffer.
 package chat
 
 import (

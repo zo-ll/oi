@@ -1,3 +1,6 @@
+// Package chat (continued) — main event loop. The TUI selects on input
+// bytes, async events, approval requests, and error signals. Input bytes
+// build up the current line; Enter dispatches to commands or the agent.
 package chat
 
 import (

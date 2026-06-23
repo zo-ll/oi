@@ -1,3 +1,5 @@
+// Package main (continued) — oi models: list available models for the
+// selected provider. Marks the currently selected model with "*".
 package main
 
 import (
@@ -7,6 +9,8 @@ import (
 	"time"
 )
 
+// runModels handles `oi models`. It resolves the provider selection, lists
+// available models, and marks the selected one with "*".
 func runModels(args []string, w io.Writer) error {
 	opts, err := parseCommonOptions("models", args)
 	if err != nil {

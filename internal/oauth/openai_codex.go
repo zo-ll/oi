@@ -1,3 +1,6 @@
+// Package oauth implements the OpenAI ChatGPT (codex) browser OAuth flow.
+// LoginOpenAICodex opens the browser for user consent and polls the Codex
+// backend until it returns access/refresh tokens.
 package oauth
 
 import (

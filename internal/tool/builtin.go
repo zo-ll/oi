@@ -1,3 +1,6 @@
+// Package tool (continued) — built-in tools: read_file, write_file, replace_string,
+// list_dir, find_files, run_command, and provider model introspection. All tools
+// are gated by workspace policy.
 package tool
 
 import (

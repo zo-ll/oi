@@ -1,3 +1,6 @@
+// Package chat (continued) — login flow helpers for the TUI. Drives
+// the two-step picker-based login (kind → provider) and post-login
+// provider refresh.
 package chat
 
 import (

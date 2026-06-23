@@ -1,3 +1,6 @@
+// Package provider (continued) — factory and OpenCode multi-model proxy backend.
+// NewForSelection dispatches to the correct backend; OpenCodeProvider wraps the
+// /chat/completions (openai) and /messages (OpenCode native) API shapes.
 package provider
 
 import (

@@ -1,3 +1,11 @@
+// Package main (continued) — oi login / oi logout: provider authentication.
+//
+// Supports two authentication modes:
+//   - sub (subscription): OpenAI ChatGPT browser OAuth via openai-codex
+//   - api (API key): standard API-key providers
+//
+// The loginPromptUI interface is satisfied by the TUI so the login flow can
+// collect user input through the fullscreen terminal UI instead of raw stdin.
 package main
 
 import (
@@ -16,14 +24,19 @@ import (
 	"github.com/zo-ll/oi/internal/oauth"
 )
 
+// loginPromptUI is an optional interface satisfied by the TUI output writer.
+// When available, login uses overlay prompts instead of raw stdin.
 type loginPromptUI interface {
-	// LoginPrompt asks the TUI for a single-line input.
+	// LoginPrompt asks the user for a single-line input.
 	// required=true re-opens the prompt on empty input.
 	LoginPrompt(prompt string, required bool) (string, bool)
-	// CancelOverlay forces any open overlay to close.
+	// CancelOverlay forces any open overlay to close (used to dismiss
+	// the login prompt if the OAuth callback arrives first).
 	CancelOverlay()
 }
 
+// promptForLogin asks for a single line of input, preferring the TUI overlay
+// prompt if available, falling back to raw stdin.
 func promptForLogin(in io.Reader, w io.Writer, prompt string) (string, error) {
 	if p, ok := w.(loginPromptUI); ok {
 		s, ok := p.LoginPrompt(prompt, true)
@@ -36,6 +49,8 @@ func promptForLogin(in io.Reader, w io.Writer, prompt string) (string, error) {
 	return promptLine(in)
 }
 
+// runLogin handles `oi login`. It determines the provider, collects
+// credentials (API key or OAuth), and persists them to auth.json.
 func runLogin(args []string, in io.Reader, w io.Writer) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -87,6 +102,7 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 	}
 	cfg.Providers[providerName] = pc
 
+	// openai-codex uses ChatGPT subscription OAuth; all others use API keys.
 	if providerName == "openai-codex" {
 		return runLoginOpenAICodex(in, w, cfg, auth, providerName, pc, opts)
 	}
@@ -128,6 +144,8 @@ func runLogin(args []string, in io.Reader, w io.Writer) error {
 	return nil
 }
 
+// runLoginOpenAICodex performs the full ChatGPT subscription OAuth flow:
+// open the browser, poll for the callback, and save the resulting credentials.
 func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *config.Auth, providerName string, pc config.ProviderConfig, opts struct {
 	provider string
 	apiKey   string
@@ -196,6 +214,8 @@ func runLoginOpenAICodex(in io.Reader, w io.Writer, cfg *config.Config, auth *co
 	return nil
 }
 
+// runLogout handles `oi logout`. It removes the saved API key or OAuth
+// credentials for a provider (but does not remove env-provided keys).
 func runLogout(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -233,10 +253,12 @@ func runLogout(args []string, w io.Writer) error {
 	return nil
 }
 
+// normalizeAPIKey strips whitespace and optional "Bearer " prefix from an API key.
 func normalizeAPIKey(v string) string {
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), "Bearer "))
 }
 
+// promptLine reads a single line from an io.Reader (typically stdin).
 func promptLine(in io.Reader) (string, error) {
 	reader, ok := in.(*bufio.Reader)
 	if !ok {
@@ -249,6 +271,10 @@ func promptLine(in io.Reader) (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
+// openBrowser opens the given URL in the system's default browser.
+// Supported on Linux (xdg-open), macOS (open), and Windows (cmd start).
+// Returns any error from starting the browser process (the browser may still
+// fail after a successful start).
 func openBrowser(target string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

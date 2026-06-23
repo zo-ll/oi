@@ -1,3 +1,7 @@
+// Package rpc (continued) — multi-session RPC server: session lifecycle,
+// provider/model management, concurrent prompt execution, and approval
+// round-trips. Each Request carries an optional session_id; events are
+// tagged with session_id so callers can route them.
 package rpc
 
 import (

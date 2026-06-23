@@ -1,3 +1,5 @@
+// Package tool defines the tool execution framework: Tool/Registry for
+// registration and invocation, Call/Result for the execution contract.
 package tool
 
 import (

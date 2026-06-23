@@ -1,3 +1,6 @@
+// Package chat (continued) — session management via the TUI picker.
+// Supports creating, saving, listing, and loading sessions from the
+// configured sessions directory, plus auto-save after successful turns.
 package chat
 
 import (

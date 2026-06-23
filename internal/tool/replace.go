@@ -1,3 +1,5 @@
+// Package tool (continued) — in-place string replacement helper used by
+// write_file when it detects a replace_string call pattern.
 package tool
 
 import (

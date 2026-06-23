@@ -1,3 +1,7 @@
+// Package chat (continued) — slash-command dispatch. Each command
+// (/login, /model, /stream, /think, etc.) delegates to the appropriate
+// handler. Commands that need a picker (model, session) use the TUI
+// overlay; commands that need text input use overlay prompts.
 package chat
 
 import (

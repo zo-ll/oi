@@ -1,3 +1,6 @@
+// Package chat (continued) — interactive TUI entry point. Wires
+// dependencies, constructs the tuiApp, runs the main loop, and handles
+// startup notices from config/auth validation.
 package chat
 
 import (

@@ -1,3 +1,7 @@
+// Package rpc implements the multi-session NDJSON stdio protocol for oi.
+// The Server handles requests from stdin and emits events on stdout.
+// Clients can manage multiple concurrent sessions, each with their own
+// provider, model, runtime, and busy state.
 package rpc
 
 import (

@@ -1,3 +1,6 @@
+// Package workspace implements path-based security policy for tool execution.
+// Policy controls read/write access relative to a root directory, with
+// configurable approval modes (auto, prompt, deny).
 package workspace
 
 import (

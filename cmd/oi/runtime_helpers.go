@@ -1,3 +1,5 @@
+// Package main (continued) — runtime construction and model introspection
+// helpers shared across the CLI subcommands and chat mode.
 package main
 
 import (

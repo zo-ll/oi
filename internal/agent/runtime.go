@@ -1,3 +1,16 @@
+// Package agent implements the core agent loop: prompt → call provider → collect
+// tool calls → execute tools → inject results → repeat until the model answers.
+//
+// Runtime is the primary public type. It wires together a provider, tool
+// registry, workspace policy, and session store. Each turn is bounded by a
+// configurable step limit, tool timeout, and request timeout. Between turns,
+// automatic compaction may run when the session approaches the provider's
+// context window.
+//
+// The streaming path (RunOnceStreamObserved) supports real-time delta delivery
+// alongside tool-start/tool-result callbacks. The drain-steering mechanism
+// allows the host to inject follow-up messages at safe boundaries without
+// aborting the current turn.
 package agent
 
 import (
@@ -16,9 +29,20 @@ import (
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
+// defaultAgentStepLimit caps the number of provider calls per user turn
+// to prevent unbounded tool-call loops if the model gets stuck.
 const defaultAgentStepLimit = 96
 
-// Runtime is the core agent runtime boundary.
+// Runtime is the core agent boundary. It holds the provider, tool registry,
+// workspace policy, session state, and all configuration for the agent loop.
+//
+// The zero value is not usable; construct via NewRuntime or by setting at
+// minimum Provider, Tools, Policy, and Session.
+//
+// Callbacks (OnModelStart, OnToolStart, DrainSteering, etc.) are stored as
+// plain function fields — they are set by the host (TUI, RPC server, CLI)
+// before the first RunOnce call. They must not be modified concurrently with
+// a running turn.
 type Runtime struct {
 	Provider                provider.Provider
 	Tools                   *tool.Registry
@@ -69,6 +93,9 @@ func (r *Runtime) RunOnceStreamObserved(ctx context.Context, input string, obs S
 	return r.run(ctx, input, obs, true)
 }
 
+// run executes the main agent loop: construct retrieval context, iterate
+// through provider calls and tool execution up to MaxSteps, and return the
+// final answer. Steering messages are drained between steps.
 func (r *Runtime) run(ctx context.Context, input string, obs StreamObserver, streaming bool) (string, error) {
 	if r == nil {
 		return "", errors.New("nil runtime")
@@ -213,6 +240,10 @@ func (r *Runtime) run(ctx context.Context, input string, obs StreamObserver, str
 	return "", err
 }
 
+// appendSteeringMessages drains the host-side steering queue and injects
+// each message as a user message into the session. Returns true if any
+// message was appended (which signals the loop to continue without
+// returning to the user).
 func (r *Runtime) appendSteeringMessages() bool {
 	if r == nil || r.DrainSteering == nil {
 		return false
@@ -263,6 +294,9 @@ func jsonRaw(raw []byte) any {
 	return string(raw)
 }
 
+// callProvider sends a request to the underlying provider. When streaming
+// is true, it reads from the SSE/NDJSON stream and forwards each delta via
+// obs.Delta. Collects the full response (content, reasoning, tool calls).
 func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, obs StreamObserver, streaming bool) (provider.Response, error) {
 	thinkingLevel := ""
 	thinkingValue := ""
@@ -336,6 +370,9 @@ func (r *Runtime) callProvider(ctx context.Context, history []provider.Message, 
 	return resp, nil
 }
 
+// providerHistory constructs the provider message sequence for a turn:
+// system prompt, optional retrieval context, and the session history
+// converted to provider messages.
 func (r *Runtime) providerHistory(retrievalContext string) []provider.Message {
 	history := r.historyToProviderMessages()
 	out := make([]provider.Message, 0, len(history)+2)
@@ -474,6 +511,9 @@ func (r *Runtime) CompactSession() (bool, int) {
 	return true, budget
 }
 
+// maybeAutoCompact checks whether the session has exceeded the configured
+// auto-compaction threshold (default 90% of the context window). If it has,
+// the session is compacted in-place. Returns true if compaction occurred.
 func (r *Runtime) maybeAutoCompact() bool {
 	if r == nil || r.Session == nil {
 		return false
@@ -504,6 +544,8 @@ func (r *Runtime) maybeAutoCompact() bool {
 	return changed
 }
 
+// autoCompactThreshold returns the configured threshold percentage, or 90
+// if not set. A value of -1 disables auto-compaction entirely.
 func (r *Runtime) autoCompactThreshold() int {
 	if r.AutoCompactThreshold != 0 {
 		return r.AutoCompactThreshold
@@ -511,6 +553,9 @@ func (r *Runtime) autoCompactThreshold() int {
 	return 90
 }
 
+// estimatedContextUsage returns the best estimate of the current token count
+// used by the session: last provider-reported usage if available, otherwise
+// an estimate from the message list.
 func (r *Runtime) estimatedContextUsage() int {
 	if r == nil {
 		return 0
@@ -693,6 +738,8 @@ func appendOutputSegment(out *[]outputSegment, text string, reasoning bool) {
 	*out = append(*out, outputSegment{Text: text, Reasoning: reasoning})
 }
 
+// systemPrompt returns the configured system prompt or a sensible default
+// if none was set.
 func (r *Runtime) systemPrompt() string {
 	if stringsTrim(r.SystemPrompt) != "" {
 		return r.SystemPrompt
@@ -709,6 +756,9 @@ Rules:
 - End every response with a complete sentence; do not leave dangling punctuation.`
 }
 
+// stringsTrim removes leading and trailing whitespace from a string.
+// Uses byte-level trimming to avoid the overhead of strings.TrimSpace
+// for very large inputs.
 func stringsTrim(s string) string {
 	return string(bytesTrimSpace([]byte(s)))
 }

@@ -1,3 +1,4 @@
+// Package main (continued) — oi doctor: inspect config, auth, and provider state.
 package main
 
 import (
@@ -13,6 +14,8 @@ import (
 	"github.com/zo-ll/oi/internal/workspace"
 )
 
+// runDoctor prints a diagnostic overview: config/auth paths, workspace root,
+// configured providers, selected provider/model, and a connectivity check.
 func runDoctor(args []string, w io.Writer) error {
 	opts, err := parseCommonOptions("doctor", args)
 	if err != nil {
@@ -70,6 +73,8 @@ func runDoctor(args []string, w io.Writer) error {
 	return nil
 }
 
+// doctorConnectivity probes the selected provider by listing models with
+// a 10s timeout. Returns a human-readable result.
 func doctorConnectivity(sel config.Selection) string {
 	if sel.Provider == "" {
 		return "skipped (no provider selected)"

@@ -1,3 +1,5 @@
+// Package session manages conversation transcripts: append, save, load, list,
+// and compact. Sessions are stored as JSON files under $XDG_STATE_HOME/oi/sessions.
 package session
 
 import (

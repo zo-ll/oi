@@ -1,3 +1,6 @@
+// Package chat (continued) — overlay surfaces and the approval modal.
+// overlayPicker and overlayInput delegate to tide's Picker/Prompt widgets.
+// renderApprovalOverlay draws the y/n approval frame directly.
 package chat
 
 import (

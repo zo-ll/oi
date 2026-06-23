@@ -1,3 +1,6 @@
+// Package provider defines the backend abstraction for oi. All model
+// communication goes through the Provider interface, which is satisfied by
+// openai, openai-codex, and opencode-go backends.
 package provider
 
 import (

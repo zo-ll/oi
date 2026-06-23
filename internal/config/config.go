@@ -1,3 +1,6 @@
+// Package config manages oi's on-disk configuration and auth persistence.
+// Config and Auth are loaded from JSON files in standard XDG directories
+// (config.json and auth.json under $XDG_CONFIG_HOME/oi).
 package config
 
 import (

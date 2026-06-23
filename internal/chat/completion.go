@@ -1,3 +1,6 @@
+// Package chat (continued) — completion engine for file paths and slash
+// commands. Tracks the current completion state (candidates, index),
+// exposes the pickerUI interface, and defines tab-completion helpers.
 package chat
 
 import "strings"

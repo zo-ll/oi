@@ -1,3 +1,6 @@
+// Package chat (continued) — non-TUI (line-mode) chat loop, TUI app
+// initialization helpers, and shared state management. When oi is not
+// attached to a TTY, Run falls back to a simple read-eval-print loop.
 package chat
 
 import (

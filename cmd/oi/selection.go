@@ -1,3 +1,5 @@
+// Package main (continued) — CLI flag parsing, config loading, and provider
+// selection helpers shared across subcommands.
 package main
 
 import (
@@ -11,6 +13,8 @@ import (
 	iprovider "github.com/zo-ll/oi/internal/provider"
 )
 
+// commonOptions holds flags accepted by most subcommands.
+// It is parsed from subcommand arguments after the subcommand name itself.
 type commonOptions struct {
 	provider string
 	model    string
@@ -21,6 +25,9 @@ type commonOptions struct {
 	rest     []string
 }
 
+// parseCommonOptions parses the standard flag set shared by subcommands
+// (--provider, --model, --api-key, --debug, --json, --ndjson).
+// name is used only for usage messages via the flag set.
 func parseCommonOptions(name string, args []string) (commonOptions, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -38,6 +45,8 @@ func parseCommonOptions(name string, args []string) (commonOptions, error) {
 	return opts, nil
 }
 
+// loadSelection loads config from disk, validates it, loads auth, and
+// resolves the effective provider/model selection.
 func loadSelection(opts commonOptions) (*config.Config, config.Selection, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -57,10 +66,14 @@ func loadSelection(opts commonOptions) (*config.Config, config.Selection, error)
 	return cfg, sel, nil
 }
 
+// requireProvider constructs the provider.Provider for a selection.
 func requireProvider(sel config.Selection) (iprovider.Provider, error) {
 	return iprovider.NewForSelection(sel)
 }
 
+// canonicalProviderName normalizes common aliases to their canonical
+// internal provider ids. For example, "chatgpt" and "codex" both map
+// to "openai-codex".
 func canonicalProviderName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "chatgpt", "codex", "openai-browser", "openai-chatgpt":
@@ -70,6 +83,9 @@ func canonicalProviderName(name string) string {
 	}
 }
 
+// knownProviderProfile returns the default base URL and API-key env-var
+// for well-known providers. This is used during login to pre-fill
+// provider configuration before the user supplies credentials.
 func knownProviderProfile(name string) (config.ProviderConfig, bool) {
 	switch canonicalProviderName(name) {
 	case "openai":
@@ -103,6 +119,8 @@ func knownProviderProfile(name string) (config.ProviderConfig, bool) {
 	}
 }
 
+// authSource describes where credentials for a provider are coming from
+// (env var, auth.json, oauth, or none). Used by doctor and status output.
 func authSource(name string, pc config.ProviderConfig, auth *config.Auth) string {
 	if pc.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(pc.APIKeyEnv)) != "" {
 		return "env:" + pc.APIKeyEnv
@@ -118,6 +136,8 @@ func authSource(name string, pc config.ProviderConfig, auth *config.Auth) string
 	return "none"
 }
 
+// loadAuthOrEmpty returns the persisted auth config, or a safe empty
+// config if none exists.
 func loadAuthOrEmpty() *config.Auth {
 	auth, _ := config.LoadAuth()
 	if auth == nil {

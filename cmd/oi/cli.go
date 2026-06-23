@@ -1,3 +1,4 @@
+// Package main (continued) — CLI command dispatch and shared helpers.
 package main
 
 import (
@@ -9,6 +10,12 @@ import (
 	"github.com/zo-ll/oi/internal/chat"
 )
 
+// dispatch routes the top-level subcommand to the appropriate handler.
+//
+// When no subcommand is given (or args start with flags like --debug),
+// the interactive chat/TUI mode is launched via chat.Run.
+// Recognised subcommands: help, version, doctor, models, login, logout,
+// run, rpc.
 func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return chat.Run(args, stdin, stdout, chat.Dependencies{Login: runLogin})
@@ -40,6 +47,7 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 }
 
+// printUsage writes the top-level help text.
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "oi")
 	fmt.Fprintln(w)
@@ -57,6 +65,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Current status: interactive mode is the default; doctor, models, login, logout, version, run, and rpc are available.")
 }
 
+// printVersion writes the build version, commit hash, build timestamp,
+// and Go runtime version.
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "oi %s\n", version)
 	fmt.Fprintf(w, "commit: %s\n", commit)
@@ -64,6 +74,8 @@ func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "go: %s\n", runtime.Version())
 }
 
+// firstNonEmpty returns the first string in values that is not blank.
+// Returns "" if all values are empty or whitespace.
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -73,6 +85,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// valueOr returns v if non-empty, otherwise fallback.
 func valueOr(v, fallback string) string {
 	if v == "" {
 		return fallback
@@ -80,6 +93,7 @@ func valueOr(v, fallback string) string {
 	return v
 }
 
+// yesNo returns "yes" for true, "no" for false.
 func yesNo(ok bool) string {
 	if ok {
 		return "yes"

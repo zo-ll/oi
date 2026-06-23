@@ -1,3 +1,6 @@
+// Package chat (continued) — turn execution: streaming, tool-call
+// display, auto-compaction, and steering injection. Bridges the
+// agent.Runtime API (RunOnce, callbacks) to the TUI block list.
 package chat
 
 import (

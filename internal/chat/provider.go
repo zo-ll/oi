@@ -1,3 +1,6 @@
+// Package chat (continued) — provider/model selection helpers using the
+// TUI picker overlay. Supports choosing models by name or index, filtering
+// by provider, and marking the currently selected model.
 package chat
 
 import (

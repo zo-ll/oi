@@ -1,3 +1,6 @@
+// Package chat (continued) — terminal rendering. Transforms the block list
+// into wrapped visual lines, handles scrolling, draws the status bar, input
+// line with cursor, and slash-command hint bar at the bottom.
 package chat
 
 import (

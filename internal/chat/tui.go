@@ -1,3 +1,7 @@
+// Package chat implements oi's interactive terminal UI. When attached to a
+// TTY, oi runs a fullscreen alt-screen interface built on tide. The tuiApp
+// struct owns all UI state: blocks, input, scroll position, prompts, and
+// overlays. When no TTY is available, chat falls back to a line-mode loop.
 package chat
 
 import (
